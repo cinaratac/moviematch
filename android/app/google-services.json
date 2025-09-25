@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "266660427246",
+    "project_id": "movie-matching-8a836",
+    "storage_bucket": "movie-matching-8a836.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:266660427246:android:4dcb77ff5e91e47dc04aff",
+        "android_client_info": {
+          "package_name": "com.example.fluttergirdi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAsHFffuxGA1cYKbHBs8LE6QbJOi4pjwC4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
