@@ -2,6 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/screens/chat_room_screen.dart';
 
 class PublicProfileScreen extends StatefulWidget {
   final String uid;
@@ -37,6 +40,14 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           final displayName = (data['displayName'] ?? '') as String;
           final lb = (data['letterboxdUsername'] ?? '') as String;
           final photoURL = (data['photoURL'] ?? '') as String;
+          final appUsername = (data['username'] ?? '') as String; // NEW
+
+          // Title fallback: username → displayName → @letterboxd → (İsimsiz)
+          final titleText = appUsername.isNotEmpty
+              ? appUsername
+              : (displayName.isNotEmpty
+                    ? displayName
+                    : (lb.isNotEmpty ? '@$lb' : '(İsimsiz)'));
 
           // Favorileri tetikle
           if (lb.isNotEmpty && _futureFavs == null) {
@@ -64,10 +75,21 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   ),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: Text(
-                      displayName.isNotEmpty ? displayName : '(İsimsiz)',
-                      style: Theme.of(context).textTheme.titleLarge,
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          titleText,
+                          style: Theme.of(context).textTheme.titleLarge,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (displayName.isNotEmpty && titleText != displayName)
+                          Text(
+                            displayName,
+                            style: Theme.of(context).textTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
                     ),
                   ),
                 ],
@@ -81,9 +103,37 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       'Letterboxd: @$lb',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                    TextButton(
-                      onPressed: () => _openUrl('https://letterboxd.com/$lb/'),
-                      child: const Text('Profili aç'),
+                    Row(
+                      children: [
+                        TextButton(
+                          onPressed: () =>
+                              _openUrl('https://letterboxd.com/$lb/'),
+                          child: const Text('Profili aç'),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final myUid =
+                                FirebaseAuth.instance.currentUser!.uid;
+                            final chatId = await ChatService().getOrCreateChat(
+                              myUid,
+                              widget.uid,
+                            );
+                            if (!mounted) return;
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ChatRoomScreen(
+                                  chatId: chatId,
+                                  otherUid: widget.uid,
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.message),
+                          label: const Text('Mesaj gönder'),
+                        ),
+                      ],
                     ),
                   ],
                 )
