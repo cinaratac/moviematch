@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/services/chat_service.dart';
 
 class MessagesPage extends StatelessWidget {
   const MessagesPage({super.key});
@@ -23,32 +24,43 @@ class MessagesPage extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
           if (s.hasError) {
-            return Center(child: Text('Hata: ${s.error}'));
+            // Chats sorgusu yetkiden düştüyse: matches fallback
+            return _MatchesFallbackList(uid: uid);
           }
-          final docs = [...(s.data?.docs ?? [])];
-          // Local sort to avoid composite index (lastMessageAt desc)
+
+          // Local sort by lastMessageAt desc to avoid composite index
+          final docs = [
+            ...(s.data?.docs ??
+                <QueryDocumentSnapshot<Map<String, dynamic>>>[]),
+          ];
           docs.sort((a, b) {
-            final ta = (a.data()['lastMessageAt'] as Timestamp?);
-            final tb = (b.data()['lastMessageAt'] as Timestamp?);
+            final ta = a.data()['lastMessageAt'] as Timestamp?;
+            final tb = b.data()['lastMessageAt'] as Timestamp?;
             final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
             final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-            return db.compareTo(da); // desc
+            return db.compareTo(da);
           });
+
           if (docs.isEmpty) {
-            return const Center(child: Text('Sohbet yok'));
+            // Hiç chat yoksa (veya görünmüyorsa) matches fallback göster
+            return _MatchesFallbackList(uid: uid);
           }
+
           return ListView.separated(
             itemCount: docs.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (_, i) {
+            itemBuilder: (context, i) {
               final d = docs[i];
               final data = d.data();
-              final participants = (data['participants'] as List)
-                  .cast<String>();
-              final otherUid = participants.firstWhere(
-                (x) => x != uid,
+              final partsAny = (data['participants'] as List?) ?? const [];
+              final parts = partsAny.map((e) => e.toString()).toList();
+              if (!parts.contains(uid)) return const SizedBox.shrink();
+              final otherUid = parts.firstWhere(
+                (e) => e != uid,
                 orElse: () => '',
               );
+              if (otherUid.isEmpty) return const SizedBox.shrink();
+
               final last = (data['lastMessage'] ?? '') as String;
               final lastAt = (data['lastMessageAt'] as Timestamp?)?.toDate();
 
@@ -56,7 +68,6 @@ class MessagesPage extends StatelessWidget {
                 future: fs.collection('users').doc(otherUid).get(),
                 builder: (context, uSnap) {
                   String title = otherUid;
-                  String subtitle = last;
                   String? photoURL;
                   if (uSnap.hasData && uSnap.data!.exists) {
                     final u = uSnap.data!.data()!;
@@ -82,7 +93,7 @@ class MessagesPage extends StatelessWidget {
                     ),
                     title: Text(title, overflow: TextOverflow.ellipsis),
                     subtitle: Text(
-                      subtitle,
+                      last,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -92,13 +103,24 @@ class MessagesPage extends StatelessWidget {
                             style: Theme.of(context).textTheme.bodySmall,
                           )
                         : null,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ChatRoomScreen(chatId: d.id, otherUid: otherUid),
-                      ),
-                    ),
+                    onTap: () async {
+                      final chatId = d.id; // chats id zaten pairId
+                      // chat stub onarımı (emin olmak için)
+                      await fs.collection('chats').doc(chatId).set({
+                        'participants': parts,
+                        'updatedAt': FieldValue.serverTimestamp(),
+                      }, SetOptions(merge: true));
+                      if (!context.mounted) return;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatRoomScreen(
+                            chatId: chatId,
+                            otherUid: otherUid,
+                          ),
+                        ),
+                      );
+                    },
                   );
                 },
               );
@@ -120,4 +142,72 @@ String _formatTime(DateTime dt) {
     return '$hh:$mm';
   }
   return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
+}
+
+class _MatchesFallbackList extends StatelessWidget {
+  final String uid;
+  const _MatchesFallbackList({required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    final fs = FirebaseFirestore.instance;
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: fs
+          .collection('matches')
+          .where('uids', arrayContains: uid)
+          .snapshots(),
+      builder: (context, s) {
+        if (s.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (s.hasError) {
+          return Center(child: Text('Hata: ${s.error}'));
+        }
+        final docs = [...(s.data?.docs ?? const [])];
+        if (docs.isEmpty) {
+          return const Center(child: Text('Sohbet yok'));
+        }
+        // Client-side sort by updatedAt DESC to avoid composite index
+        docs.sort((a, b) {
+          final ta = a.data()['updatedAt'] as Timestamp?;
+          final tb = b.data()['updatedAt'] as Timestamp?;
+          final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return db.compareTo(da);
+        });
+        return ListView.separated(
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, i) {
+            final d = docs[i].data();
+            final uids = List<String>.from(d['uids'] ?? const []);
+            if (uids.length < 2) return const SizedBox.shrink();
+            final otherUid = (uids[0] == uid) ? uids[1] : uids[0];
+            return ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.person)),
+              title: Text(otherUid),
+              subtitle: const Text('Eşleşme'),
+              onTap: () async {
+                final chatId = (uid.compareTo(otherUid) < 0)
+                    ? '${uid}_$otherUid'
+                    : '${otherUid}_$uid';
+                await fs.collection('chats').doc(chatId).set({
+                  'participants': [uid, otherUid],
+                  'updatedAt': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+                if (!context.mounted) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        ChatRoomScreen(chatId: chatId, otherUid: otherUid),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
 }

@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
+import 'package:fluttergirdi/services/match_service.dart';
 import 'package:fluttergirdi/auth/auth_gate.dart';
-import 'package:flutter/foundation.dart';
 import 'dart:async';
-import 'package:fluttergirdi/services/user_profile_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -17,15 +16,16 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   String? _lbUsername;
+  String? _appUsername;
   Future<List<LetterboxdFilm>>? _futureFavs;
-  final _profileSvc = UserProfileService();
-  StreamSubscription? _profileSub;
+  Future<List<LetterboxdFilm>>? _futureFiveStar;
+  Future<List<LetterboxdFilm>>? _futureDisliked;
+  bool _autoSynced = false;
 
   @override
   void initState() {
     super.initState();
     _loadPrefs();
-    _attachProfileStream();
   }
 
   Future<void> _loadPrefs() async {
@@ -48,36 +48,142 @@ class _ProfilePageState extends State<ProfilePage> {
       _futureFavs = (u == null || u.isEmpty)
           ? null
           : LetterboxdService.fetchFavorites(u);
+      _futureFiveStar = (u == null || u.isEmpty)
+          ? null
+          : LetterboxdService.fetchFiveStar(u);
+      _futureDisliked = (u == null || u.isEmpty)
+          ? null
+          : LetterboxdService.fetchDisliked(u);
     });
+    // Auto-sync once per session if LB username exists and Firestore is missing data
+    if (!_autoSynced && u != null && u.isNotEmpty && uid != null) {
+      try {
+        final db = FirebaseFirestore.instance;
+        final usersDoc = await db.collection('users').doc(uid).get();
+        final tasteDoc = await db
+            .collection('userTasteProfiles')
+            .doc(uid)
+            .get();
+        final hasFavKeys = List.from(
+          (usersDoc.data() ?? const {})['favoritesKeys'] ?? const [],
+        ).isNotEmpty;
+        final hasFive = List.from(
+          (tasteDoc.data() ?? const {})['fiveStars'] ?? const [],
+        ).isNotEmpty;
+        if (!hasFavKeys || !hasFive) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _syncLetterboxdToFirestore(u);
+          });
+        }
+        _autoSynced = true;
+      } catch (_) {
+        // ignore; manual refresh or next open will try again
+      }
+    }
   }
 
-  void _attachProfileStream() {
+  /// Upsert film docs into `catalog_films/{filmKey}` so posters/titles resolve in UI
+  Future<void> _upsertCatalogFromList(List<LetterboxdFilm> films) async {
+    final db = FirebaseFirestore.instance;
+    final batch = db.batch();
+    for (final f in films) {
+      if ((f.key).isEmpty) continue;
+      final ref = db.collection('catalog_films').doc(f.key);
+      batch.set(ref, {
+        'title': f.title,
+        'url': f.url,
+        'posterUrl': f.posterUrl,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+    await batch.commit();
+  }
+
+  /// Writes fiveStars and lowRatings into `userTasteProfiles/{uid}`
+  Future<void> _writeTasteProfile({
+    required String uid,
+    required String lbUsername,
+    required List<LetterboxdFilm> fiveStars,
+    required List<LetterboxdFilm> lowRatings,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    final db = FirebaseFirestore.instance;
+    final doc = db.collection('userTasteProfiles').doc(uid);
+    await doc.set({
+      'fiveStars': fiveStars
+          .map((e) => e.key)
+          .where((k) => k.isNotEmpty)
+          .toList(),
+      'lowRatings': lowRatings
+          .map((e) => e.key)
+          .where((k) => k.isNotEmpty)
+          .toList(),
+      'profile': {
+        'displayName': user?.displayName,
+        'letterboxdUsername': lbUsername,
+        'avatarUrl': user?.photoURL,
+      },
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Full sync: favorites -> users/{uid}.favoritesKeys, fiveStars/lowRatings -> userTasteProfiles/{uid}
+  Future<void> _syncLetterboxdToFirestore(String lbUsername) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    _profileSub?.cancel();
-    if (uid == null) return;
-    _profileSub = _profileSvc.profileStream(uid).listen((profile) async {
-      final lb = profile?.letterboxdUsername?.trim();
-      if (lb == null || lb.isEmpty) return;
-      // Yerelde de güncel tut
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString('lb_username_$uid', lb);
-      if (!mounted) return;
-      setState(() {
-        _lbUsername = lb;
-        _futureFavs = LetterboxdService.fetchFavorites(lb);
-      });
-    });
+    if (uid == null || lbUsername.isEmpty) return;
+
+    // 1) Favorites: fills users/{uid}.favoritesKeys and catalog
+    final favorites = await LetterboxdService.syncFavoritesToFirestore(
+      lbUsername: lbUsername,
+    );
+
+    // 2) Five stars & low ratings; also upsert catalogs so posters resolve
+    final five = await LetterboxdService.fetchFiveStar(lbUsername);
+    final low = await LetterboxdService.fetchDisliked(lbUsername);
+    await _upsertCatalogFromList(five);
+    await _upsertCatalogFromList(low);
+
+    // 3) Mirror disliked into users/{uid}.dislikedKeys as well (and catalog already upserted above)
+    try {
+      await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername);
+    } catch (_) {
+      // optional: ignore if not available
+    }
+
+    // 4) Write taste profile for 5★ and low ratings
+    await _writeTasteProfile(
+      uid: uid,
+      lbUsername: lbUsername,
+      fiveStars: five,
+      lowRatings: low,
+    );
+
+    // 5) Sync bitti: ortak 5★/favori veya ortak disliked olanlar için otomatik eşleşme oluştur
+    try {
+      await MatchService().autoCreateMatches(
+        uid,
+        minCommonFive: 1,
+        minCommonFav: 1,
+        minCommonDisliked: 1,
+      );
+    } catch (e) {
+      // Sessiz geç; eşleşme oluşmasa da uygulama çalışmaya devam etsin
+      debugPrint('autoCreateMatches error: $e');
+    }
   }
 
   @override
   void dispose() {
-    _profileSub?.cancel();
     super.dispose();
   }
 
   String _shownName(User user) {
+    final local = (_appUsername ?? '').trim();
+    if (local.isNotEmpty) {
+      return local; // Firestore'daki uygulama kullanıcı adı öncelikli
+    }
     final dn = (user.displayName ?? '').trim();
-    if (dn.isNotEmpty) return dn; // önce displayName
+    if (dn.isNotEmpty) return dn; // sonra Firebase Auth displayName
     final email = user.email ?? '';
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
   }
@@ -150,17 +256,18 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() {
           _lbUsername = null;
           _futureFavs = null;
+          _futureDisliked = null;
         });
       } else {
         await sp.setString(key, result);
         setState(() {
           _lbUsername = result;
           _futureFavs = LetterboxdService.fetchFavorites(result);
+          _futureFiveStar = LetterboxdService.fetchFiveStar(result);
+          _futureDisliked = LetterboxdService.fetchDisliked(result);
         });
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid != null) {
-          await _profileSvc.setLetterboxdUsername(result);
-        }
+        // NEW: auto-sync to Firestore
+        await _syncLetterboxdToFirestore(result);
       }
     }
   }
@@ -173,22 +280,81 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _lbUsername = null;
       _futureFavs = null;
+      _futureFiveStar = null;
+      _futureDisliked = null;
     });
-    final uid2 = FirebaseAuth.instance.currentUser?.uid;
-    if (uid2 != null) {
-      await _profileSvc.clearLetterboxdUsername();
-    }
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        final db = FirebaseFirestore.instance;
+        await db.collection('users').doc(uid).set({
+          'favoritesKeys': [],
+          'dislikedKeys': [],
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        await db.collection('userTasteProfiles').doc(uid).set({
+          'fiveStars': [],
+          'lowRatings': [],
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {}
+    // Removed Firestore update
   }
 
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Bağlantı açılamadı.')));
-      }
-    }
+  Widget _posterTile(LetterboxdFilm f) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            f.posterUrl,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            headers: LetterboxdService.imageHeaders,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Container(
+                color: Colors.black12,
+                child: const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+            },
+            errorBuilder: (_, __, ___) => Container(
+              color: Colors.grey.shade800,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    _noYear(f.title),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              color: Colors.black54,
+              child: Text(
+                _noYear(f.title),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // Zorla yenile: cache'i temizleyip tekrar çekmek için
@@ -202,7 +368,14 @@ class _ProfilePageState extends State<ProfilePage> {
     // Yeniden çek
     setState(() {
       _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
+      _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
+      _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
     });
+  }
+
+  String _noYear(String t) {
+    // "Movie Title (1999)" -> "Movie Title"
+    return t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
   }
 
   @override
@@ -220,12 +393,7 @@ class _ProfilePageState extends State<ProfilePage> {
           return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
         }
 
-        final displayName = _shownName(user);
-        final email = user.email ?? '—';
-        ImageProvider? avatarImage;
-        if (user.photoURL != null && user.photoURL!.isNotEmpty) {
-          avatarImage = NetworkImage(user.photoURL!);
-        }
+        // Removed unused local variables
 
         Future<void> _resetPassword() async {
           if (user.email == null) return;
@@ -318,6 +486,12 @@ class _ProfilePageState extends State<ProfilePage> {
               PopupMenuButton<String>(
                 onSelected: (value) async {
                   switch (value) {
+                    case 'set_lb':
+                      await _promptLetterboxdUsername();
+                      break;
+                    case 'clear_lb':
+                      await _clearLetterboxdUsername();
+                      break;
                     case 'reset':
                       await _resetPassword();
                       break;
@@ -330,6 +504,31 @@ class _ProfilePageState extends State<ProfilePage> {
                   }
                 },
                 itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'set_lb',
+                    child: ListTile(
+                      leading: const Icon(Icons.alternate_email),
+                      title: Text(
+                        _lbUsername == null || _lbUsername!.isEmpty
+                            ? 'Letterboxd hesabı ekle'
+                            : 'Letterboxd hesabını değiştir',
+                      ),
+                      subtitle: _lbUsername == null || _lbUsername!.isEmpty
+                          ? null
+                          : Text(
+                              '@${_lbUsername!}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                    ),
+                  ),
+                  if (_lbUsername != null && _lbUsername!.isNotEmpty)
+                    const PopupMenuItem(
+                      value: 'clear_lb',
+                      child: ListTile(
+                        leading: Icon(Icons.link_off),
+                        title: Text('Letterboxd bağlantısını kaldır'),
+                      ),
+                    ),
                   const PopupMenuItem(
                     value: 'reset',
                     child: ListTile(
@@ -362,6 +561,9 @@ class _ProfilePageState extends State<ProfilePage> {
               if (_lbUsername != null && _lbUsername!.isNotEmpty) {
                 setState(() {
                   _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
+                  _futureFiveStar = LetterboxdService.fetchFiveStar(
+                    _lbUsername!,
+                  );
                 });
               }
             },
@@ -440,18 +642,11 @@ class _ProfilePageState extends State<ProfilePage> {
                 if (_lbUsername != null) ...[
                   const SizedBox(height: 16),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         'Favori Filmler',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      if (_lbUsername != null)
-                        TextButton(
-                          onPressed: () =>
-                              _openUrl('https://letterboxd.com/$_lbUsername/'),
-                          child: const Text('Profili aç'),
-                        ),
                     ],
                   ),
                   FutureBuilder<List<LetterboxdFilm>>(
@@ -503,58 +698,142 @@ class _ProfilePageState extends State<ProfilePage> {
                               aspectRatio: 2 / 3,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
-                                child: InkWell(
-                                  onTap: () => _openUrl(f.url),
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.network(
-                                        f.posterUrl,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          color: Colors.grey.shade800,
-                                          child: Center(
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(
-                                                8.0,
-                                              ),
-                                              child: Text(
-                                                f.title,
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                textAlign: TextAlign.center,
-                                                style: const TextStyle(
-                                                  color: Colors.white70,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      Align(
-                                        alignment: Alignment.bottomCenter,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 4,
-                                          ),
-                                          color: Colors.black54,
-                                          child: Text(
-                                            f.title,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.white,
-                                            ),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                child: _posterTile(f),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Text(
+                        'Sevdiği Filmler',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  FutureBuilder<List<LetterboxdFilm>>(
+                    future: _futureFiveStar,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 180,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('5★ filmler alınamadı: ${snapshot.error}'),
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: FilledButton.icon(
+                                  onPressed: _refreshFavorites,
+                                  icon: const Icon(Icons.refresh),
+                                  label: const Text('Tekrar dene'),
                                 ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      final items = snapshot.data ?? [];
+                      if (items.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text('5★ film bulunamadı.'),
+                        );
+                      }
+                      return SizedBox(
+                        height: 180,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 12),
+                          itemBuilder: (context, i) {
+                            final f = items[i];
+                            return AspectRatio(
+                              aspectRatio: 2 / 3,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: _posterTile(f),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Text(
+                        'Sevmediği Filmler',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  FutureBuilder<List<LetterboxdFilm>>(
+                    future: _futureDisliked,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 180,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Sevmediği filmler alınamadı: ${snapshot.error}',
+                              ),
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: FilledButton.icon(
+                                  onPressed: _refreshFavorites,
+                                  icon: const Icon(Icons.refresh),
+                                  label: const Text('Tekrar dene'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      final items = snapshot.data ?? [];
+                      if (items.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text('Sevmediği film bulunamadı.'),
+                        );
+                      }
+                      return SizedBox(
+                        height: 180,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 12),
+                          itemBuilder: (context, i) {
+                            final f = items[i];
+                            return AspectRatio(
+                              aspectRatio: 2 / 3,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: _posterTile(f),
                               ),
                             );
                           },
@@ -565,29 +844,6 @@ class _ProfilePageState extends State<ProfilePage> {
                 ],
 
                 const SizedBox(height: 24),
-                Text(
-                  'Top 10 Films',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 140,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: 10,
-                    separatorBuilder: (_, __) => const SizedBox(width: 12),
-                    itemBuilder: (context, i) => AspectRatio(
-                      aspectRatio: 2 / 3,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          color: Theme.of(context).colorScheme.surfaceContainer,
-                        ),
-                        child: Center(child: Text('#${i + 1}')),
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),

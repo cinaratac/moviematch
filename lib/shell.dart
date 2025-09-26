@@ -17,7 +17,7 @@ class _HomeShellState extends State<HomeShell> {
 
   final List<Widget> _pages = [
     const FeedPage(),
-    const MatchPage(),
+    const MatchListScreen(),
     const ProfilePage(),
     const MessagesPage(),
     const SearchProfilesScreen(),

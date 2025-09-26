@@ -20,7 +20,14 @@ class ChatRoomScreen extends StatefulWidget {
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _svc = ChatService();
   final _ctrl = TextEditingController();
-  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final myUid = FirebaseAuth.instance.currentUser!.uid;
+    // Katılımcılar alanını garantiye al (kalıcılık için kritik)
+    _svc.ensureChat(widget.chatId, myUid, widget.otherUid);
+  }
 
   @override
   void dispose() {
@@ -30,19 +37,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _send() async {
     final txt = _ctrl.text.trim();
-    if (txt.isEmpty || _sending) return;
-    setState(() => _sending = true);
+    if (txt.isEmpty) return;
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
       _ctrl.clear();
-      await _svc.send(widget.chatId, myUid, txt);
+      await _svc.send(widget.chatId, myUid, txt, otherUid: widget.otherUid);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Gönderilemedi: $e')));
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -169,10 +173,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _sending ? null : _send,
-                    icon: const Icon(Icons.send),
-                  ),
+                  IconButton(onPressed: _send, icon: const Icon(Icons.send)),
                 ],
               ),
             ),

@@ -6,6 +6,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 
+const Map<String, String> _lbImageHeaders = {
+  'Referer': 'https://letterboxd.com',
+  'User-Agent':
+      'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/117.0',
+};
+
 class PublicProfileScreen extends StatefulWidget {
   final String uid;
   const PublicProfileScreen({super.key, required this.uid});
@@ -16,6 +22,8 @@ class PublicProfileScreen extends StatefulWidget {
 
 class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Future<List<LetterboxdFilm>>? _futureFavs;
+  Future<List<LetterboxdFilm>>? _futureFiveStars;
+  Future<List<LetterboxdFilm>>? _futureDisliked;
 
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
@@ -52,6 +60,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           // Favorileri tetikle
           if (lb.isNotEmpty && _futureFavs == null) {
             _futureFavs = LetterboxdService.fetchFavorites(lb);
+          }
+          if (lb.isNotEmpty && _futureFiveStars == null) {
+            _futureFiveStars = LetterboxdService.fetchFiveStar(lb);
+          }
+          if (lb.isNotEmpty && _futureDisliked == null) {
+            _futureDisliked = LetterboxdService.fetchDisliked(lb);
           }
 
           return ListView(
@@ -96,21 +110,27 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               ),
               const SizedBox(height: 12),
               if (lb.isNotEmpty)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  runAlignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     Text(
                       'Letterboxd: @$lb',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        TextButton(
+                        TextButton.icon(
                           onPressed: () =>
                               _openUrl('https://letterboxd.com/$lb/'),
-                          child: const Text('Profili aç'),
+                          icon: const Icon(Icons.open_in_new),
+                          label: const Text('Profili aç'),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         TextButton.icon(
                           onPressed: () async {
                             final myUid =
@@ -142,6 +162,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
               const SizedBox(height: 12),
               if (lb.isNotEmpty)
+                Text(
+                  'Favori Filmler',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              if (lb.isNotEmpty) const SizedBox(height: 8),
+              if (lb.isNotEmpty)
                 FutureBuilder<List<LetterboxdFilm>>(
                   future: _futureFavs,
                   builder: (context, s) {
@@ -170,37 +196,200 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                             aspectRatio: 2 / 3,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: InkWell(
-                                onTap: () => _openUrl(f.url),
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Image.network(
-                                      f.posterUrl,
-                                      fit: BoxFit.cover,
-                                    ),
-                                    Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 4,
-                                        ),
-                                        color: Colors.black54,
-                                        child: Text(
-                                          f.title,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.white,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.network(
+                                    f.posterUrl,
+                                    headers: _lbImageHeaders,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.black26,
+                                      alignment: Alignment.center,
+                                      child: const Icon(
+                                        Icons.image_not_supported,
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 4,
+                                      ),
+                                      color: Colors.black54,
+                                      child: Text(
+                                        f.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              if (lb.isNotEmpty) const SizedBox(height: 16),
+              if (lb.isNotEmpty)
+                Text(
+                  'Sevdiği Filmler',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              if (lb.isNotEmpty)
+                FutureBuilder<List<LetterboxdFilm>>(
+                  future: _futureFiveStars,
+                  builder: (context, s) {
+                    if (s.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(
+                        height: 180,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (s.hasError) {
+                      return Text('5★ filmler alınamadı: ${s.error}');
+                    }
+                    final items = s.data ?? [];
+                    if (items.isEmpty) {
+                      return const Text('5★ film bulunamadı.');
+                    }
+                    return SizedBox(
+                      height: 180,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (_, i) {
+                          final f = items[i];
+                          return AspectRatio(
+                            aspectRatio: 2 / 3,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.network(
+                                    f.posterUrl,
+                                    headers: _lbImageHeaders,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.black26,
+                                      alignment: Alignment.center,
+                                      child: const Icon(
+                                        Icons.image_not_supported,
+                                      ),
+                                    ),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 4,
+                                      ),
+                                      color: Colors.black54,
+                                      child: Text(
+                                        f.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              if (lb.isNotEmpty) const SizedBox(height: 16),
+              if (lb.isNotEmpty)
+                Text(
+                  'Sevmediği Filmler',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              if (lb.isNotEmpty)
+                FutureBuilder<List<LetterboxdFilm>>(
+                  future: _futureDisliked,
+                  builder: (context, s) {
+                    if (s.connectionState == ConnectionState.waiting) {
+                      return const SizedBox(
+                        height: 180,
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+                    if (s.hasError) {
+                      return Text('Sevmediği filmler alınamadı: ${s.error}');
+                    }
+                    final items = s.data ?? [];
+                    if (items.isEmpty) {
+                      return const Text('Sevmediği film bulunamadı.');
+                    }
+                    return SizedBox(
+                      height: 180,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (_, i) {
+                          final f = items[i];
+                          return AspectRatio(
+                            aspectRatio: 2 / 3,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.network(
+                                    f.posterUrl,
+                                    headers: _lbImageHeaders,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.black26,
+                                      alignment: Alignment.center,
+                                      child: const Icon(
+                                        Icons.image_not_supported,
+                                      ),
+                                    ),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 4,
+                                      ),
+                                      color: Colors.black54,
+                                      child: Text(
+                                        f.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           );

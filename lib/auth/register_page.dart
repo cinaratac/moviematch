@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -16,7 +15,6 @@ class _RegisterPageState extends State<RegisterPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
-  final _profileSvc = UserProfileService();
   bool _obscure1 = true;
   bool _obscure2 = true;
   bool _loading = false;
@@ -41,12 +39,7 @@ class _RegisterPageState extends State<RegisterPage> {
         await user?.updateDisplayName(uname);
       } catch (_) {}
 
-      // 3) Firestore'a temel profil senkronu (displayName/email)
-      try {
-        await _profileSvc.syncAuthProfile();
-      } catch (_) {}
-
-      // 4) Onboarding: Letterboxd kullanıcı adı zorunlu adımı
+      // 3) Onboarding: Letterboxd kullanıcı adı zorunlu adımı
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const OnboardingLetterboxd()),

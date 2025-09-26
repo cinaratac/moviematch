@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:fluttergirdi/shell.dart';
+import 'package:fluttergirdi/services/user_profile_service.dart';
 
 class OnboardingLetterboxd extends StatefulWidget {
   const OnboardingLetterboxd({super.key});
@@ -13,8 +13,7 @@ class OnboardingLetterboxd extends StatefulWidget {
 
 class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
   final _formKey = GlobalKey<FormState>();
-  final _controller = TextFieldController();
-  final _svc = UserProfileService();
+  final _controller = TextEditingController();
   bool _loading = true;
   bool _saving = false;
 
@@ -62,24 +61,42 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     return null;
   }
 
-  Future<void> _save() async {
+  Future<void> _saveAndBuild() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
       final raw = _controller.text.trim();
-      // Tek seferlik kaydet (servis merge çalışır)
-      await _svc.setLetterboxdUsername(raw);
-      await _svc.syncAuthProfile();
+
+      // Auth kontrolü
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid;
+      if (uid == null) {
+        throw 'Oturum bulunamadı';
+      }
+
+      // 1) Firestore: kullanıcı dökümanına Letterboxd kullanıcı adını yaz
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'letterboxdUsername': raw,
+        'letterboxdUsername_lc': raw.toLowerCase(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 2) TasteProfile oluştur (eşleşme sistemi için zorunlu)
+      //    Bu çağrı users/{uid} belgesindeki letterboxdUsername alanını okur,
+      //    Letterboxd’dan verileri çekip tasteProfiles/{uid} belgesini yazar.
+      await UserProfileService.instance.saveFromLetterboxd(uid: uid);
+
       if (!mounted) return;
+      // Başarılı → ana uygulamaya geç
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeShell()),
         (_) => false,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Kaydedilemedi: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Kaydetme/Profil oluşturma hatası: $e')),
+      );
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -99,28 +116,28 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
           child: Column(
             children: [
               const Text(
-                'Lütfen Letterboxd kullanıcı adını gir. Bu adım zorunludur ve daha sonra değiştirilemez.',
+                'Letterboxd kullanıcı adını gir. Kaydettikten sonra film beğenilerin çekilecek ve eşleşme sistemi için profilin oluşturulacak.',
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _controller,
                 decoration: const InputDecoration(
-                  labelText: 'Kullanıcı adı (ör. silhouettofaman)',
+                  labelText: 'Kullanıcı adı',
                   border: OutlineInputBorder(),
                 ),
                 textInputAction: TextInputAction.done,
                 validator: _validator,
-                onFieldSubmitted: (_) => _save(),
+                onFieldSubmitted: (_) => _saveAndBuild(),
               ),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _saving ? null : _save,
+                  onPressed: _saving ? null : _saveAndBuild,
                   icon: const Icon(Icons.check),
                   label: _saving
-                      ? const Text('Kaydediliyor...')
-                      : const Text('Kaydet ve devam et'),
+                      ? const Text('Hazırlanıyor...')
+                      : const Text('Kaydet ve eşleşmeleri hazırla'),
                 ),
               ),
             ],
@@ -130,6 +147,3 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     );
   }
 }
-
-/// Küçük yardımcı: iOS klavyede done tetiklemeyi kolaylaştırmak için
-class TextFieldController extends TextEditingController {}
