@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:math' as math;
 import 'package:fluttergirdi/services/match_service.dart'
     as global_match; // uses services/match_service.dart
 import 'package:fluttergirdi/services/like_service.dart';
@@ -42,10 +43,27 @@ class MatchListScreen extends StatelessWidget {
               final m = items[i];
               final pct = m.score.clamp(0, 100).toStringAsFixed(1);
               return ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.person)),
-                title: Text(m.displayName ?? m.uid),
+                leading: CircleAvatar(
+                  backgroundImage:
+                      (m.photoURL != null && m.photoURL!.isNotEmpty)
+                      ? NetworkImage(m.photoURL!)
+                      : null,
+                  child: (m.photoURL == null || m.photoURL!.isEmpty)
+                      ? const Icon(Icons.person)
+                      : null,
+                ),
+                title: Text(
+                  (m.displayName != null && m.displayName!.isNotEmpty)
+                      ? m.displayName!
+                      : (m.letterboxdUsername != null &&
+                                m.letterboxdUsername!.isNotEmpty
+                            ? '@${m.letterboxdUsername}'
+                            : m.uid),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 subtitle: Text(
-                  '%$pct uyum • Ortak 5★: ${m.commonFiveStarsCount} • Ortak fav: ${m.commonFavoritesCount}',
+                  '%$pct uyum • Ortak 5★: ${m.commonFiveCount} • Ortak fav: ${m.commonFavCount}',
                 ),
                 onTap: () {
                   Navigator.of(context).push(
@@ -80,8 +98,8 @@ class MatchListScreen extends StatelessWidget {
                         try {
                           await LikeService.instance.likeUser(
                             m.uid,
-                            commonFavoritesCount: m.commonFavoritesCount,
-                            commonFiveStarsCount: m.commonFiveStarsCount,
+                            commonFavoritesCount: m.commonFavCount,
+                            commonFiveStarsCount: m.commonFiveCount,
                           );
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -121,7 +139,16 @@ class MatchScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(result.displayName ?? result.uid),
+        title: Text(
+          (result.displayName != null && result.displayName!.isNotEmpty)
+              ? result.displayName!
+              : (result.letterboxdUsername != null &&
+                        result.letterboxdUsername!.isNotEmpty
+                    ? '@${result.letterboxdUsername}'
+                    : result.uid),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
         actions: [
           IconButton(
             tooltip: 'Geç',
@@ -198,8 +225,8 @@ class MatchScreen extends StatelessWidget {
           try {
             await LikeService.instance.likeUser(
               result.uid,
-              commonFavoritesCount: result.commonFavoritesCount,
-              commonFiveStarsCount: result.commonFiveStarsCount,
+              commonFavoritesCount: result.commonFavCount,
+              commonFiveStarsCount: result.commonFiveCount,
             );
             if (!context.mounted) return;
             ScaffoldMessenger.of(
@@ -222,17 +249,25 @@ class MatchScreen extends StatelessWidget {
     final db = FirebaseFirestore.instance;
 
     Future<List<FilmItem>> _read(List<String> keys) async {
+      if (keys.isEmpty) return const [];
       final items = <FilmItem>[];
-      for (final k in keys) {
-        final doc = await db.collection('catalog_films').doc(k).get();
-        if (!doc.exists) continue;
-        final d = doc.data()!;
-        items.add(
-          FilmItem(
-            title: (d['title'] ?? '') as String,
-            posterUrl: (d['posterUrl'] ?? '') as String,
-          ),
-        );
+      const chunkSize = 10; // Firestore whereIn max 10
+
+      for (var i = 0; i < keys.length; i += chunkSize) {
+        final chunk = keys.sublist(i, math.min(i + chunkSize, keys.length));
+        final qs = await db
+            .collection('catalog_films')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+        for (final doc in qs.docs) {
+          final d = doc.data();
+          items.add(
+            FilmItem(
+              title: (d['title'] ?? '') as String,
+              posterUrl: (d['posterUrl'] ?? '') as String,
+            ),
+          );
+        }
       }
       return items;
     }
@@ -322,8 +357,7 @@ class _Grid extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AspectRatio(
-                  aspectRatio: 2 / 3,
+                Expanded(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: Image.network(

@@ -6,11 +6,14 @@ import 'package:fluttergirdi/services/chat_service.dart';
 class ChatRoomScreen extends StatefulWidget {
   final String chatId;
   final String otherUid;
+  final String?
+  otherTitle; // optional pre-resolved title (username/displayName)
 
   const ChatRoomScreen({
     super.key,
     required this.chatId,
     required this.otherUid,
+    this.otherTitle,
   });
 
   @override
@@ -55,7 +58,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser!.uid;
 
     return Scaffold(
-      appBar: AppBar(title: _ChatAppBarTitle(otherUid: widget.otherUid)),
+      appBar: AppBar(
+        title: _ChatAppBarTitle(
+          chatId: widget.chatId,
+          otherUid: widget.otherUid,
+          initialTitle: widget.otherTitle,
+        ),
+      ),
       body: Column(
         children: [
           // Mesajlar
@@ -185,31 +194,98 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 }
 
 class _ChatAppBarTitle extends StatelessWidget {
+  final String chatId;
   final String otherUid;
-  const _ChatAppBarTitle({required this.otherUid});
+  final String? initialTitle;
+  const _ChatAppBarTitle({
+    required this.chatId,
+    required this.otherUid,
+    this.initialTitle,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // Karşı tarafın görünen adını Firestore'dan çekelim (username -> displayName -> @lb -> uid fallback)
+    // Eğer dışarıdan başlık (username) verildiyse direkt onu göster (UID flaşlamaz)
+    if (initialTitle != null && initialTitle!.isNotEmpty) {
+      return Text(initialTitle!, overflow: TextOverflow.ellipsis);
+    }
+
+    // Öncelik: chats/{chatId}.participantsMeta[otherUid]
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(otherUid)
+          .collection('chats')
+          .doc(chatId)
           .snapshots(),
       builder: (context, snap) {
-        String title = otherUid;
+        Map<String, dynamic>? meta;
         if (snap.hasData && snap.data!.exists) {
           final d = snap.data!.data()!;
-          final username = (d['username'] ?? '') as String;
-          final displayName = (d['displayName'] ?? '') as String;
-          final lb = (d['letterboxdUsername'] ?? '') as String;
-          title = username.isNotEmpty
+          final m = d['participantsMeta'];
+          if (m is Map) {
+            final m2 = Map<String, dynamic>.from(m);
+            if (m2.containsKey(otherUid) && m2[otherUid] is Map) {
+              meta = Map<String, dynamic>.from(m2[otherUid] as Map);
+            }
+          }
+        }
+
+        if (meta != null) {
+          final username = (meta['username'] ?? '') as String;
+          final displayName = (meta['displayName'] ?? '') as String;
+          final lb = (meta['lb'] ?? meta['letterboxdUsername'] ?? '') as String;
+          final title = username.isNotEmpty
               ? username
               : (displayName.isNotEmpty
                     ? displayName
-                    : (lb.isNotEmpty ? '@$lb' : otherUid));
+                    : (lb.isNotEmpty ? '@$lb' : ''));
+          if (title.isNotEmpty) {
+            return Text(title, overflow: TextOverflow.ellipsis);
+          }
         }
-        return Text(title, overflow: TextOverflow.ellipsis);
+
+        // Fallback (bir defa): matches/{chatId} içinden doldurup chats'e persist et
+        return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          future: FirebaseFirestore.instance
+              .collection('matches')
+              .doc(chatId)
+              .get(),
+          builder: (context, mSnap) {
+            String title = '';
+            if (mSnap.hasData && mSnap.data!.exists) {
+              final md = mSnap.data!.data()!;
+              final aP = md['aProfile'] as Map<String, dynamic>?;
+              final bP = md['bProfile'] as Map<String, dynamic>?;
+              Map<String, dynamic>? otherP;
+              if (aP != null && aP['uid'] == otherUid) otherP = aP;
+              if (bP != null && bP['uid'] == otherUid) otherP = bP;
+              if (otherP != null) {
+                final username = (otherP['username'] ?? '') as String;
+                final disp = (otherP['displayName'] ?? '') as String;
+                final lb =
+                    (otherP['lb'] ?? otherP['letterboxdUsername'] ?? '')
+                        as String;
+                title = username.isNotEmpty
+                    ? username
+                    : (disp.isNotEmpty ? disp : (lb.isNotEmpty ? '@$lb' : ''));
+
+                FirebaseFirestore.instance.collection('chats').doc(chatId).set({
+                  'participantsMeta': {
+                    otherUid: {
+                      'uid': otherUid,
+                      'username': username,
+                      'displayName': disp,
+                      'lb': lb,
+                    },
+                  },
+                }, SetOptions(merge: true));
+              }
+            }
+            return Text(
+              title.isNotEmpty ? title : '',
+              overflow: TextOverflow.ellipsis,
+            );
+          },
+        );
       },
     );
   }

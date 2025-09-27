@@ -1,230 +1,290 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:collection/collection.dart';
 
-/// Tek bir eşleşmeyi temsil eder.
+/// Tek bir eşleşmeyi temsil eder
 class MatchResult {
   final String uid;
   final double score; // 0..100
-  final String? displayName;
-  final String? username;
-  final String? avatarUrl;
-
-  /// Ortak favori ve ortak 5 yıldız anahtarları (film:<slug>)
-  final List<String> commonFavorites;
   final List<String> commonFiveStars;
+  final List<String> commonFavorites;
+  final List<String> commonDisliked;
+  final String? displayName;
+  final String? letterboxdUsername;
+  final String? photoURL;
 
-  int get commonFavoritesCount => commonFavorites.length;
-  int get commonFiveStarsCount => commonFiveStars.length;
+  int get commonFiveCount => commonFiveStars.length;
+  int get commonFavCount => commonFavorites.length;
+  int get commonDisCount => commonDisliked.length;
 
   MatchResult({
     required this.uid,
     required this.score,
-    this.displayName,
-    this.username,
-    this.avatarUrl,
-    required this.commonFavorites,
     required this.commonFiveStars,
+    required this.commonFavorites,
+    required this.commonDisliked,
+    this.displayName,
+    this.letterboxdUsername,
+    this.photoURL,
   });
 }
 
-/// Eşleşme hesaplama servisi.
-/// Kullandığı kaynaklar:
-///  - users/{uid}.favoritesKeys : List<String>
-///  - userTasteProfiles/{uid}.fiveStars : List<String>
-///  - userTasteProfiles/{uid}.profile : { displayName?, letterboxdUsername?, avatarUrl? }
 class MatchService {
-  final _usersCol = FirebaseFirestore.instance.collection('users');
-  final _tasteCol = FirebaseFirestore.instance.collection('userTasteProfiles');
+  final _db = FirebaseFirestore.instance;
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _db.collection('users');
+  CollectionReference<Map<String, dynamic>> get _matches =>
+      _db.collection('matches');
 
-  final _matchesCol = FirebaseFirestore.instance.collection('matches');
+  Map<String, dynamic> _profileSnippet(Map<String, dynamic> u, String uid) => {
+    'uid': uid,
+    'displayName': (u['displayName'] ?? '') as String,
+    'lb': (u['letterboxdUsername'] ?? '') as String,
+    'photoURL': (u['photoURL'] ?? '') as String,
+  };
 
-  String _pairIdOf(String u1, String u2) =>
-      (u1.compareTo(u2) < 0) ? '${u1}_$u2' : '${u2}_$u1';
+  /// İki uid’den deterministik pairId üret
+  String pairIdOf(String a, String b) =>
+      (a.compareTo(b) < 0) ? '${a}_$b' : '${b}_$a';
 
-  /// [myUid] kullanıcısı için diğer kullanıcılarla eşleşme skorlarını döndürür.
-  /// Skor: ortak 5 yıldızlara daha fazla ağırlık verilir.
-  /// Formül (0..100):
-  ///   score = 100 * ( 2*|F★∩G★| + |F∩G| ) / ( 2*(|F★|+|G★|) + (|F|+|G|) )
-  /// Burada F=benim favorites, F★=benim fiveStars; G=karşı taraf favorites, G★=karşı taraf fiveStars.
+  /* ---------------------------------------------------------------------- */
+  /* 1) EŞLEŞME LİSTESİ HESAPLA (YAZMADAN, SADECE HESAP)                     */
+  /* ---------------------------------------------------------------------- */
   Future<List<MatchResult>> findMatches(String myUid) async {
-    // 1) Benim dokümanlarım
-    final meUsersSnap = await _usersCol.doc(myUid).get();
-    final meTasteSnap = await _tasteCol.doc(myUid).get();
+    final meDoc = await _users.doc(myUid).get();
+    if (!meDoc.exists) return [];
 
-    final Set<String> myFavorites = Set<String>.from(
-      (meUsersSnap.data()?['favoritesKeys'] ?? const []) as List,
+    final Set<String> myFive = Set<String>.from(
+      (meDoc.data()?['fiveStarKeys'] ?? const []) as List,
     );
-    final Set<String> myFiveStars = Set<String>.from(
-      (meTasteSnap.data()?['fiveStars'] ?? const []) as List,
+    final Set<String> myFavs = Set<String>.from(
+      (meDoc.data()?['favoritesKeys'] ?? const []) as List,
+    );
+    final Set<String> myDis = Set<String>.from(
+      (meDoc.data()?['dislikedKeys'] ?? const []) as List,
     );
 
-    if (myFavorites.isEmpty && myFiveStars.isEmpty) {
-      return [];
-    }
+    if (myFive.isEmpty && myFavs.isEmpty && myDis.isEmpty) return [];
 
-    // 2) Diğer kullanıcıların toplu okunması
-    final usersSnap = await _usersCol.get();
-    final tasteSnap = await _tasteCol.get();
+    // Tüm kullanıcıları oku (geliştirme için uygun; üretimde pagination düşünebilirsin)
+    final all = await _users.get();
 
-    // Haritalar: uid -> list
-    final Map<String, Set<String>> favoritesByUid = {
-      for (final d in usersSnap.docs)
-        d.id: Set<String>.from((d.data()['favoritesKeys'] ?? const []) as List),
-    };
-    final Map<String, Set<String>> fiveStarsByUid = {
-      for (final d in tasteSnap.docs)
-        d.id: Set<String>.from((d.data()['fiveStars'] ?? const []) as List),
-    };
-
-    // Profil alanları (displayName / username / avatar)
-    final Map<String, Map<String, dynamic>> profileByUid = {
-      for (final d in tasteSnap.docs)
-        d.id: (d.data()['profile'] ?? const {}) as Map<String, dynamic>,
-    };
-
-    // 3) Her aday için skor hesapla
     final List<MatchResult> out = [];
-
-    final allUids = <String>{}
-      ..addAll(favoritesByUid.keys)
-      ..addAll(fiveStarsByUid.keys);
-
-    for (final uid in allUids) {
+    for (final d in all.docs) {
+      final uid = d.id;
       if (uid == myUid) continue;
 
-      final theirFavs = favoritesByUid[uid] ?? const <String>{};
-      final their5 = fiveStarsByUid[uid] ?? const <String>{};
+      final data = d.data();
+      final theirFive = Set<String>.from(
+        (data['fiveStarKeys'] ?? const []) as List,
+      );
+      final theirFavs = Set<String>.from(
+        (data['favoritesKeys'] ?? const []) as List,
+      );
+      final theirDis = Set<String>.from(
+        (data['dislikedKeys'] ?? const []) as List,
+      );
 
-      if (theirFavs.isEmpty && their5.isEmpty) continue;
+      if (theirFive.isEmpty && theirFavs.isEmpty && theirDis.isEmpty) continue;
 
-      final commonFavs = myFavorites.intersection(theirFavs).toList()..sort();
-      final common5 = myFiveStars.intersection(their5).toList()..sort();
+      final common5 = myFive.intersection(theirFive).toList()..sort();
+      final commonF = myFavs.intersection(theirFavs).toList()..sort();
+      final commonD = myDis.intersection(theirDis).toList()..sort();
 
-      // Ağırlıklı skor
-      final favDen = myFavorites.length + theirFavs.length;
-      final fiveDen = myFiveStars.length + their5.length;
-      final denom = 2 * fiveDen + favDen; // iki kat ağırlık 5 yıldıza
+      // En az bir ortaklık olmalı
+      if (common5.isEmpty && commonF.isEmpty && commonD.isEmpty) continue;
 
-      double score = 0;
-      if (denom > 0) {
-        score = 100.0 * ((2 * common5.length + commonFavs.length) / denom);
-      }
-
-      // Profil bilgisi
-      final p = profileByUid[uid] ?? const {};
-
-      // En azından bir ortaklık olmalı
-      if (commonFavs.isEmpty && common5.isEmpty) continue;
+      // Skor: 5★ iki kat ağırlık
+      final denom =
+          2 * (myFive.length + theirFive.length) +
+          (myFavs.length + theirFavs.length);
+      final score = denom == 0
+          ? 0.0
+          : (100.0 * ((2 * common5.length + commonF.length) / denom))
+                .toDouble();
 
       out.add(
         MatchResult(
           uid: uid,
           score: score,
-          displayName: p['displayName'] as String?,
-          username: p['letterboxdUsername'] as String?,
-          avatarUrl: p['avatarUrl'] as String?,
-          commonFavorites: commonFavs,
           commonFiveStars: common5,
+          commonFavorites: commonF,
+          commonDisliked: commonD,
+          displayName: data['displayName'] as String?,
+          letterboxdUsername: data['letterboxdUsername'] as String?,
+          photoURL: data['photoURL'] as String?,
         ),
       );
     }
 
-    // 4) Skora ve sonra ortak 5 yıldız sayısına göre sırala
+    // Skor > ortak 5★ > ortak favori sayısına göre sırala
     out.sort((a, b) {
-      final byScore = b.score.compareTo(a.score);
-      if (byScore != 0) return byScore;
-      final by5 = b.commonFiveStarsCount.compareTo(a.commonFiveStarsCount);
-      if (by5 != 0) return by5;
-      return b.commonFavoritesCount.compareTo(a.commonFavoritesCount);
+      final s = b.score.compareTo(a.score);
+      if (s != 0) return s;
+      final f5 = b.commonFiveCount.compareTo(a.commonFiveCount);
+      if (f5 != 0) return f5;
+      return b.commonFavCount.compareTo(a.commonFavCount);
     });
 
     return out;
   }
 
-  /// Otomatik eşleştirme:
-  /// - Koşul A: en az [minCommonFive] ortak 5★ VE en az [minCommonFav] ortak favori
-  /// - Veya Koşul B: en az [minCommonDisliked] ortak beğenilmeyen (disliked)
-  /// Şartı sağlayan adaylar için `matches/{pairId}` belgesi oluşturulur/güncellenir.
+  /* ---------------------------------------------------------------------- */
+  /* 2) OTOMATİK MATCH OLUŞTUR (matches/{pairId})                           */
+  /* ---------------------------------------------------------------------- */
+  /// Şartı sağlayan adaylar için `matches/{pairId}` belgesini set/merge eder.
+  /// Varsayılan eşik: en az 1 ortak 5★ VE 1 ortak favori **VEYA** en az 1 ortak disliked.
   Future<int> autoCreateMatches(
     String myUid, {
     int minCommonFive = 1,
     int minCommonFav = 1,
     int minCommonDisliked = 1,
   }) async {
-    // 1) Benim profillerim
-    final meUsersSnap = await _usersCol.doc(myUid).get();
-    final meTasteSnap = await _tasteCol.doc(myUid).get();
+    final meDoc = await _users.doc(myUid).get();
+    if (!meDoc.exists) return 0;
 
-    final Set<String> myFavorites = Set<String>.from(
-      (meUsersSnap.data()?['favoritesKeys'] ?? const []) as List,
+    final myFive = Set<String>.from(
+      (meDoc.data()?['fiveStarKeys'] ?? const []) as List,
     );
-    final Set<String> myFiveStars = Set<String>.from(
-      (meTasteSnap.data()?['fiveStars'] ?? const []) as List,
+    final myFavs = Set<String>.from(
+      (meDoc.data()?['favoritesKeys'] ?? const []) as List,
     );
-    final Set<String> myDisliked = Set<String>.from(
-      (meUsersSnap.data()?['dislikedKeys'] ?? const []) as List,
+    final myDis = Set<String>.from(
+      (meDoc.data()?['dislikedKeys'] ?? const []) as List,
     );
 
-    if (myFavorites.isEmpty && myFiveStars.isEmpty && myDisliked.isEmpty) {
-      return 0;
-    }
+    final all = await _users.get();
 
-    // 2) Tüm kullanıcı ve tat profilleri
-    final usersSnap = await _usersCol.get();
-    final tasteSnap = await _tasteCol.get();
-
-    final Map<String, Set<String>> favoritesByUid = {
-      for (final d in usersSnap.docs)
-        d.id: Set<String>.from((d.data()['favoritesKeys'] ?? const []) as List),
-    };
-    final Map<String, Set<String>> dislikedByUid = {
-      for (final d in usersSnap.docs)
-        d.id: Set<String>.from((d.data()['dislikedKeys'] ?? const []) as List),
-    };
-    final Map<String, Set<String>> fiveStarsByUid = {
-      for (final d in tasteSnap.docs)
-        d.id: Set<String>.from((d.data()['fiveStars'] ?? const []) as List),
-    };
-
-    // 3) Adayları değerlendir, koşulu sağlayanlara match yaz
-    int createdOrUpdated = 0;
-    for (final uid in {
-      ...favoritesByUid.keys,
-      ...fiveStarsByUid.keys,
-      ...dislikedByUid.keys,
-    }) {
+    int touched = 0;
+    for (final d in all.docs) {
+      final uid = d.id;
       if (uid == myUid) continue;
 
-      final theirFavs = favoritesByUid[uid] ?? const <String>{};
-      final their5 = fiveStarsByUid[uid] ?? const <String>{};
-      final theirDis = dislikedByUid[uid] ?? const <String>{};
+      final data = d.data();
+      final theirFive = Set<String>.from(
+        (data['fiveStarKeys'] ?? const []) as List,
+      );
+      final theirFavs = Set<String>.from(
+        (data['favoritesKeys'] ?? const []) as List,
+      );
+      final theirDis = Set<String>.from(
+        (data['dislikedKeys'] ?? const []) as List,
+      );
 
-      final commonFavs = myFavorites.intersection(theirFavs);
-      final common5 = myFiveStars.intersection(their5);
-      final commonDis = myDisliked.intersection(theirDis);
+      final c5 = myFive.intersection(theirFive);
+      final cf = myFavs.intersection(theirFavs);
+      final cd = myDis.intersection(theirDis);
 
-      final meetsA =
-          common5.length >= minCommonFive && commonFavs.length >= minCommonFav;
-      final meetsB = commonDis.length >= minCommonDisliked;
+      final meetsA = c5.length >= minCommonFive && cf.length >= minCommonFav;
+      final meetsB = cd.length >= minCommonDisliked;
       if (!meetsA && !meetsB) continue;
 
-      final pairId = _pairIdOf(myUid, uid);
-      final docRef = _matchesCol.doc(pairId);
-
-      // createdAt sadece yoksa set edilir; updatedAt her seferinde güncellenir
-      await docRef.set({
-        'uids': (myUid.compareTo(uid) < 0) ? [myUid, uid] : [uid, myUid],
-        'commonFavoritesCount': commonFavs.length,
-        'commonFiveStarsCount': common5.length,
-        'commonDislikedCount': commonDis.length,
+      final pairId = pairIdOf(myUid, uid);
+      final meIsA = myUid.compareTo(uid) < 0;
+      final aProfile = _profileSnippet(
+        meIsA ? (meDoc.data() ?? {}) : data,
+        meIsA ? myUid : uid,
+      );
+      final bProfile = _profileSnippet(
+        meIsA ? data : (meDoc.data() ?? {}),
+        meIsA ? uid : myUid,
+      );
+      await _matches.doc(pairId).set({
+        'uids': meIsA ? [myUid, uid] : [uid, myUid],
+        'aProfile': aProfile,
+        'bProfile': bProfile,
+        'commonFiveStarsCount': c5.length,
+        'commonFavoritesCount': cf.length,
+        'commonDislikedCount': cd.length,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'source': meetsB ? 'auto:disliked' : 'auto:five+fav',
       }, SetOptions(merge: true));
 
-      createdOrUpdated += 1;
+      touched++;
+    }
+    return touched;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* 2.1) OTOMATİK MATCH (SADECE ORTAK 5★)                                 */
+  /* ---------------------------------------------------------------------- */
+  /// Yalnızca ortak 5★'ı baz alan otomatik eşleştirme.
+  /// En az [minCommonFive] adet ortak 5★ varsa matches/{pairId} set/merge eder.
+  Future<int> autoCreateMatchesFiveOnly(
+    String myUid, {
+    int minCommonFive = 1,
+  }) async {
+    final meDoc = await _users.doc(myUid).get();
+    if (!meDoc.exists) return 0;
+
+    final myFive = Set<String>.from(
+      (meDoc.data()?['fiveStarKeys'] ?? const []) as List,
+    );
+
+    if (myFive.isEmpty) return 0;
+
+    final all = await _users.get();
+    int touched = 0;
+
+    for (final d in all.docs) {
+      final uid = d.id;
+      if (uid == myUid) continue;
+
+      final data = d.data();
+      final theirFive = Set<String>.from(
+        (data['fiveStarKeys'] ?? const []) as List,
+      );
+      if (theirFive.isEmpty) continue;
+
+      final commonFive = myFive.intersection(theirFive);
+      if (commonFive.length < minCommonFive) continue;
+
+      final pairId = pairIdOf(myUid, uid);
+      final meIsA = myUid.compareTo(uid) < 0;
+      final aProfile = _profileSnippet(
+        meIsA ? (meDoc.data() ?? {}) : data,
+        meIsA ? myUid : uid,
+      );
+      final bProfile = _profileSnippet(
+        meIsA ? data : (meDoc.data() ?? {}),
+        meIsA ? uid : myUid,
+      );
+      await _matches.doc(pairId).set({
+        'uids': meIsA ? [myUid, uid] : [uid, myUid],
+        'aProfile': aProfile,
+        'bProfile': bProfile,
+        'commonFiveStarsCount': commonFive.length,
+        'commonFavoritesCount': 0,
+        'commonDislikedCount': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'source': 'auto:fiveOnly',
+      }, SetOptions(merge: true));
+
+      touched++;
     }
 
-    return createdOrUpdated;
+    return touched;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* 3) MATCHES LİSTESİ STREAM (ekrana göstermek için)                      */
+  /* ---------------------------------------------------------------------- */
+  /// Not: orderBy kullanmıyoruz; indeks gerekmesin diye client-side sıralıyoruz.
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> matchesStream(
+    String uid,
+  ) {
+    return _matches.where('uids', arrayContains: uid).limit(50).snapshots().map(
+      (qs) {
+        final docs = [...qs.docs];
+        docs.sort((a, b) {
+          final ta = a.data()['updatedAt'] as Timestamp?;
+          final tb = b.data()['updatedAt'] as Timestamp?;
+          final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return db.compareTo(da); // desc
+        });
+        return docs;
+      },
+    );
   }
 }

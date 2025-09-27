@@ -91,7 +91,7 @@ class TasteProfile {
     final postersRaw = data['posters'];
     final vectorRaw = data['vector'];
 
-    List<String> _stringList(dynamic v) {
+    List<String> stringList(dynamic v) {
       if (v is Iterable) {
         final seen = <String>{};
         final out = <String>[];
@@ -106,14 +106,14 @@ class TasteProfile {
       return <String>[];
     }
 
-    Map<String, String> _stringMap(dynamic v) {
+    Map<String, String> stringMap(dynamic v) {
       if (v is Map) {
         return v.map((k, val) => MapEntry(k.toString(), val?.toString() ?? ''));
       }
       return <String, String>{};
     }
 
-    List<double>? _doubleList(dynamic v) {
+    List<double>? doubleList(dynamic v) {
       if (v is Iterable) {
         final list = v.map((e) {
           if (e is num) return e.toDouble();
@@ -127,10 +127,10 @@ class TasteProfile {
 
     final tp = TasteProfile(
       letterboxdUsername: (data['letterboxdUsername'] as String?)?.trim(),
-      loved: _stringList(lovedRaw),
-      disliked: _stringList(dislikedRaw),
-      posters: _stringMap(postersRaw),
-      vector: _doubleList(vectorRaw),
+      loved: stringList(lovedRaw),
+      disliked: stringList(dislikedRaw),
+      posters: stringMap(postersRaw),
+      vector: doubleList(vectorRaw),
       computedAtMs: (data['computedAtMs'] is num)
           ? (data['computedAtMs'] as num).toInt()
           : int.tryParse('${data['computedAtMs'] ?? ''}'),
@@ -231,6 +231,48 @@ class UserProfileService {
   /// Reference to root `users/{uid}` for cross-collection mirrors (matching queries)
   DocumentReference<Map<String, dynamic>> _usersRef(String uid) {
     return _fs.collection('users').doc(uid);
+  }
+
+  // Lowercase helper for search fields
+  String _lc(Object? v) => v == null ? '' : v.toString().trim().toLowerCase();
+
+  /// Ensure users/{uid} has lowercase search fields and timestamps.
+  /// - Adds username_lc / displayName_lc / letterboxdUsername_lc if missing
+  /// - Adds createdAt if missing
+  /// - Touches updatedAt
+  Future<void> ensureSearchableUserFields({required String uid}) async {
+    final ref = _usersRef(uid);
+    final snap = await ref.get();
+    final data = snap.data() ?? <String, dynamic>{};
+
+    final username = data['username'];
+    final displayName = data['displayName'];
+    final lb = data['letterboxdUsername'];
+
+    final update = <String, dynamic>{
+      if (username != null &&
+          (data['username_lc'] == null ||
+              (data['username_lc'] as String).isEmpty))
+        'username_lc': _lc(username),
+      if (displayName != null &&
+          (data['displayName_lc'] == null ||
+              (data['displayName_lc'] as String).isEmpty))
+        'displayName_lc': _lc(displayName),
+      if (lb != null &&
+          (data['letterboxdUsername_lc'] == null ||
+              (data['letterboxdUsername_lc'] as String).isEmpty))
+        'letterboxdUsername_lc': _lc(lb),
+    };
+
+    // createdAt yoksa ekle
+    if (data['createdAt'] == null) {
+      update['createdAt'] = FieldValue.serverTimestamp();
+    }
+    update['updatedAt'] = FieldValue.serverTimestamp();
+
+    if (update.isNotEmpty) {
+      await ref.set(update, SetOptions(merge: true));
+    }
   }
 
   /// Mirror five-star (loved) keys into users/{uid}.fiveStarKeys for visibility
@@ -345,10 +387,12 @@ class UserProfileService {
     required String username,
   }) async {
     final clean = username.trim();
+    final lower = clean.toLowerCase();
     final batch = _fs.batch();
     final userRef = _fs.collection('users').doc(uid);
     batch.set(userRef, {
       'letterboxdUsername': clean,
+      'letterboxdUsername_lc': lower,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
@@ -358,6 +402,30 @@ class UserProfileService {
     }, SetOptions(merge: true));
 
     await batch.commit();
+    await ensureSearchableUserFields(uid: uid);
+  }
+
+  /// Upsert basic profile preferences to users/{uid}
+  Future<void> saveUserPreferences({
+    required String uid,
+    int? age,
+    List<String>? favGenres,
+    List<String>? favDirectors,
+    List<String>? favActors,
+  }) async {
+    final payload = <String, dynamic>{
+      if (age != null) 'age': age,
+      if (favGenres != null) 'favGenres': _cleanGenres(favGenres),
+      if (favDirectors != null) 'favDirectors': _dedupePretty(favDirectors),
+      if (favActors != null) 'favActors': _dedupePretty(favActors),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (payload.isEmpty) {
+      return;
+    }
+    await _usersRef(uid).set(payload, SetOptions(merge: true));
+    // Ensure lc/timestamps are present for searchability
+    await ensureSearchableUserFields(uid: uid);
   }
 
   // ---- Convenience helpers to persist Letterboxd-derived data ----
@@ -368,11 +436,35 @@ class UserProfileService {
     final out = <String>[];
     for (final raw in keys) {
       final k = (raw).trim().toLowerCase();
-      if (k.isEmpty) continue;
-      if (seen.add(k)) out.add(k);
+      if (k.isEmpty) {
+        continue;
+      }
+      if (seen.add(k)) {
+        out.add(k);
+      }
     }
     return out;
   }
+
+  /// Dedupes strings (case-insensitive) while preserving original casing
+  List<String> _dedupePretty(Iterable<String> items) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final raw in items) {
+      final s = (raw).toString().trim();
+      if (s.isEmpty) {
+        continue;
+      }
+      final key = s.toLowerCase();
+      if (seen.add(key)) {
+        out.add(s);
+      }
+    }
+    return out;
+  }
+
+  /// Normalizes genres by trimming; keeps human-readable case
+  List<String> _cleanGenres(Iterable<String> items) => _dedupePretty(items);
 
   /// Merge poster map while only keeping posters for keys we actually store.
   Map<String, String> _mergePosters({
@@ -384,8 +476,12 @@ class UserProfileService {
     for (final e in incoming.entries) {
       final k = (e.key).trim().toLowerCase();
       final v = (e.value).toString();
-      if (k.isEmpty || v.isEmpty) continue;
-      if (allowedKeys.contains(k)) out[k] = v;
+      if (k.isEmpty || v.isEmpty) {
+        continue;
+      }
+      if (allowedKeys.contains(k)) {
+        out[k] = v;
+      }
     }
     return out;
   }
@@ -395,22 +491,26 @@ class UserProfileService {
   Future<void> saveFromLetterboxd({
     required String uid,
     String? username,
+    String? lbUsername, // alias for onboarding calls
     List<String> lovedKeys = const [],
     List<String> dislikedKeys = const [],
     Map<String, String> posters = const {},
     int? computedAtMs,
     bool merge = true,
   }) async {
+    // Prefer explicit username from caller (username, then lbUsername)
+    final uname =
+        username ?? lbUsername; // prefer explicit username from caller
+
     // Load current to merge (if requested)
     final current = merge ? await loadTasteProfile(uid) : TasteProfile.empty;
 
     final lovedClean = _normKeys(lovedKeys);
     final dislikedClean = _normKeys(dislikedKeys);
-    final allowed = {...lovedClean, ...dislikedClean}.toSet();
 
     // Compose a new profile from incoming
     final incoming = TasteProfile.fromLists(
-      letterboxdUsername: username ?? current.letterboxdUsername,
+      letterboxdUsername: uname ?? current.letterboxdUsername,
       loved: lovedClean,
       disliked: dislikedClean,
       posters: posters,
@@ -431,7 +531,7 @@ class UserProfileService {
 
     final finalProfile = merged.copyWith(
       posters: cleanedPosters,
-      letterboxdUsername: username ?? merged.letterboxdUsername,
+      letterboxdUsername: uname ?? merged.letterboxdUsername,
       computedAtMs: computedAtMs ?? merged.computedAtMs,
     );
 

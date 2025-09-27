@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
-import 'package:fluttergirdi/services/chat_service.dart';
 
 class MessagesPage extends StatelessWidget {
   const MessagesPage({super.key});
@@ -117,6 +116,7 @@ class MessagesPage extends StatelessWidget {
                           builder: (_) => ChatRoomScreen(
                             chatId: chatId,
                             otherUid: otherUid,
+                            otherTitle: title,
                           ),
                         ),
                       );
@@ -199,8 +199,12 @@ class _MatchesFallbackList extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        ChatRoomScreen(chatId: chatId, otherUid: otherUid),
+                    builder: (_) => ChatRoomScreen(
+                      chatId: chatId,
+                      otherUid: otherUid,
+                      otherTitle:
+                          otherUid, // replace with pre-resolved username if available
+                    ),
                   ),
                 );
               },

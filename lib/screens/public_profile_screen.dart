@@ -161,6 +161,76 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 const Text('Letterboxd bağlı değil'),
 
               const SizedBox(height: 12),
+              // — Kullanıcı tercihleri (yaş, türler, yönetmenler, oyuncular) —
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(widget.uid)
+                    .snapshots(),
+                builder: (context, usnap) {
+                  if (!usnap.hasData || !usnap.data!.exists) {
+                    return const SizedBox.shrink();
+                  }
+                  final u = usnap.data!.data()!;
+                  final age = u['age'];
+                  final genres = List<String>.from(u['favGenres'] ?? const []);
+                  final directors = List<String>.from(
+                    u['favDirectors'] ?? const [],
+                  );
+                  final actors = List<String>.from(u['favActors'] ?? const []);
+
+                  if ((age == null || (age is int && age <= 0)) &&
+                      genres.isEmpty &&
+                      directors.isEmpty &&
+                      actors.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+
+                  Widget chipWrap(String title, List<String> items) {
+                    if (items.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: items
+                                .map((e) => Chip(label: Text(e)))
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (age is int && age > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.cake, size: 18),
+                              const SizedBox(width: 6),
+                              Text('Yaş: $age'),
+                            ],
+                          ),
+                        ),
+                      chipWrap('Sevdiği türler', genres),
+                      chipWrap('Sevdiği yönetmenler', directors),
+                      chipWrap('Sevdiği oyuncular', actors),
+                    ],
+                  );
+                },
+              ),
               if (lb.isNotEmpty)
                 Text(
                   'Favori Filmler',
@@ -257,7 +327,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       );
                     }
                     if (s.hasError) {
-                      return Text('5★ filmler alınamadı: ${s.error}');
+                      return const Text('5★ film bulunamadı.');
                     }
                     final items = s.data ?? [];
                     if (items.isEmpty) {

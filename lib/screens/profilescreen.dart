@@ -6,6 +6,8 @@ import 'package:fluttergirdi/services/match_service.dart';
 import 'package:fluttergirdi/auth/auth_gate.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -55,26 +57,13 @@ class _ProfilePageState extends State<ProfilePage> {
           ? null
           : LetterboxdService.fetchDisliked(u);
     });
-    // Auto-sync once per session if LB username exists and Firestore is missing data
+    // Auto-sync once per session if LB username exists
     if (!_autoSynced && u != null && u.isNotEmpty && uid != null) {
       try {
-        final db = FirebaseFirestore.instance;
-        final usersDoc = await db.collection('users').doc(uid).get();
-        final tasteDoc = await db
-            .collection('userTasteProfiles')
-            .doc(uid)
-            .get();
-        final hasFavKeys = List.from(
-          (usersDoc.data() ?? const {})['favoritesKeys'] ?? const [],
-        ).isNotEmpty;
-        final hasFive = List.from(
-          (tasteDoc.data() ?? const {})['fiveStars'] ?? const [],
-        ).isNotEmpty;
-        if (!hasFavKeys || !hasFive) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _syncLetterboxdToFirestore(u);
-          });
-        }
+        // Trigger full sync on next frame (avoid setState conflicts)
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _syncLetterboxdToFirestore(u);
+        });
         _autoSynced = true;
       } catch (_) {
         // ignore; manual refresh or next open will try again
@@ -133,15 +122,27 @@ class _ProfilePageState extends State<ProfilePage> {
     if (uid == null || lbUsername.isEmpty) return;
 
     // 1) Favorites: fills users/{uid}.favoritesKeys and catalog
-    final favorites = await LetterboxdService.syncFavoritesToFirestore(
-      lbUsername: lbUsername,
-    );
+    await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername);
 
     // 2) Five stars & low ratings; also upsert catalogs so posters resolve
     final five = await LetterboxdService.fetchFiveStar(lbUsername);
     final low = await LetterboxdService.fetchDisliked(lbUsername);
     await _upsertCatalogFromList(five);
     await _upsertCatalogFromList(low);
+
+    // Mirror 5★ into users/{uid}.fiveStarKeys as well (MatchService this field reads)
+    try {
+      final db = FirebaseFirestore.instance;
+      await db.collection('users').doc(uid).set({
+        'fiveStarKeys': five
+            .map((e) => e.key)
+            .where((k) => k.isNotEmpty)
+            .toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {
+      // optional: ignore if fails; taste profile still written below
+    }
 
     // 3) Mirror disliked into users/{uid}.dislikedKeys as well (and catalog already upserted above)
     try {
@@ -158,17 +159,11 @@ class _ProfilePageState extends State<ProfilePage> {
       lowRatings: low,
     );
 
-    // 5) Sync bitti: ortak 5★/favori veya ortak disliked olanlar için otomatik eşleşme oluştur
+    // 5) Sync bitti: sadece ortak 5★ olanlar için otomatik eşleşme oluştur
     try {
-      await MatchService().autoCreateMatches(
-        uid,
-        minCommonFive: 1,
-        minCommonFav: 1,
-        minCommonDisliked: 1,
-      );
+      await MatchService().autoCreateMatchesFiveOnly(uid, minCommonFive: 1);
     } catch (e) {
-      // Sessiz geç; eşleşme oluşmasa da uygulama çalışmaya devam etsin
-      debugPrint('autoCreateMatches error: $e');
+      debugPrint('autoCreateMatchesFiveOnly error: $e');
     }
   }
 
@@ -186,6 +181,69 @@ class _ProfilePageState extends State<ProfilePage> {
     if (dn.isNotEmpty) return dn; // sonra Firebase Auth displayName
     final email = user.email ?? '';
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
+  }
+
+  Future<void> _pickAndUploadPhoto() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final picker = ImagePicker();
+      final xfile = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        imageQuality: 85,
+      );
+      if (xfile == null) return; // cancelled
+
+      final uid = user.uid;
+      final bytes = await xfile.readAsBytes();
+      final ext = xfile.name.split('.').last.toLowerCase();
+      final path = 'user_avatars/$uid/avatar.$ext';
+
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putData(bytes, SettableMetadata(contentType: 'image/$ext'));
+      final url = await ref.getDownloadURL();
+
+      await user.updatePhotoURL(url);
+      await user.reload();
+
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'photoURL': url,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (mounted) setState(() {});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profil fotoğrafı güncellendi.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Yükleme hatası: $e')));
+    }
+  }
+
+  Future<void> _clearPhoto() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      await user.updatePhotoURL(null);
+      await user.reload();
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'photoURL': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    }
   }
 
   Future<void> _promptLetterboxdUsername() async {
@@ -289,6 +347,7 @@ class _ProfilePageState extends State<ProfilePage> {
         final db = FirebaseFirestore.instance;
         await db.collection('users').doc(uid).set({
           'favoritesKeys': [],
+          'fiveStarKeys': [],
           'dislikedKeys': [],
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
@@ -401,42 +460,36 @@ class _ProfilePageState extends State<ProfilePage> {
             await FirebaseAuth.instance.sendPasswordResetEmail(
               email: user.email!,
             );
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Şifre sıfırlama e-postası gönderildi.'),
-                ),
-              );
-            }
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Şifre sıfırlama e-postası gönderildi.'),
+              ),
+            );
           } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Hata: $e')));
-            }
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Hata: $e')));
           }
         }
 
-        Future<void> _sendEmailVerification() async {
+        Future<void> sendEmailVerification() async {
           try {
             await user.sendEmailVerification();
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Doğrulama e-postası gönderildi.'),
-                ),
-              );
-            }
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Doğrulama e-postası gönderildi.')),
+            );
           } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Hata: $e')));
-            }
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Hata: $e')));
           }
         }
 
-        Future<void> _confirmAndLogout() async {
+        Future<void> confirmAndLogout() async {
           final ok = await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
@@ -459,17 +512,16 @@ class _ProfilePageState extends State<ProfilePage> {
           if (ok == true) {
             try {
               await FirebaseAuth.instance.signOut();
-              if (!mounted) return;
+              if (!context.mounted) return;
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const AuthGate()),
                 (route) => false,
               );
             } catch (e) {
-              if (mounted) {
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('Çıkış yapılamadı: $e')));
-              }
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('Çıkış yapılamadı: $e')));
             }
           }
         }
@@ -486,6 +538,12 @@ class _ProfilePageState extends State<ProfilePage> {
               PopupMenuButton<String>(
                 onSelected: (value) async {
                   switch (value) {
+                    case 'set_photo':
+                      await _pickAndUploadPhoto();
+                      break;
+                    case 'clear_photo':
+                      await _clearPhoto();
+                      break;
                     case 'set_lb':
                       await _promptLetterboxdUsername();
                       break;
@@ -496,14 +554,37 @@ class _ProfilePageState extends State<ProfilePage> {
                       await _resetPassword();
                       break;
                     case 'verify':
-                      await _sendEmailVerification();
+                      await sendEmailVerification();
                       break;
                     case 'logout':
-                      await _confirmAndLogout();
+                      await confirmAndLogout();
                       break;
                   }
                 },
                 itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'set_photo',
+                    child: ListTile(
+                      leading: const Icon(Icons.image_outlined),
+                      title: const Text('Profil fotoğrafını ayarla'),
+                      subtitle:
+                          (user.photoURL != null && user.photoURL!.isNotEmpty)
+                          ? Text(
+                              user.photoURL!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            )
+                          : null,
+                    ),
+                  ),
+                  if (user.photoURL != null && user.photoURL!.isNotEmpty)
+                    const PopupMenuItem(
+                      value: 'clear_photo',
+                      child: ListTile(
+                        leading: Icon(Icons.image_not_supported_outlined),
+                        title: Text('Profil fotoğrafını kaldır'),
+                      ),
+                    ),
                   PopupMenuItem(
                     value: 'set_lb',
                     child: ListTile(
@@ -639,6 +720,82 @@ class _ProfilePageState extends State<ProfilePage> {
                     child: Chip(label: Text('Letterboxd: @$_lbUsername')),
                   ),
 
+                // Kullanıcı profili tercihleri (yaş, türler, yönetmenler, oyuncular)
+                const SizedBox(height: 12),
+                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(user.uid)
+                      .snapshots(),
+                  builder: (context, usnap) {
+                    if (!usnap.hasData || !usnap.data!.exists) {
+                      return const SizedBox.shrink();
+                    }
+                    final data = usnap.data!.data()!;
+                    final age = data['age'];
+                    final genres = List<String>.from(
+                      data['favGenres'] ?? const [],
+                    );
+                    final directors = List<String>.from(
+                      data['favDirectors'] ?? const [],
+                    );
+                    final actors = List<String>.from(
+                      data['favActors'] ?? const [],
+                    );
+
+                    if ((age == null || (age is int && age <= 0)) &&
+                        genres.isEmpty &&
+                        directors.isEmpty &&
+                        actors.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+
+                    Widget chipWrap(String title, List<String> items) {
+                      if (items.isEmpty) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: items
+                                  .map((e) => Chip(label: Text(e)))
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (age is int && age > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.cake, size: 18),
+                                const SizedBox(width: 6),
+                                Text('Yaş: $age'),
+                              ],
+                            ),
+                          ),
+                        chipWrap('Sevdiğin türler', genres),
+                        chipWrap('Sevdiğin yönetmenler', directors),
+                        chipWrap('Sevdiğin oyuncular', actors),
+                      ],
+                    );
+                  },
+                ),
+
                 if (_lbUsername != null) ...[
                   const SizedBox(height: 16),
                   Row(
@@ -726,23 +883,9 @@ class _ProfilePageState extends State<ProfilePage> {
                         );
                       }
                       if (snapshot.hasError) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('5★ filmler alınamadı: ${snapshot.error}'),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: FilledButton.icon(
-                                  onPressed: _refreshFavorites,
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('Tekrar dene'),
-                                ),
-                              ),
-                            ],
-                          ),
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Text('5★ film bulunamadı.'),
                         );
                       }
                       final items = snapshot.data ?? [];

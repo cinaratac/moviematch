@@ -19,6 +19,15 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
   bool _isLoading = false;
   List<Map<String, dynamic>> _results = [];
 
+  void _pushUnique(
+    List<Map<String, dynamic>> buf,
+    QueryDocumentSnapshot<Map<String, dynamic>> d,
+  ) {
+    if (!buf.any((e) => e['uid'] == d.id)) {
+      buf.add({'uid': d.id, ...d.data()});
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -37,11 +46,53 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
   }
 
   Future<void> _runSearch() async {
-    final q = _query;
+    final q = _query.trim();
+    final qLc = q.toLowerCase();
     if (q.isEmpty) {
-      setState(() {
-        _results = [];
-      });
+      try {
+        // Try: createdAt desc
+        final snap = await _fs
+            .collection('users')
+            .orderBy('createdAt', descending: true)
+            .limit(20)
+            .get();
+        final recents = [
+          for (final d in snap.docs) {'uid': d.id, ...d.data()},
+        ];
+        if (mounted) {
+          setState(() {
+            _results = recents;
+          });
+        }
+      } catch (_) {
+        try {
+          // Fallback: updatedAt desc
+          final snap2 = await _fs
+              .collection('users')
+              .orderBy('updatedAt', descending: true)
+              .limit(20)
+              .get();
+          final recents2 = [
+            for (final d in snap2.docs) {'uid': d.id, ...d.data()},
+          ];
+          if (mounted) {
+            setState(() {
+              _results = recents2;
+            });
+          }
+        } catch (_) {
+          // Last resort: no order (avoids index requirements)
+          final snap3 = await _fs.collection('users').limit(20).get();
+          final recents3 = [
+            for (final d in snap3.docs) {'uid': d.id, ...d.data()},
+          ];
+          if (mounted) {
+            setState(() {
+              _results = recents3;
+            });
+          }
+        }
+      }
       return;
     }
 
@@ -50,47 +101,104 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
     try {
       final List<Map<String, dynamic>> buf = [];
 
-      // 1) letterboxdUsername = tam eşleşme
-      final r1 = await _fs
-          .collection('users')
-          .where('letterboxdUsername', isEqualTo: q)
-          .limit(10)
-          .get();
-      for (final d in r1.docs) {
-        buf.add({'uid': d.id, ...?d.data()});
-      }
-
-      // 2) email = tam eşleşme (eğer email'i users doc’una yazıyorsan)
-      // (Yazmıyorsan bu kısmı silebilirsin ya da eklemeyi düşünebilirsin)
-      final r2 = await _fs
-          .collection('users')
-          .where('email', isEqualTo: q)
-          .limit(10)
-          .get();
-      for (final d in r2.docs) {
-        if (!buf.any((e) => e['uid'] == d.id)) {
-          buf.add({'uid': d.id, ...?d.data()});
+      // 1) letterboxdUsername exact (lc)
+      try {
+        final rLb = await _fs
+            .collection('users')
+            .where('letterboxdUsername_lc', isEqualTo: qLc)
+            .limit(10)
+            .get();
+        for (final d in rLb.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        // Fallback: small scan and filter client-side
+        final snap = await _fs.collection('users').limit(100).get();
+        for (final d in snap.docs) {
+          final lb = (d.data()['letterboxdUsername'] ?? '')
+              .toString()
+              .toLowerCase();
+          if (lb == qLc) _pushUnique(buf, d);
         }
       }
 
-      // 3) displayName prefix arama (Ali -> Ali*, alfabetik)
-      // Not: Bu sorgu için Firestore bazen indeks isteyebilir; link verir.
-      final r3 = await _fs
-          .collection('users')
-          .orderBy('displayName')
-          .startAt([q])
-          .endAt(['$q\uf8ff'])
-          .limit(10)
-          .get();
-      for (final d in r3.docs) {
-        if (!buf.any((e) => e['uid'] == d.id)) {
-          buf.add({'uid': d.id, ...?d.data()});
+      // 2) email exact (if present on user doc)
+      try {
+        final rEmail = await _fs
+            .collection('users')
+            .where('email', isEqualTo: q)
+            .limit(10)
+            .get();
+        for (final d in rEmail.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        /* ignore */
+      }
+
+      // 3) username exact (lc)
+      try {
+        final rUx = await _fs
+            .collection('users')
+            .where('username_lc', isEqualTo: qLc)
+            .limit(10)
+            .get();
+        for (final d in rUx.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        final snap = await _fs.collection('users').limit(100).get();
+        for (final d in snap.docs) {
+          final u = (d.data()['username'] ?? '').toString().toLowerCase();
+          if (u == qLc) _pushUnique(buf, d);
         }
       }
 
-      setState(() {
-        _results = buf;
-      });
+      // 4) username prefix (lc) with fallback
+      try {
+        final rUp = await _fs
+            .collection('users')
+            .orderBy('username_lc')
+            .startAt([qLc])
+            .endAt(['$qLc\uf8ff'])
+            .limit(10)
+            .get();
+        for (final d in rUp.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        final snap = await _fs.collection('users').limit(200).get();
+        for (final d in snap.docs) {
+          final u = (d.data()['username'] ?? '').toString().toLowerCase();
+          if (u.startsWith(qLc)) _pushUnique(buf, d);
+        }
+      }
+
+      // 5) displayName prefix (lc) with fallback
+      try {
+        final rDp = await _fs
+            .collection('users')
+            .orderBy('displayName_lc')
+            .startAt([qLc])
+            .endAt(['$qLc\uf8ff'])
+            .limit(10)
+            .get();
+        for (final d in rDp.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        final snap = await _fs.collection('users').limit(200).get();
+        for (final d in snap.docs) {
+          final dn = (d.data()['displayName'] ?? '').toString().toLowerCase();
+          if (dn.startsWith(qLc)) _pushUnique(buf, d);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _results = buf;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -129,28 +237,41 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
                     itemCount: _results.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, i) {
-                      final it = _results[i];
+                      final Map<String, dynamic> it = _results[i];
+                      final username = (it['username'] ?? '') as String;
                       final displayName = (it['displayName'] ?? '') as String;
                       final lb = (it['letterboxdUsername'] ?? '') as String;
                       final photoURL = (it['photoURL'] ?? '') as String;
+
+                      String title = username.isNotEmpty
+                          ? username
+                          : (displayName.isNotEmpty
+                                ? displayName
+                                : (lb.isNotEmpty ? '@$lb' : '—'));
+                      final fallbackLetter =
+                          (username.isNotEmpty
+                                  ? username[0]
+                                  : (displayName.isNotEmpty
+                                        ? displayName[0]
+                                        : (lb.isNotEmpty ? lb[0] : '?')))
+                              .toUpperCase();
+
                       return ListTile(
                         leading: CircleAvatar(
                           backgroundImage: photoURL.isNotEmpty
                               ? NetworkImage(photoURL)
                               : null,
-                          child: photoURL.isEmpty
-                              ? Text(
-                                  displayName.isNotEmpty
-                                      ? displayName[0].toUpperCase()
-                                      : '?',
-                                )
-                              : null,
+                          child: photoURL.isEmpty ? Text(fallbackLetter) : null,
                         ),
                         title: Text(
-                          displayName.isNotEmpty ? displayName : '(İsimsiz)',
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         subtitle: Text(
                           lb.isNotEmpty ? '@$lb' : 'Letterboxd bağlı değil',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {

@@ -3,7 +3,6 @@ import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/auth/auth_gate.dart';
-import 'package:fluttergirdi/shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

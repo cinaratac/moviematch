@@ -104,7 +104,7 @@ class LetterboxdService {
     'User-Agent': 'Mozilla/5.0',
   };
   static String _cacheKeyFor(String username) =>
-      'lb_cache_' + username.toLowerCase();
+      'lb_cache_${username.toLowerCase()}';
   // --- Generic rated-page fetcher (0.5★, 1★, 5★, etc.) ---------------------
   static Future<List<LetterboxdFilm>> _fetchRated(
     String username,
@@ -178,8 +178,8 @@ class LetterboxdService {
           rc?.attributes['data-target-link'] ??
           '';
       if (href.isEmpty) continue;
-      if (href.startsWith('//')) href = 'https:' + href;
-      if (href.startsWith('/')) href = 'https://letterboxd.com' + href;
+      if (href.startsWith('//')) href = 'https:$href';
+      if (href.startsWith('/')) href = 'https://letterboxd.com$href';
       if (!seenHref.add(href)) continue;
 
       String? poster =
@@ -191,9 +191,10 @@ class LetterboxdService {
               .first;
       poster ??= img?.attributes['src'] ?? img?.attributes['data-src'];
 
-      if (poster != null && poster.startsWith('//')) poster = 'https:' + poster;
-      if (poster != null && poster.startsWith('/'))
-        poster = 'https://a.ltrbxd.com' + poster;
+      if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
+      if (poster != null && poster.startsWith('/')) {
+        poster = 'https://a.ltrbxd.com$poster';
+      }
 
       final filmId =
           rc?.attributes['data-film-id'] ?? img?.attributes['data-film-id'];
@@ -225,7 +226,7 @@ class LetterboxdService {
     }
 
     if (items.isEmpty) {
-      final cached = prefs.getString(_cacheKeyFor(username) + cacheSuffix);
+      final cached = prefs.getString('${_cacheKeyFor(username)}$cacheSuffix');
       if (cached != null) {
         final list = (jsonDecode(cached) as List)
             .map((e) => LetterboxdFilm.fromJson(e))
@@ -244,11 +245,11 @@ class LetterboxdService {
 
     try {
       await prefs.setString(
-        _cacheKeyFor(username) + cacheSuffix,
+        '${_cacheKeyFor(username)}$cacheSuffix',
         jsonEncode(result.map((e) => e.toJson()).toList()),
       );
       await prefs.setInt(
-        _cacheKeyFor(username) + cacheSuffix + '_time',
+        '${_cacheKeyFor(username)}${cacheSuffix}_time',
         DateTime.now().millisecondsSinceEpoch,
       );
     } catch (_) {}
@@ -364,12 +365,18 @@ class LetterboxdService {
     final s = u.startsWith('//') ? 'https:$u' : u;
     final uri = Uri.tryParse(s);
     if (uri == null) return false;
+
     final path = uri.path.toLowerCase();
-    // Letterboxd boş poster görselini reddet
+
+    // Letterboxd placeholder'ı dışla
     if (path.contains('empty-poster')) return false;
+
+    // Sadece gerçek görsel uzantılarını kabul et (query string'i path'e dahil olmadığı için sorun yok)
     return path.endsWith('.jpg') ||
         path.endsWith('.jpeg') ||
-        path.endsWith('.png');
+        path.endsWith('.png') ||
+        path.endsWith('.webp') ||
+        path.endsWith('.avif');
   }
 
   static String _buildPosterFromIdSlug(
@@ -504,10 +511,10 @@ class LetterboxdService {
           // Poster URL normalizasyonu: CDN/TMDB ve relatif yollar
           if (posterUrl != null && posterUrl.isNotEmpty) {
             if (posterUrl.startsWith('//')) {
-              posterUrl = 'https:' + posterUrl;
+              posterUrl = 'https:$posterUrl';
             } else if (posterUrl.startsWith('/')) {
               // Eğer TMDB path'i gibi değilse ltrbxd CDN'e yönlendir
-              posterUrl = 'https://a.ltrbxd.com' + posterUrl;
+              posterUrl = 'https://a.ltrbxd.com$posterUrl';
             }
           }
 
@@ -535,15 +542,15 @@ class LetterboxdService {
           if (href != null && title != null && posterUrl != null) {
             final absHref = href.startsWith('http')
                 ? href
-                : 'https://letterboxd.com' + href;
+                : 'https://letterboxd.com$href';
             String absPoster = posterUrl;
             if (!absPoster.startsWith('http')) {
-              absPoster = 'https://letterboxd.com' + absPoster;
+              absPoster = 'https://letterboxd.com$absPoster';
             }
             // DEBUG: Çıkan URL'leri konsola yazalım
             // Örn: LB fav: 12 Angry Men (1957) | https://a.ltrbxd.com/resized/...jpg?v=...
             // ignore: avoid_print
-            print('LB fav: ' + (title ?? '') + ' | ' + absPoster);
+            print('LB fav: $title | $absPoster');
 
             films.add(
               LetterboxdFilm(title: title, url: absHref, posterUrl: absPoster),
@@ -564,9 +571,9 @@ class LetterboxdService {
               var src =
                   img.attributes['src'] ?? img.attributes['data-src'] ?? '';
               if (src.startsWith('//')) {
-                src = 'https:' + src;
+                src = 'https:$src';
               } else if (src.startsWith('/')) {
-                src = 'https://a.ltrbxd.com' + src;
+                src = 'https://a.ltrbxd.com$src';
               }
               // Placeholder ise ekleme
               final up2 = Uri.tryParse(src);
@@ -748,19 +755,21 @@ class LetterboxdService {
       }
 
       if (poster != null && poster.startsWith('//')) {
-        poster = 'https:' + poster;
+        poster = 'https:$poster';
       }
       if (poster == null || !_looksLikeImageUrl(poster)) continue;
 
       // ignore: avoid_print
-      if (items.length < 5) print('[LB][5★] $title | $poster');
+      if (items.length < 5) {
+        print('[LB][5★] $title | $poster');
+      }
 
       items.add(LetterboxdFilm(title: title, url: href, posterUrl: poster));
     }
 
     if (items.isEmpty) {
       // Cache’e düş
-      final cached = prefs.getString(_cacheKeyFor(username) + '_rated5');
+      final cached = prefs.getString('${_cacheKeyFor(username)}_rated5');
       if (cached != null) {
         final list = (jsonDecode(cached) as List)
             .map((e) => LetterboxdFilm.fromJson(e))
@@ -780,11 +789,11 @@ class LetterboxdService {
     // Cache yaz
     try {
       await prefs.setString(
-        _cacheKeyFor(username) + '_rated5',
+        '${_cacheKeyFor(username)}_rated5',
         jsonEncode(result.map((e) => e.toJson()).toList()),
       );
       await prefs.setInt(
-        _cacheKeyFor(username) + '_rated5_time',
+        '${_cacheKeyFor(username)}_rated5_time',
         DateTime.now().millisecondsSinceEpoch,
       );
     } catch (_) {}
