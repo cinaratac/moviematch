@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 class SearchProfilesScreen extends StatefulWidget {
@@ -15,9 +16,61 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
   final _fs = FirebaseFirestore.instance;
   Timer? _debounce;
 
+  static const _kRecentKey = 'recent_searches_v1';
+  static const _kRecentLimit = 10;
+  List<String> _recents = [];
+
   String _query = '';
   bool _isLoading = false;
   List<Map<String, dynamic>> _results = [];
+
+  Future<void> _loadRecents() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final list = sp.getStringList(_kRecentKey) ?? const [];
+      if (!mounted) return;
+      setState(() {
+        _recents = list;
+      });
+    } catch (_) {
+      // ignore storage errors silently
+    }
+  }
+
+  Future<void> _pushRecent(String raw) async {
+    final q = raw.trim();
+    if (q.isEmpty) return;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final lc = q.toLowerCase();
+      final next = List<String>.from(_recents);
+      next.removeWhere((e) => e.toLowerCase() == lc);
+      next.insert(0, q);
+      if (next.length > _kRecentLimit) {
+        next.removeRange(_kRecentLimit, next.length);
+      }
+      await sp.setStringList(_kRecentKey, next);
+      if (!mounted) return;
+      setState(() {
+        _recents = next;
+      });
+    } catch (_) {
+      // ignore storage errors silently
+    }
+  }
+
+  Future<void> _clearRecents() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.remove(_kRecentKey);
+      if (!mounted) return;
+      setState(() {
+        _recents = [];
+      });
+    } catch (_) {
+      // ignore
+    }
+  }
 
   void _pushUnique(
     List<Map<String, dynamic>> buf,
@@ -26,6 +79,12 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
     if (!buf.any((e) => e['uid'] == d.id)) {
       buf.add({'uid': d.id, ...d.data()});
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecents();
   }
 
   @override
@@ -48,6 +107,9 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
   Future<void> _runSearch() async {
     final q = _query.trim();
     final qLc = q.toLowerCase();
+    if (q.isNotEmpty) {
+      await _pushRecent(q);
+    }
     if (q.isEmpty) {
       try {
         // Try: createdAt desc
@@ -257,6 +319,47 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
               onSubmitted: (_) => _runSearch(),
             ),
           ),
+          if (_recents.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+              child: Row(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: Icon(Icons.history, size: 18),
+                  ),
+                  Expanded(
+                    child: SizedBox(
+                      height: 36,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _recents.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 6),
+                        itemBuilder: (context, i) {
+                          final term = _recents[i];
+                          return ActionChip(
+                            label: Text(
+                              term,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onPressed: () {
+                              _controller.text = term;
+                              _onChanged(term);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Temizle',
+                    icon: const Icon(Icons.close),
+                    onPressed: _clearRecents,
+                  ),
+                ],
+              ),
+            ),
           if (_isLoading) const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: _results.isEmpty
