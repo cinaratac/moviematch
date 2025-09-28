@@ -12,6 +12,9 @@ class MatchResult {
   final List<Map<String, dynamic>> commonFavorites;
   final List<Map<String, dynamic>> commonDisliked;
   final List<Map<String, dynamic>> conflicts; // A like ∩ B dislike (two-way)
+  final List<Map<String, dynamic>> commonWatchlist; // A∩B watchlist
+  final List<Map<String, dynamic>>
+  likeVsWatchlist; // (A like ∩ B watchlist) ∪ (B like ∩ A watchlist)
 
   const MatchResult({
     required this.score,
@@ -21,6 +24,8 @@ class MatchResult {
     required this.commonFavorites,
     required this.commonDisliked,
     required this.conflicts,
+    required this.commonWatchlist,
+    required this.likeVsWatchlist,
   });
 
   Map<String, dynamic> toMap() => {
@@ -31,8 +36,10 @@ class MatchResult {
     'commonFavorites': commonFavorites,
     'commonDisliked': commonDisliked,
     'conflicts': conflicts,
+    'commonWatchlist': commonWatchlist,
+    'likeVsWatchlist': likeVsWatchlist,
     'updatedAt': FieldValue.serverTimestamp(),
-    'version': 1,
+    'version': 2,
   };
 
   static MatchResult fromMap(Map<String, dynamic> m) => MatchResult(
@@ -50,6 +57,12 @@ class MatchResult {
         const [],
     conflicts:
         (m['conflicts'] as List?)?.cast<Map<String, dynamic>>() ?? const [],
+    commonWatchlist:
+        (m['commonWatchlist'] as List?)?.cast<Map<String, dynamic>>() ??
+        const [],
+    likeVsWatchlist:
+        (m['likeVsWatchlist'] as List?)?.cast<Map<String, dynamic>>() ??
+        const [],
   );
 }
 
@@ -104,6 +117,16 @@ class MatchService {
     final likeA = {...s5A, ...sfA};
     final likeB = {...s5B, ...sfB};
 
+    Future<Set<String>> _watchlistKeys(String uid) async {
+      final col = _db.collection('users').doc(uid).collection('watchlist');
+      // Fetch first 500 items (can paginate later if needed)
+      final qs = await col.limit(500).get();
+      return qs.docs.map((d) => d.id).toSet();
+    }
+
+    final wA = await _watchlistKeys(uidA);
+    final wB = await _watchlistKeys(uidB);
+
     Set<String> inter(Set<String> x, Set<String> y) => x.intersection(y);
     Set<String> uni(Set<String> x, Set<String> y) => x.union(y);
 
@@ -122,6 +145,9 @@ class MatchService {
     final c1 = inter(likeA, sdB);
     final c2 = inter(likeB, sdA);
     final conflictsKeys = {...c1, ...c2};
+
+    final iW = inter(wA, wB);
+    final likeVsWatch = inter(likeA, wB)..addAll(inter(likeB, wA));
 
     // overlap for data sufficiency (like-like intersection)
     final likeOverlap = inter(likeA, likeB).length;
@@ -158,6 +184,8 @@ class MatchService {
     final byKeyCommonF = await _resolve(iF);
     final byKeyCommonD = await _resolve(iD);
     final byKeyConf = await _resolve(conflictsKeys);
+    final byKeyCommonW = await _resolve(iW);
+    final byKeyLikeVsWatch = await _resolve(likeVsWatch);
 
     List<Map<String, dynamic>> _pick(
       Map<String, Map<String, dynamic>> m,
@@ -176,6 +204,8 @@ class MatchService {
     final commonFavorites = _pick(byKeyCommonF, iF);
     final commonDisliked = _pick(byKeyCommonD, iD);
     final conflicts = _pick(byKeyConf, conflictsKeys);
+    final commonWatchlist = _pick(byKeyCommonW, iW);
+    final likeVsWatchlist = _pick(byKeyLikeVsWatch, likeVsWatch);
 
     final result = MatchResult(
       score: s.clamp(0, 100),
@@ -185,6 +215,8 @@ class MatchService {
       commonFavorites: commonFavorites,
       commonDisliked: commonDisliked,
       conflicts: conflicts,
+      commonWatchlist: commonWatchlist,
+      likeVsWatchlist: likeVsWatchlist,
     );
 
     // 3) Write cache

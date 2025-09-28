@@ -1,35 +1,54 @@
 class MatchResult {
-  final String otherUid;
-  final double score;
-  final List<String> commonLoved;
-  final List<String> commonDisliked;
-  final List<String> posters;
+  final String userId;
+  final double score; // toplam eşleşme puanı
+  final List<String> commonFilms;
+  final List<String> commonDirectors;
+  final List<String> commonActors;
+  final List<String> commonGenres;
+  final String? displayName;
+  final String? letterboxdUsername;
+  final String? photoURL;
 
   MatchResult({
-    required this.otherUid,
+    required this.userId,
     required this.score,
-    required this.commonLoved,
-    required this.commonDisliked,
-    required this.posters,
+    required this.commonFilms,
+    required this.commonDirectors,
+    required this.commonActors,
+    required this.commonGenres,
+    this.displayName,
+    this.letterboxdUsername,
+    this.photoURL,
   });
 
-  Map<String, dynamic> toMap() {
-    return {
-      'otherUid': otherUid,
-      'score': score,
-      'commonLoved': commonLoved,
-      'commonDisliked': commonDisliked,
-      'posters': posters,
-    };
+  factory MatchResult.fromJson(Map<String, dynamic> json) {
+    return MatchResult(
+      userId: json['userId'] as String,
+      score: (json['score'] as num).toDouble(),
+      commonFilms: (json['commonFilms'] as List<dynamic>? ?? []).cast<String>(),
+      commonDirectors: (json['commonDirectors'] as List<dynamic>? ?? [])
+          .cast<String>(),
+      commonActors: (json['commonActors'] as List<dynamic>? ?? [])
+          .cast<String>(),
+      commonGenres: (json['commonGenres'] as List<dynamic>? ?? [])
+          .cast<String>(),
+      displayName: json['displayName'] as String?,
+      letterboxdUsername: json['letterboxdUsername'] as String?,
+      photoURL: json['photoURL'] as String?,
+    );
   }
 
-  factory MatchResult.fromMap(Map<String, dynamic> map) {
-    return MatchResult(
-      otherUid: map['otherUid'] ?? '',
-      score: (map['score'] ?? 0).toDouble(),
-      commonLoved: List<String>.from(map['commonLoved'] ?? []),
-      commonDisliked: List<String>.from(map['commonDisliked'] ?? []),
-      posters: List<String>.from(map['posters'] ?? []),
-    );
+  Map<String, dynamic> toJson() {
+    return {
+      'userId': userId,
+      'score': score,
+      'commonFilms': commonFilms,
+      'commonDirectors': commonDirectors,
+      'commonActors': commonActors,
+      'commonGenres': commonGenres,
+      'displayName': displayName,
+      'letterboxdUsername': letterboxdUsername,
+      'photoURL': photoURL,
+    };
   }
 }

@@ -8,8 +8,91 @@ import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 /// Lists other users ordered by computed match score using `MatchService().findMatches(...)`.
-class MatchListScreen extends StatelessWidget {
+class MatchListScreen extends StatefulWidget {
   const MatchListScreen({super.key});
+
+  @override
+  State<MatchListScreen> createState() => _MatchListScreenState();
+}
+
+class _MatchListScreenState extends State<MatchListScreen> {
+  final _scrollController = ScrollController();
+  final _pageSize = 12; // how many cards per "page"
+  List<global_match.MatchResult> _all = const [];
+  int _visibleCount = 0;
+  bool _initialLoading = true;
+  bool _loadingMore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitial();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadInitial() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) {
+      setState(() {
+        _initialLoading = false;
+        _all = const [];
+      });
+      return;
+    }
+    try {
+      // NOTE: We fetch once, then reveal incrementally for quick first paint.
+      final results = await global_match.MatchService().findMatches(me.uid);
+      if (!mounted) return;
+      setState(() {
+        _all = results;
+        _visibleCount = results.isEmpty
+            ? 0
+            : (_pageSize).clamp(0, results.length);
+        _initialLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // propagate via Scaffold below
+      setState(() {
+        _all = const [];
+        _initialLoading = false;
+      });
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Eşleşmeler alınamadı: $e')));
+    }
+  }
+
+  void _onScroll() {
+    if (_loadingMore || _initialLoading) return;
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    // When user is within 400px of bottom, reveal next page
+    if (position.pixels > position.maxScrollExtent - 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_visibleCount >= _all.length) return;
+    setState(() => _loadingMore = true);
+    await Future<void>.delayed(
+      const Duration(milliseconds: 50),
+    ); // allow a frame
+    if (!mounted) return;
+    final next = (_visibleCount + _pageSize).clamp(0, _all.length);
+    setState(() {
+      _visibleCount = next;
+      _loadingMore = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,74 +105,90 @@ class MatchListScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Eşleşmeler')),
-      body: FutureBuilder<List<global_match.MatchResult>>(
-        future: global_match.MatchService().findMatches(me.uid),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return Center(child: Text('Hata: ${snap.error}'));
-          }
-          final items = snap.data ?? const [];
-          if (items.isEmpty) {
-            return const Center(child: Text('Şu an eşleşme yok.'));
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final m = items[i];
-              return _MatchCard(
-                result: m,
-                onOpen: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => MatchScreen(result: m)),
-                  );
-                },
-                onLike: () async {
-                  try {
-                    await LikeService.instance.likeUser(
-                      m.uid,
-                      commonFavoritesCount: m.commonFavCount,
-                      commonFiveStarsCount: m.commonFiveCount,
-                    );
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('Beğenildi')));
-                  } catch (e) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Beğenme hatası: $e')),
-                    );
-                  }
-                },
-                onPass: () async {
-                  try {
-                    await LikeService.instance.passUser(m.uid);
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('Geçildi')));
-                  } catch (e) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('Geç hatası: $e')));
-                  }
-                },
-              );
-            },
-          );
-        },
-      ),
+      body: _initialLoading
+          ? const Center(child: CircularProgressIndicator())
+          : (_all.isEmpty
+                ? const Center(child: Text('Şu an eşleşme yok.'))
+                : RefreshIndicator(
+                    onRefresh: _loadInitial,
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: _visibleCount + 1, // +1 for loader at the end
+                      cacheExtent: 800,
+                      addAutomaticKeepAlives: true,
+                      itemBuilder: (context, i) {
+                        if (i >= _visibleCount) {
+                          final hasMore = _visibleCount < _all.length;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Center(
+                              child: hasMore
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Hepsi bu kadar 👋'),
+                            ),
+                          );
+                        }
+                        final m = _all[i];
+                        return RepaintBoundary(
+                          child: _MatchCard(
+                            key: ValueKey(m.uid),
+                            result: m,
+                            onOpen: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => MatchScreen(result: m),
+                                ),
+                              );
+                            },
+                            onLike: () async {
+                              try {
+                                await LikeService.instance.likeUser(
+                                  m.uid,
+                                  commonFavoritesCount: m.commonFavCount,
+                                  commonFiveStarsCount: m.commonFiveCount,
+                                );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Beğenildi')),
+                                );
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Beğenme hatası: $e')),
+                                );
+                              }
+                            },
+                            onPass: () async {
+                              try {
+                                await LikeService.instance.passUser(m.uid);
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Geçildi')),
+                                );
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Geç hatası: $e')),
+                                );
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  )),
     );
   }
 }
 
-class _MatchCard extends StatelessWidget {
+class _MatchCard extends StatefulWidget {
   final global_match.MatchResult result;
   final VoidCallback onOpen;
   final VoidCallback onLike;
@@ -99,11 +198,30 @@ class _MatchCard extends StatelessWidget {
     required this.onOpen,
     required this.onLike,
     required this.onPass,
+    super.key,
   });
 
   @override
+  State<_MatchCard> createState() => _MatchCardState();
+}
+
+class _MatchCardState extends State<_MatchCard>
+    with AutomaticKeepAliveClientMixin {
+  late final Future<_CardData> _future; // cached once per card
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadCardData(widget.result);
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
-    final m = result;
+    super.build(context); // keep-alive
+    final m = widget.result;
     final theme = Theme.of(context);
     final pct = m.score.clamp(0, 100).toStringAsFixed(1);
     final title = (m.displayName != null && m.displayName!.isNotEmpty)
@@ -118,7 +236,6 @@ class _MatchCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          final m = result;
           Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: m.uid)),
           );
@@ -126,7 +243,7 @@ class _MatchCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: FutureBuilder<_CardData>(
-            future: _loadCardData(m),
+            future: _future,
             builder: (context, snap) {
               final cd = snap.data;
               return Column(
@@ -172,6 +289,12 @@ class _MatchCard extends StatelessWidget {
                                   icon: Icons.favorite_outline,
                                   text: 'Ortak fav: ${m.commonFavCount}',
                                 ),
+                                if (m.commonWatchCount > 0)
+                                  _Pill(
+                                    icon: Icons.visibility_outlined,
+                                    text:
+                                        'Ortak watchlist: ${m.commonWatchCount}',
+                                  ),
                                 if (cd?.age != null)
                                   _Pill(
                                     icon: Icons.cake_outlined,
@@ -210,10 +333,11 @@ class _MatchCard extends StatelessWidget {
                     const SizedBox(height: 8),
                   ],
 
-                  // Common film posters preview (favorites & 5★)
+                  // Common film posters preview (five★, favorites, watchlist)
                   if (cd != null &&
                       (cd.favPosters.isNotEmpty ||
-                          cd.fivePosters.isNotEmpty)) ...[
+                          cd.fivePosters.isNotEmpty ||
+                          cd.watchPosters.isNotEmpty)) ...[
                     if (cd.fivePosters.isNotEmpty) ...[
                       const _SectionLabel(text: 'Ortak 5★ Filmler'),
                       const SizedBox(height: 8),
@@ -224,6 +348,12 @@ class _MatchCard extends StatelessWidget {
                       const _SectionLabel(text: 'Ortak Favoriler'),
                       const SizedBox(height: 8),
                       _PosterStrip(urls: cd.favPosters),
+                      const SizedBox(height: 12),
+                    ],
+                    if (cd.watchPosters.isNotEmpty) ...[
+                      const _SectionLabel(text: 'Ortak Watchlist'),
+                      const SizedBox(height: 8),
+                      _PosterStrip(urls: cd.watchPosters),
                       const SizedBox(height: 12),
                     ],
                   ] else ...[
@@ -237,7 +367,7 @@ class _MatchCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: onPass,
+                          onPressed: widget.onPass,
                           icon: const Icon(Icons.close_rounded),
                           label: const Text('Geç'),
                         ),
@@ -245,7 +375,7 @@ class _MatchCard extends StatelessWidget {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: onLike,
+                          onPressed: widget.onLike,
                           icon: const Icon(Icons.favorite_rounded),
                           label: const Text('Beğen'),
                         ),
@@ -295,21 +425,44 @@ class FilmItem {
 }
 
 /// Shows details for a single match, resolving posters/titles from `catalog_films/{filmKey}`.
-class MatchScreen extends StatelessWidget {
+class MatchScreen extends StatefulWidget {
   final global_match.MatchResult result;
   const MatchScreen({super.key, required this.result});
 
   @override
+  State<MatchScreen> createState() => _MatchScreenState();
+}
+
+class _MatchScreenState extends State<MatchScreen>
+    with AutomaticKeepAliveClientMixin {
+  late final Future<_Resolved> _future; // cache once per screen
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _resolveCommonFilms(widget.result);
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context);
+    // Normalize possible nulls from MatchResult for new common fields
+    final commonGenres = widget.result.commonGenres;
+    final commonDirectors = widget.result.commonDirectors;
+    final commonActors = widget.result.commonActors;
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          (result.displayName != null && result.displayName!.isNotEmpty)
-              ? result.displayName!
-              : (result.letterboxdUsername != null &&
-                        result.letterboxdUsername!.isNotEmpty
-                    ? '@${result.letterboxdUsername}'
-                    : result.uid),
+          (widget.result.displayName != null &&
+                  widget.result.displayName!.isNotEmpty)
+              ? widget.result.displayName!
+              : (widget.result.letterboxdUsername != null &&
+                        widget.result.letterboxdUsername!.isNotEmpty
+                    ? '@${widget.result.letterboxdUsername}'
+                    : widget.result.uid),
           overflow: TextOverflow.ellipsis,
           maxLines: 1,
         ),
@@ -319,7 +472,7 @@ class MatchScreen extends StatelessWidget {
             icon: const Icon(Icons.close_rounded),
             onPressed: () async {
               try {
-                await LikeService.instance.passUser(result.uid);
+                await LikeService.instance.passUser(widget.result.uid);
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(
                   context,
@@ -335,7 +488,7 @@ class MatchScreen extends StatelessWidget {
         ],
       ),
       body: FutureBuilder<_Resolved>(
-        future: _resolveCommonFilms(result),
+        future: _future,
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -344,7 +497,7 @@ class MatchScreen extends StatelessWidget {
             return Center(child: Text('Detay yüklenemedi: ${snap.error}'));
           }
           final data = snap.data ?? const _Resolved();
-          final pct = result.score.clamp(0, 100).toStringAsFixed(1);
+          final pct = widget.result.score.clamp(0, 100).toStringAsFixed(1);
 
           return CustomScrollView(
             slivers: [
@@ -371,14 +524,35 @@ class MatchScreen extends StatelessWidget {
                             label: 'Ortak favori',
                             value: data.favorites.length,
                           ),
+                          _StatChip(
+                            label: 'Ortak watchlist',
+                            value: data.watchlist.length,
+                          ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      if (commonGenres.isNotEmpty)
+                        _ChipsRow(
+                          label: 'Ortak Türler',
+                          values: commonGenres.take(8).toList(),
+                        ),
+                      if (commonDirectors.isNotEmpty)
+                        _ChipsRow(
+                          label: 'Ortak Yönetmenler',
+                          values: commonDirectors.take(6).toList(),
+                        ),
+                      if (commonActors.isNotEmpty)
+                        _ChipsRow(
+                          label: 'Ortak Oyuncular',
+                          values: commonActors.take(6).toList(),
+                        ),
                     ],
                   ),
                 ),
               ),
               _SectionGrid(title: 'Ortak 5★', films: data.fiveStars),
               _SectionGrid(title: 'Ortak Favoriler', films: data.favorites),
+              _SectionGrid(title: 'Ortak Watchlist', films: data.watchlist),
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
             ],
           );
@@ -388,9 +562,9 @@ class MatchScreen extends StatelessWidget {
         onPressed: () async {
           try {
             await LikeService.instance.likeUser(
-              result.uid,
-              commonFavoritesCount: result.commonFavCount,
-              commonFiveStarsCount: result.commonFiveCount,
+              widget.result.uid,
+              commonFavoritesCount: widget.result.commonFavCount,
+              commonFiveStarsCount: widget.result.commonFiveCount,
             );
             if (!context.mounted) return;
             ScaffoldMessenger.of(
@@ -412,7 +586,7 @@ class MatchScreen extends StatelessWidget {
   Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
     final db = FirebaseFirestore.instance;
 
-    Future<List<FilmItem>> _read(List<String> keys) async {
+    Future<List<FilmItem>> readChunk(List<String> keys) async {
       if (keys.isEmpty) return const [];
       final items = <FilmItem>[];
       const chunkSize = 10; // Firestore whereIn max 10
@@ -425,10 +599,14 @@ class MatchScreen extends StatelessWidget {
             .get();
         for (final doc in qs.docs) {
           final d = doc.data();
+          final t =
+              (d['title'] ?? d['name'] ?? d['originalTitle'] ?? d['t'] ?? '')
+                  as String;
           items.add(
             FilmItem(
-              title: (d['title'] ?? '') as String,
-              posterUrl: (d['posterUrl'] ?? '') as String,
+              title: t.isNotEmpty ? t : 'İsimsiz',
+              posterUrl:
+                  (d['posterUrl'] ?? d['poster'] ?? d['image'] ?? '') as String,
             ),
           );
         }
@@ -436,16 +614,27 @@ class MatchScreen extends StatelessWidget {
       return items;
     }
 
-    final favs = await _read(m.commonFavorites);
-    final fives = await _read(m.commonFiveStars);
-    return _Resolved(favorites: favs, fiveStars: fives);
+    // Fetch all three groups in parallel
+    final favF = readChunk(m.commonFavorites);
+    final fiveF = readChunk(m.commonFiveStars);
+    final watchF = readChunk(m.commonWatchlist);
+
+    final favs = await favF;
+    final fives = await fiveF;
+    final watch = await watchF;
+    return _Resolved(favorites: favs, fiveStars: fives, watchlist: watch);
   }
 }
 
 class _Resolved {
   final List<FilmItem> favorites;
   final List<FilmItem> fiveStars;
-  const _Resolved({this.favorites = const [], this.fiveStars = const []});
+  final List<FilmItem> watchlist;
+  const _Resolved({
+    this.favorites = const [],
+    this.fiveStars = const [],
+    this.watchlist = const [],
+  });
 }
 
 class _StatChip extends StatelessWidget {
@@ -514,20 +703,23 @@ class _Grid extends StatelessWidget {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 8,
             mainAxisSpacing: 8,
-            childAspectRatio: 2 / 3,
+            // Space for a one-line caption under the poster (outside the image)
+            childAspectRatio: 0.64,
           ),
           itemBuilder: (context, index) {
             final film = films[index];
-            return AspectRatio(
-              aspectRatio: 2 / 3,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.network(
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
                       film.posterUrl,
                       fit: BoxFit.cover,
+                      cacheWidth: 300, // ~2x of 150px width
+                      filterQuality: FilterQuality.low,
                       errorBuilder: (_, __, ___) => Container(
                         color: Theme.of(
                           context,
@@ -537,29 +729,26 @@ class _Grid extends StatelessWidget {
                         ),
                       ),
                     ),
-                    Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
-                        ),
-                        child: Text(
-                          film.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(color: Colors.white, height: 1.1),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    film.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             );
           },
         );
@@ -584,6 +773,7 @@ class _CardData {
   final List<String> actors;
   final List<String> favPosters; // from commonFavorites
   final List<String> fivePosters; // from commonFiveStars
+  final List<String> watchPosters; // from commonWatchlist
   const _CardData({
     this.age,
     this.genres = const [],
@@ -591,6 +781,7 @@ class _CardData {
     this.actors = const [],
     this.favPosters = const [],
     this.fivePosters = const [],
+    this.watchPosters = const [],
   });
 }
 
@@ -635,6 +826,7 @@ Future<_CardData> _loadCardData(global_match.MatchResult m) async {
 
   final favPosters = await readPosters(m.commonFavorites, limit: 8);
   final fivePosters = await readPosters(m.commonFiveStars, limit: 8);
+  final watchPosters = await readPosters(m.commonWatchlist, limit: 8);
 
   return _CardData(
     age: age,
@@ -643,13 +835,14 @@ Future<_CardData> _loadCardData(global_match.MatchResult m) async {
     actors: actors,
     favPosters: favPosters,
     fivePosters: fivePosters,
+    watchPosters: watchPosters,
   );
 }
 
 class _ChipsRow extends StatelessWidget {
   final String label;
   final List<String> values;
-  const _ChipsRow({required this.label, required this.values, super.key});
+  const _ChipsRow({required this.label, required this.values});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -681,7 +874,7 @@ class _ChipsRow extends StatelessWidget {
 
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel({required this.text, super.key});
+  const _SectionLabel({required this.text});
   @override
   Widget build(BuildContext context) {
     return Text(text, style: Theme.of(context).textTheme.bodyLarge);
@@ -690,7 +883,7 @@ class _SectionLabel extends StatelessWidget {
 
 class _PosterStrip extends StatelessWidget {
   final List<String> urls;
-  const _PosterStrip({required this.urls, super.key});
+  const _PosterStrip({required this.urls});
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -708,6 +901,8 @@ class _PosterStrip extends StatelessWidget {
               child: Image.network(
                 u,
                 fit: BoxFit.cover,
+                cacheWidth: 240, // ~120px * 2 devicePixelRatio
+                filterQuality: FilterQuality.low,
                 errorBuilder: (_, __, ___) => Container(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   child: const Center(child: Icon(Icons.image_not_supported)),
@@ -722,7 +917,7 @@ class _PosterStrip extends StatelessWidget {
 }
 
 class _SkeletonLine extends StatelessWidget {
-  const _SkeletonLine({super.key});
+  const _SkeletonLine();
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -736,7 +931,7 @@ class _SkeletonLine extends StatelessWidget {
 }
 
 class _SkeletonPosters extends StatelessWidget {
-  const _SkeletonPosters({super.key});
+  const _SkeletonPosters();
   @override
   Widget build(BuildContext context) {
     return SizedBox(

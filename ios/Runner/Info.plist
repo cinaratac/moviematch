@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Fluttergirdi</string>
+	<string>fluttergirdi</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -47,5 +47,13 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
     <string>Profil fotoğrafını seçebilmek için fotoğraf galerinize erişmemiz gerekiyor.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<true/>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Yeni mesajlar için bildirim gönderebilmek istiyoruz.</string>
 </dict>
 </plist>

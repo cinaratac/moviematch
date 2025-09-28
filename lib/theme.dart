@@ -22,7 +22,7 @@ class AppTheme {
       headlineLarge: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
       headlineMedium: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
       bodyLarge: TextStyle(fontSize: 16),
-      bodyMedium: TextStyle(fontSize: 14, color: Colors.black54),
+      bodyMedium: TextStyle(fontSize: 14, color: Color(0x89000000)),
     ),
     appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
     filledButtonTheme: FilledButtonThemeData(

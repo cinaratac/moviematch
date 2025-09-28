@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:ui' as ui;
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -23,6 +24,9 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<List<LetterboxdFilm>>? _futureFiveStar;
   Future<List<LetterboxdFilm>>? _futureDisliked;
   bool _autoSynced = false;
+  // Cache for watchlist catalog fetches to avoid refetch on repeated snapshots
+  final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
+      {};
 
   @override
   void initState() {
@@ -123,6 +127,12 @@ class _ProfilePageState extends State<ProfilePage> {
 
     // 1) Favorites: fills users/{uid}.favoritesKeys and catalog
     await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername);
+    // 1.1) WATCHLIST: users/{uid}.watchlistKeys + catalog_films upsert
+    try {
+      await LetterboxdService.syncWatchlistToFirestore(lbUsername: lbUsername);
+    } catch (e) {
+      debugPrint('syncWatchlistToFirestore error: $e');
+    }
 
     // 2) Five stars & low ratings; also upsert catalogs so posters resolve
     final five = await LetterboxdService.fetchFiveStar(lbUsername);
@@ -324,8 +334,16 @@ class _ProfilePageState extends State<ProfilePage> {
           _futureFiveStar = LetterboxdService.fetchFiveStar(result);
           _futureDisliked = LetterboxdService.fetchDisliked(result);
         });
-        // NEW: auto-sync to Firestore
-        await _syncLetterboxdToFirestore(result);
+        // NEW: auto-sync to Firestore (non-blocking)
+        // Start in background so UI remains responsive
+        Future.microtask(() => _syncLetterboxdToFirestore(result));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Letterboxd verileri senkronize ediliyor…'),
+            ),
+          );
+        }
       }
     }
   }
@@ -416,6 +434,50 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  /// Blurred header using the first favorite film poster as a fullscreen background
+  Widget _blurBackdrop() {
+    if (_futureFavs == null) return const SizedBox.shrink();
+    return FutureBuilder<List<LetterboxdFilm>>(
+      future: _futureFavs,
+      builder: (context, snap) {
+        final list = snap.data ?? const <LetterboxdFilm>[];
+        final hasPoster = list.isNotEmpty && (list.first.posterUrl).isNotEmpty;
+        if (!hasPoster) return const SizedBox.shrink();
+        final url = list.first.posterUrl;
+        return Positioned.fill(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  headers: LetterboxdService.imageHeaders,
+                  errorBuilder: (_, __, ___) => Container(color: Colors.black),
+                ),
+              ),
+              // dark scrim for contrast
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xCC000000),
+                      Color(0x99000000),
+                      Color(0x66000000),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // Zorla yenile: cache'i temizleyip tekrar çekmek için
   Future<void> _refreshFavorites() async {
     if (_lbUsername == null || _lbUsername!.isEmpty) return;
@@ -435,6 +497,118 @@ class _ProfilePageState extends State<ProfilePage> {
   String _noYear(String t) {
     // "Movie Title (1999)" -> "Movie Title"
     return t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
+  }
+
+  // --- WATCHLIST SECTION ---
+  Widget _watchlistSection(String uid, {int maxItems = 30}) {
+    final fs = FirebaseFirestore.instance;
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: fs.collection('users').doc(uid).snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData || !snap.data!.exists) {
+          return const SizedBox.shrink();
+        }
+        final data = snap.data!.data()!;
+        final List<dynamic> keysDyn =
+            (data['watchlistKeys'] ?? []) as List<dynamic>;
+        final keys = keysDyn.map((e) => e.toString()).toList();
+        if (keys.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('Watchlist boş.'),
+          );
+        }
+        final limited = keys.take(maxItems).toList();
+        // Build a stable cache key based on limited keys
+        final hash = limited.join('|');
+        final future = _watchlistFutureCache[hash] ??= Future.wait(
+          limited.map((k) async {
+            final d = await fs.collection('catalog_films').doc(k).get();
+            return d.data();
+          }),
+        );
+
+        return FutureBuilder<List<Map<String, dynamic>?>>(
+          future: future,
+          builder: (context, filmSnap) {
+            if (filmSnap.connectionState == ConnectionState.waiting &&
+                !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
+              return const SizedBox(
+                height: 180,
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (!filmSnap.hasData) return const SizedBox.shrink();
+            final films = filmSnap.data!
+                .where((m) => m != null)
+                .map((m) => m!)
+                .toList();
+            if (films.isEmpty) return const SizedBox.shrink();
+
+            return SizedBox(
+              height: 180,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: films.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, i) {
+                  final film = films[i];
+                  final poster =
+                      (film['poster'] ??
+                              film['posterUrl'] ??
+                              film['image'] ??
+                              '')
+                          as String;
+                  final title = (film['title'] ?? '') as String;
+                  return AspectRatio(
+                    aspectRatio: 2 / 3,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          poster.isNotEmpty
+                              ? Image.network(
+                                  poster,
+                                  fit: BoxFit.cover,
+                                  gaplessPlayback: true,
+                                  headers: LetterboxdService.imageHeaders,
+                                  errorBuilder: (_, __, ___) =>
+                                      Container(color: Colors.grey.shade800),
+                                )
+                              : Container(color: Colors.grey.shade800),
+                          if (title.isNotEmpty)
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 4,
+                                ),
+                                color: Colors.black54,
+                                child: Text(
+                                  _noYear(title),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -529,6 +703,10 @@ class _ProfilePageState extends State<ProfilePage> {
         return Scaffold(
           appBar: AppBar(
             title: const Text('Profil'),
+            backgroundColor: Colors.black.withOpacity(0.20), // semi‑transparent
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            surfaceTintColor: Colors.transparent,
             actions: [
               IconButton(
                 tooltip: 'Yenile',
@@ -636,359 +814,391 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ],
           ),
-          body: RefreshIndicator(
-            onRefresh: () async {
-              await user.reload();
-              if (_lbUsername != null && _lbUsername!.isNotEmpty) {
-                setState(() {
-                  _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
-                  _futureFiveStar = LetterboxdService.fetchFiveStar(
-                    _lbUsername!,
-                  );
-                });
-              }
-            },
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // Header
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+          extendBodyBehindAppBar: true,
+          body: Stack(
+            children: [
+              _blurBackdrop(),
+              RefreshIndicator(
+                onRefresh: () async {
+                  await user.reload();
+                  if (_lbUsername != null && _lbUsername!.isNotEmpty) {
+                    setState(() {
+                      _futureFavs = LetterboxdService.fetchFavorites(
+                        _lbUsername!,
+                      );
+                      _futureFiveStar = LetterboxdService.fetchFiveStar(
+                        _lbUsername!,
+                      );
+                      _futureDisliked = LetterboxdService.fetchDisliked(
+                        _lbUsername!,
+                      );
+                    });
+                  }
+                },
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    MediaQuery.of(context).padding.top + kToolbarHeight + 12,
+                    16,
+                    16,
+                  ),
                   children: [
-                    CircleAvatar(
-                      radius: 36,
-                      backgroundImage:
-                          user.photoURL != null && user.photoURL!.isNotEmpty
-                          ? NetworkImage(user.photoURL!)
-                          : null,
-                      child: (user.photoURL == null || user.photoURL!.isEmpty)
-                          ? Text(
-                              _shownName(user).isNotEmpty
-                                  ? _shownName(user)[0].toUpperCase()
-                                  : '?',
-                              style: const TextStyle(fontSize: 24),
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _shownName(user),
-                            style: Theme.of(context).textTheme.titleLarge,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            user.email ?? '—',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          if (!user.emailVerified)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6.0),
-                              child: Row(
-                                children: const [
-                                  Icon(Icons.info_outline, size: 16),
-                                  SizedBox(width: 6),
-                                  Text('E-posta doğrulanmadı'),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-                if (_lbUsername == null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.alternate_email),
-                        SizedBox(width: 8),
-                        Text('Letterboxd bağlı değil'),
-                      ],
-                    ),
-                  )
-                else
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Chip(label: Text('Letterboxd: @$_lbUsername')),
-                  ),
-
-                // Kullanıcı profili tercihleri (yaş, türler, yönetmenler, oyuncular)
-                const SizedBox(height: 12),
-                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                  stream: FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(user.uid)
-                      .snapshots(),
-                  builder: (context, usnap) {
-                    if (!usnap.hasData || !usnap.data!.exists) {
-                      return const SizedBox.shrink();
-                    }
-                    final data = usnap.data!.data()!;
-                    final age = data['age'];
-                    final genres = List<String>.from(
-                      data['favGenres'] ?? const [],
-                    );
-                    final directors = List<String>.from(
-                      data['favDirectors'] ?? const [],
-                    );
-                    final actors = List<String>.from(
-                      data['favActors'] ?? const [],
-                    );
-
-                    if ((age == null || (age is int && age <= 0)) &&
-                        genres.isEmpty &&
-                        directors.isEmpty &&
-                        actors.isEmpty) {
-                      return const SizedBox.shrink();
-                    }
-
-                    Widget chipWrap(String title, List<String> items) {
-                      if (items.isEmpty) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: Theme.of(context).textTheme.titleSmall,
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: items
-                                  .map((e) => Chip(label: Text(e)))
-                                  .toList(),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    // Header
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        if (age is int && age > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.cake, size: 18),
-                                const SizedBox(width: 6),
-                                Text('Yaş: $age'),
-                              ],
-                            ),
-                          ),
-                        chipWrap('Sevdiğin türler', genres),
-                        chipWrap('Sevdiğin yönetmenler', directors),
-                        chipWrap('Sevdiğin oyuncular', actors),
-                      ],
-                    );
-                  },
-                ),
-
-                if (_lbUsername != null) ...[
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Text(
-                        'Favori Filmler',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ],
-                  ),
-                  FutureBuilder<List<LetterboxdFilm>>(
-                    future: _futureFavs,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox(
-                          height: 180,
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-                      if (snapshot.hasError) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Favoriler alınamadı: ${snapshot.error}'),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: FilledButton.icon(
-                                  onPressed: _refreshFavorites,
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('Tekrar dene'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      final items = snapshot.data ?? [];
-                      if (items.isEmpty) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('Favori film bulunamadı.'),
-                        );
-                      }
-                      return SizedBox(
-                        height: 180,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: items.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 12),
-                          itemBuilder: (context, i) {
-                            final f = items[i];
-                            return AspectRatio(
-                              aspectRatio: 2 / 3,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: _posterTile(f),
-                              ),
-                            );
-                          },
+                        CircleAvatar(
+                          radius: 36,
+                          backgroundImage:
+                              user.photoURL != null && user.photoURL!.isNotEmpty
+                              ? NetworkImage(user.photoURL!)
+                              : null,
+                          child:
+                              (user.photoURL == null || user.photoURL!.isEmpty)
+                              ? Text(
+                                  _shownName(user).isNotEmpty
+                                      ? _shownName(user)[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(fontSize: 24),
+                                )
+                              : null,
                         ),
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Text(
-                        'Sevdiği Filmler',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ],
-                  ),
-                  FutureBuilder<List<LetterboxdFilm>>(
-                    future: _futureFiveStar,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox(
-                          height: 180,
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-                      if (snapshot.hasError) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('5★ film bulunamadı.'),
-                        );
-                      }
-                      final items = snapshot.data ?? [];
-                      if (items.isEmpty) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('5★ film bulunamadı.'),
-                        );
-                      }
-                      return SizedBox(
-                        height: 180,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: items.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 12),
-                          itemBuilder: (context, i) {
-                            final f = items[i];
-                            return AspectRatio(
-                              aspectRatio: 2 / 3,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: _posterTile(f),
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Text(
-                        'Sevmediği Filmler',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ],
-                  ),
-                  FutureBuilder<List<LetterboxdFilm>>(
-                    future: _futureDisliked,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox(
-                          height: 180,
-                          child: Center(child: CircularProgressIndicator()),
-                        );
-                      }
-                      if (snapshot.hasError) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        const SizedBox(width: 16),
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Sevmediği filmler alınamadı: ${snapshot.error}',
+                                _shownName(user),
+                                style: Theme.of(context).textTheme.titleLarge,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: FilledButton.icon(
-                                  onPressed: _refreshFavorites,
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('Tekrar dene'),
+                              const SizedBox(height: 4),
+                              Text(
+                                user.email ?? '—',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                              if (!user.emailVerified)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6.0),
+                                  child: Row(
+                                    children: const [
+                                      Icon(Icons.info_outline, size: 16),
+                                      SizedBox(width: 6),
+                                      Text('E-posta doğrulanmadı'),
+                                    ],
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+                    if (_lbUsername == null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.alternate_email),
+                            SizedBox(width: 8),
+                            Text('Letterboxd bağlı değil'),
+                          ],
+                        ),
+                      )
+                    else
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Chip(label: Text('Letterboxd: @$_lbUsername')),
+                      ),
+
+                    // Kullanıcı profili tercihleri (yaş, türler, yönetmenler, oyuncular)
+                    const SizedBox(height: 12),
+                    StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(user.uid)
+                          .snapshots(),
+                      builder: (context, usnap) {
+                        if (!usnap.hasData || !usnap.data!.exists) {
+                          return const SizedBox.shrink();
+                        }
+                        final data = usnap.data!.data()!;
+                        final age = data['age'];
+                        final genres = List<String>.from(
+                          data['favGenres'] ?? const [],
                         );
-                      }
-                      final items = snapshot.data ?? [];
-                      if (items.isEmpty) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('Sevmediği film bulunamadı.'),
+                        final directors = List<String>.from(
+                          data['favDirectors'] ?? const [],
                         );
-                      }
-                      return SizedBox(
-                        height: 180,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: items.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(width: 12),
-                          itemBuilder: (context, i) {
-                            final f = items[i];
-                            return AspectRatio(
-                              aspectRatio: 2 / 3,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: _posterTile(f),
+                        final actors = List<String>.from(
+                          data['favActors'] ?? const [],
+                        );
+
+                        if ((age == null || (age is int && age <= 0)) &&
+                            genres.isEmpty &&
+                            directors.isEmpty &&
+                            actors.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+
+                        Widget chipWrap(String title, List<String> items) {
+                          if (items.isEmpty) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: items
+                                      .map((e) => Chip(label: Text(e)))
+                                      .toList(),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (age is int && age > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.cake, size: 18),
+                                    const SizedBox(width: 6),
+                                    Text('Yaş: $age'),
+                                  ],
+                                ),
+                              ),
+                            chipWrap('Sevdiğin türler', genres),
+                            chipWrap('Sevdiğin yönetmenler', directors),
+                            chipWrap('Sevdiğin oyuncular', actors),
+                          ],
+                        );
+                      },
+                    ),
+
+                    if (_lbUsername != null) ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Text(
+                            'Favori Filmler',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                      FutureBuilder<List<LetterboxdFilm>>(
+                        future: _futureFavs,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const SizedBox(
+                              height: 180,
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Favoriler alınamadı: ${snapshot.error}',
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: FilledButton.icon(
+                                      onPressed: _refreshFavorites,
+                                      icon: const Icon(Icons.refresh),
+                                      label: const Text('Tekrar dene'),
+                                    ),
+                                  ),
+                                ],
                               ),
                             );
-                          },
-                        ),
-                      );
-                    },
-                  ),
-                ],
+                          }
+                          final items = snapshot.data ?? [];
+                          if (items.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text('Favori film bulunamadı.'),
+                            );
+                          }
+                          return SizedBox(
+                            height: 180,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: items.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 12),
+                              itemBuilder: (context, i) {
+                                final f = items[i];
+                                return AspectRatio(
+                                  aspectRatio: 2 / 3,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: _posterTile(f),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
 
-                const SizedBox(height: 24),
-              ],
-            ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Text(
+                            'Sevdiği Filmler',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                      FutureBuilder<List<LetterboxdFilm>>(
+                        future: _futureFiveStar,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const SizedBox(
+                              height: 180,
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text('5★ film bulunamadı.'),
+                            );
+                          }
+                          final items = snapshot.data ?? [];
+                          if (items.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text('5★ film bulunamadı.'),
+                            );
+                          }
+                          return SizedBox(
+                            height: 180,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: items.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 12),
+                              itemBuilder: (context, i) {
+                                final f = items[i];
+                                return AspectRatio(
+                                  aspectRatio: 2 / 3,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: _posterTile(f),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Text(
+                            'Sevmediği Filmler',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                      FutureBuilder<List<LetterboxdFilm>>(
+                        future: _futureDisliked,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const SizedBox(
+                              height: 180,
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Sevmediği filmler alınamadı: ${snapshot.error}',
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: FilledButton.icon(
+                                      onPressed: _refreshFavorites,
+                                      icon: const Icon(Icons.refresh),
+                                      label: const Text('Tekrar dene'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                          final items = snapshot.data ?? [];
+                          if (items.isEmpty) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 12),
+                              child: Text('Sevmediği film bulunamadı.'),
+                            );
+                          }
+                          return SizedBox(
+                            height: 180,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: items.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 12),
+                              itemBuilder: (context, i) {
+                                final f = items[i];
+                                return AspectRatio(
+                                  aspectRatio: 2 / 3,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: _posterTile(f),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Text(
+                          'Watchlist',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                    _watchlistSection(user.uid, maxItems: 30),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ],
           ),
         );
       },

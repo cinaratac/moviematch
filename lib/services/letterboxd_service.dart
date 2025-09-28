@@ -7,6 +7,48 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+// --- HTTP client & helpers ---------------------------------------------------
+const _kDefaultUa =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+const _kAcceptLang = 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7';
+
+class _Http {
+  static final http.Client client = http.Client();
+
+  static Map<String, String> baseHeaders({String? referer}) => {
+    'User-Agent': _kDefaultUa,
+    'Accept-Language': _kAcceptLang,
+    if (referer != null) 'Referer': referer,
+  };
+
+  /// GET with timeout & simple retry (network hiccups)
+  static Future<http.Response?> get(
+    Uri uri, {
+    Map<String, String>? headers,
+    Duration timeout = const Duration(seconds: 10),
+    int retries = 2,
+  }) async {
+    http.Response? res;
+    for (int attempt = 0; attempt <= retries; attempt++) {
+      try {
+        final h = <String, String>{};
+        if (headers != null) h.addAll(headers);
+        res = await client.get(uri, headers: h).timeout(timeout);
+        if (res.statusCode == 200) return res;
+        // For 4xx/5xx, retry only once; otherwise break
+        if (attempt == retries) return res;
+      } on TimeoutException {
+        if (attempt == retries) rethrow;
+      } catch (_) {
+        if (attempt == retries) rethrow;
+      }
+      // small backoff
+      await Future.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+    }
+    return res; // may be non-200
+  }
+}
+
 class LetterboxdFilm {
   /// Display title (e.g., "The Matrix")
   final String title;
@@ -105,6 +147,12 @@ class LetterboxdService {
   };
   static String _cacheKeyFor(String username) =>
       'lb_cache_${username.toLowerCase()}';
+  // Default headers for HTML/JSON requests to Letterboxd
+  static const Map<String, String> _reqHeaders = {
+    'User-Agent': _kDefaultUa,
+    'Accept-Language': _kAcceptLang,
+    'Referer': 'https://letterboxd.com/',
+  };
   // --- Generic rated-page fetcher (0.5★, 1★, 5★, etc.) ---------------------
   static Future<List<LetterboxdFilm>> _fetchRated(
     String username,
@@ -120,21 +168,11 @@ class LetterboxdService {
     ];
 
     for (final u in tries) {
-      try {
-        final r = await http.get(
-          u,
-          headers: const {
-            'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Referer': 'https://letterboxd.com/',
-          },
-        );
-        if (r.statusCode == 200) {
-          res = r;
-          break;
-        }
-      } catch (_) {}
+      final r = await _Http.get(u, headers: _reqHeaders);
+      if (r != null && r.statusCode == 200) {
+        res = r;
+        break;
+      }
     }
 
     if (res == null) throw Exception('$rating★ sayfası alınamadı');
@@ -292,15 +330,11 @@ class LetterboxdService {
         ? Uri.parse(detailsPath)
         : Uri.parse('https://letterboxd.com$detailsPath');
     try {
-      final res = await http.get(
+      final res = await _Http.get(
         uri,
-        headers: const {
-          'User-Agent':
-              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-        },
+        headers: _Http.baseHeaders(referer: 'https://letterboxd.com/'),
       );
-      if (res.statusCode != 200) return null;
+      if (res == null || res.statusCode != 200) return null;
       final data = jsonDecode(res.body);
       return _firstImageUrl(data);
     } catch (_) {
@@ -423,16 +457,12 @@ class LetterboxdService {
 
     try {
       final url = Uri.parse('https://letterboxd.com/$username/');
-      final res = await http.get(
+      final res = await _Http.get(
         url,
-        headers: const {
-          'User-Agent':
-              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36',
-          'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-        },
+        headers: _Http.baseHeaders(referer: 'https://letterboxd.com/'),
       );
-      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
-
+      if (res == null || res.statusCode != 200)
+        throw Exception('HTTP ${res?.statusCode}');
       final doc = html.parse(res.body);
 
       final films = <LetterboxdFilm>[];
@@ -643,21 +673,11 @@ class LetterboxdService {
 
     http.Response? res;
     for (final u in tries) {
-      try {
-        final r = await http.get(
-          u,
-          headers: const {
-            'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-            'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Referer': 'https://letterboxd.com/',
-          },
-        );
-        if (r.statusCode == 200) {
-          res = r;
-          break;
-        }
-      } catch (_) {}
+      final r = await _Http.get(u, headers: _reqHeaders);
+      if (r != null && r.statusCode == 200) {
+        res = r;
+        break;
+      }
     }
     if (res == null) throw Exception('5★ sayfası alınamadı');
 
@@ -870,6 +890,211 @@ class LetterboxdService {
     return favs;
   }
 
+  /// Fetch user's WATCHLIST films from Letterboxd (with pagination) and return full film objects
+  static Future<List<LetterboxdFilm>> fetchWatchlist(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final List<LetterboxdFilm> all = [];
+    final seenHref = <String>{};
+    int page = 1;
+
+    while (true) {
+      final uri = page == 1
+          ? Uri.parse('https://letterboxd.com/$username/watchlist/')
+          : Uri.parse('https://letterboxd.com/$username/watchlist/page/$page/');
+
+      http.Response? res;
+      final r = await _Http.get(uri, headers: _reqHeaders);
+      if (r != null && r.statusCode == 200) {
+        res = r;
+      }
+
+      if (res == null) break; // further pages likely don't exist
+
+      final doc = html.parse(res.body);
+
+      // Use the same robust selectors used elsewhere to handle layout variants
+      final candidates = <dom.Element>[
+        ...doc.querySelectorAll('div.poster-grid ul.grid li.griditem'),
+        ...doc.querySelectorAll(
+          'section.col-main .poster-grid ul.grid li.griditem',
+        ),
+        ...doc.querySelectorAll('section.col-main ul.grid li.griditem'),
+        ...doc.querySelectorAll('ul.grid.-p70 li.griditem'),
+        ...doc.querySelectorAll('ul.grid li.griditem'),
+      ];
+
+      final pageItems = <LetterboxdFilm>[];
+
+      for (final li in candidates) {
+        final a =
+            li.querySelector('a.frame') ?? li.querySelector('a.frame.has-menu');
+        final img = li.querySelector('img.image') ?? li.querySelector('img');
+        final rc = li.querySelector('div.react-component');
+        if (a == null && rc == null && img == null) continue;
+
+        String title =
+            (a?.attributes['data-original-title'] ??
+                    img?.attributes['alt'] ??
+                    rc?.attributes['data-item-name'] ??
+                    rc?.attributes['data-item-full-display-name'] ??
+                    a?.querySelector('.frame-title')?.text ??
+                    '')
+                .replaceAll(RegExp(r'^Poster for '), '')
+                .trim();
+        if (title.isEmpty) continue;
+
+        String href =
+            a?.attributes['href'] ??
+            rc?.attributes['data-item-link'] ??
+            rc?.attributes['data-target-link'] ??
+            '';
+        if (href.isEmpty) continue;
+        if (href.startsWith('//')) href = 'https:$href';
+        if (href.startsWith('/')) href = 'https://letterboxd.com$href';
+        if (!seenHref.add(href)) continue;
+
+        String? poster =
+            (img?.attributes['srcset'] ?? img?.attributes['data-srcset'])
+                ?.split(',')
+                .last
+                .trim()
+                .split(' ')
+                .first;
+        poster ??= img?.attributes['src'] ?? img?.attributes['data-src'];
+
+        if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
+        if (poster != null && poster.startsWith('/')) {
+          poster = 'https://a.ltrbxd.com$poster';
+        }
+
+        final filmId =
+            rc?.attributes['data-film-id'] ?? img?.attributes['data-film-id'];
+        final slug =
+            rc?.attributes['data-item-slug'] ??
+            img?.attributes['data-item-slug'];
+        final isPlaceholder = poster != null && poster.contains('empty-poster');
+        final looksImg = _looksLikeImageUrl(poster);
+
+        if (filmId != null && slug != null) {
+          poster = _buildPosterFromIdSlug(filmId, slug, w: 300, h: 450);
+        } else if (!looksImg || isPlaceholder) {
+          final details =
+              rc?.attributes['data-details-endpoint'] ??
+              a?.attributes['data-details-endpoint'];
+          final via = await _resolvePosterFromDetails(details);
+          if (via != null) poster = via;
+        }
+
+        if ((poster == null || !_looksLikeImageUrl(poster)) &&
+            (rc != null || img != null)) {
+          final viaAttrs = _posterFromDataAttrs(
+            rc: rc,
+            img: img,
+            w: 300,
+            h: 450,
+          );
+          if (viaAttrs != null) poster = viaAttrs;
+        }
+
+        if (poster != null && poster.startsWith('//'))
+          poster = 'https:' + poster;
+        if (poster == null || !_looksLikeImageUrl(poster)) continue;
+
+        pageItems.add(
+          LetterboxdFilm(title: title, url: href, posterUrl: poster),
+        );
+      }
+
+      if (pageItems.isEmpty) break;
+
+      // De-duplicate by absolute URL within this page (global dedup is already handled by seenHref)
+      final uniq = <String, LetterboxdFilm>{};
+      for (final f in pageItems) {
+        uniq[f.url] = f;
+      }
+      all.addAll(uniq.values);
+
+      page++;
+      if (page > 50) break; // hard stop to avoid infinite loops
+    }
+
+    if (all.isEmpty) {
+      // fallback to cache if exists
+      final cached = prefs.getString('${_cacheKeyFor(username)}_watchlist');
+      if (cached != null) {
+        final list = (jsonDecode(cached) as List)
+            .map((e) => LetterboxdFilm.fromJson(e))
+            .toList();
+        if (list.isNotEmpty) return list;
+      }
+      throw Exception('Watchlist boş veya seçiciler uyumsuz');
+    }
+
+    try {
+      await prefs.setString(
+        '${_cacheKeyFor(username)}_watchlist',
+        jsonEncode(all.map((e) => e.toJson()).toList()),
+      );
+      await prefs.setInt(
+        '${_cacheKeyFor(username)}_watchlist_time',
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (_) {}
+
+    return all;
+  }
+
+  /// Sync Letterboxd WATCHLIST into Firestore under users/{uid}
+  /// Writes: users/{uid}.watchlistKeys (all keys), users/{uid}.watchlist (first N lite items), and upserts catalog_films
+  static Future<void> syncWatchlistToFirestore({
+    String? uid,
+    required String lbUsername,
+    int liteLimit = 30,
+  }) async {
+    final auth = FirebaseAuth.instance;
+    final me = uid ?? auth.currentUser?.uid;
+    if (me == null) {
+      throw StateError('No Firebase user. Call FirebaseAuth.signIn first.');
+    }
+
+    // 1) Scrape watchlist
+    final films = await fetchWatchlist(lbUsername);
+
+    // 2) Upsert catalog in chunks
+    const int batchSize =
+        50; // reuse catalog helper signature (List<LetterboxdFilm>)
+    for (int i = 0; i < films.length; i += batchSize) {
+      final end = (i + batchSize < films.length) ? i + batchSize : films.length;
+      await _upsertCatalog(films.sublist(i, end));
+    }
+
+    // 3) Persist on user profile
+    final db = FirebaseFirestore.instance;
+    final doc = db.collection('users').doc(me);
+
+    final keys = LetterboxdFilm.keysOf(films);
+    final lite = films
+        .take(liteLimit)
+        .map(
+          (f) => {
+            'title': f.title,
+            'url': f.url,
+            'posterUrl': f.posterUrl,
+            'key': f.key,
+          },
+        )
+        .toList();
+
+    await doc.set({
+      'lbUsername': lbUsername,
+      'watchlistKeys': keys,
+      'watchlist': lite,
+      'watchlistUpdatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   /// Utility: chunks a list into parts of size [n]
   static List<List<T>> _chunk<T>(List<T> list, int n) {
     final chunks = <List<T>>[];
@@ -969,5 +1194,12 @@ class LetterboxdService {
       'dislikedKeys': LetterboxdFilm.keysOf(disliked),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// Call from app shutdown if needed
+  static void disposeHttp() {
+    try {
+      _Http.client.close();
+    } catch (_) {}
   }
 }

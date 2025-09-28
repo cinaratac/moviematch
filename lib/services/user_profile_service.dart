@@ -305,6 +305,31 @@ class UserProfileService {
     await _usersRef(uid).set(payload, SetOptions(merge: true));
   }
 
+  /// Mirror a user's Letterboxd watchlist keys into users/{uid} for visibility
+  /// Keeps this service the single place that shapes root user doc mirrors.
+  Future<void> mirrorWatchlistKeysToUsers({
+    required String uid,
+    required List<String> watchlistKeys,
+  }) async {
+    final clean = _normKeys(watchlistKeys);
+    await _usersRef(uid).set({
+      'watchlistKeys': clean,
+      'watchlistUpdatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Public convenience wrapper to set watchlist keys on users/{uid}.
+  /// Useful if another service scraped the list but we want consistent writes.
+  Future<void> saveWatchlistKeys({
+    required String uid,
+    required List<String> keys,
+  }) async {
+    await mirrorWatchlistKeysToUsers(uid: uid, watchlistKeys: keys);
+    // Ensure searchable fields & timestamps are healthy
+    await ensureSearchableUserFields(uid: uid);
+  }
+
   /// Save/merge a profile. Adds a server timestamp.
   Future<void> saveTasteProfile({
     required String uid,

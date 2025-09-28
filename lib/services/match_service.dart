@@ -1,11 +1,19 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Short‑term cache container for findMatches
+class _FindCache {
+  final List<MatchResult> results;
+  final DateTime ts;
+  const _FindCache(this.results, this.ts);
+}
+
 /// Tek bir eşleşmeyi temsil eder
 class MatchResult {
   final String uid;
   final double score; // 0..100
   final List<String> commonFiveStars;
   final List<String> commonFavorites;
+  final List<String> commonWatchlist;
   final List<String> commonDisliked;
 
   // NEW: profile snippet (already existed)
@@ -20,6 +28,7 @@ class MatchResult {
 
   int get commonFiveCount => commonFiveStars.length;
   int get commonFavCount => commonFavorites.length;
+  int get commonWatchCount => commonWatchlist.length;
   int get commonDisCount => commonDisliked.length;
 
   int get commonGenreCount => commonGenres.length;
@@ -31,6 +40,7 @@ class MatchResult {
     required this.score,
     required this.commonFiveStars,
     required this.commonFavorites,
+    required this.commonWatchlist,
     required this.commonDisliked,
     required this.commonGenres,
     required this.commonDirectors,
@@ -47,6 +57,10 @@ class MatchService {
       _db.collection('users');
   CollectionReference<Map<String, dynamic>> get _matches =>
       _db.collection('matches');
+
+  // In-memory short-term cache for findMatches results per user
+  final Map<String, _FindCache> _findCache = {};
+  static const Duration _findCacheTtl = Duration(seconds: 60);
 
   Set<String> _lcSet(Map<String, dynamic> src, String key) {
     final raw = (src[key] ?? const []) as List;
@@ -74,11 +88,21 @@ class MatchService {
     final meDoc = await _users.doc(myUid).get();
     if (!meDoc.exists) return [];
 
+    // Short-term cache: avoid recomputing within TTL for the same user
+    final now = DateTime.now();
+    final cached = _findCache[myUid];
+    if (cached != null && now.difference(cached.ts) < _findCacheTtl) {
+      return cached.results;
+    }
+
     final myFive = Set<String>.from(
       (meDoc.data()?['fiveStarKeys'] ?? const []) as List,
     );
     final myFavs = Set<String>.from(
       (meDoc.data()?['favoritesKeys'] ?? const []) as List,
+    );
+    final myWatch = Set<String>.from(
+      (meDoc.data()?['watchlistKeys'] ?? const []) as List,
     );
     final myDis = Set<String>.from(
       (meDoc.data()?['dislikedKeys'] ?? const []) as List,
@@ -92,6 +116,7 @@ class MatchService {
 
     if (myFive.isEmpty &&
         myFavs.isEmpty &&
+        myWatch.isEmpty &&
         myDis.isEmpty &&
         myGenres.isEmpty &&
         myDirectors.isEmpty &&
@@ -116,6 +141,9 @@ class MatchService {
       final theirFavs = Set<String>.from(
         (data['favoritesKeys'] ?? const []) as List,
       );
+      final theirWatch = Set<String>.from(
+        (data['watchlistKeys'] ?? const []) as List,
+      );
       final theirDis = Set<String>.from(
         (data['dislikedKeys'] ?? const []) as List,
       );
@@ -128,6 +156,7 @@ class MatchService {
       // intersections
       final common5 = myFive.intersection(theirFive).toList()..sort();
       final commonF = myFavs.intersection(theirFavs).toList()..sort();
+      final commonW = myWatch.intersection(theirWatch).toList()..sort();
       final commonD = myDis.intersection(theirDis).toList()..sort();
 
       final commonG = myGenres.intersection(theirGenres).toList()..sort();
@@ -137,6 +166,7 @@ class MatchService {
 
       if (common5.isEmpty &&
           commonF.isEmpty &&
+          commonW.isEmpty &&
           commonD.isEmpty &&
           commonG.isEmpty &&
           commonDir.isEmpty &&
@@ -144,24 +174,31 @@ class MatchService {
         continue;
       }
 
-      // Weighted score: 5★ (w=3), favorites (w=2), genres (w=1.5), directors (w=1.8), actors (w=1.2)
+      // Weighted score: 5★ (w=3), favorites (w=2), watchlist (w=1.6), genres (w=1.5), directors (w=1.8), actors (w=1.2)
       // Denominators use sum of both sides for each vector, to keep score in 0..100.
       double part(double common, double total, double w) =>
           total == 0 ? 0.0 : w * (common / total);
 
       final totalFive = (myFive.length + theirFive.length).toDouble();
       final totalFavs = (myFavs.length + theirFavs.length).toDouble();
+      final totalWatch = (myWatch.length + theirWatch.length).toDouble();
       final totalG = (myGenres.length + theirGenres.length).toDouble();
       final totalDir = (myDirectors.length + theirDirectors.length).toDouble();
       final totalAct = (myActors.length + theirActors.length).toDouble();
 
       // weights
-      const w5 = 3.0, wFav = 2.0, wG = 1.5, wDir = 1.8, wAct = 1.2;
+      const w5 = 3.0,
+          wFav = 2.0,
+          wWatch = 1.6,
+          wG = 1.5,
+          wDir = 1.8,
+          wAct = 1.2;
 
-      final maxScoreUnit = w5 + wFav + wG + wDir + wAct;
+      final maxScoreUnit = w5 + wFav + wWatch + wG + wDir + wAct;
       final unitScore =
           part(common5.length.toDouble(), totalFive, w5) +
           part(commonF.length.toDouble(), totalFavs, wFav) +
+          part(commonW.length.toDouble(), totalWatch, wWatch) +
           part(commonG.length.toDouble(), totalG, wG) +
           part(commonDir.length.toDouble(), totalDir, wDir) +
           part(commonAct.length.toDouble(), totalAct, wAct);
@@ -174,6 +211,7 @@ class MatchService {
           score: score,
           commonFiveStars: common5,
           commonFavorites: commonF,
+          commonWatchlist: commonW,
           commonDisliked: commonD,
           commonGenres: commonG,
           commonDirectors: commonDir,
@@ -185,7 +223,7 @@ class MatchService {
       );
     }
 
-    // Skor > ortak 5★ > ortak favori > ortak genre > ortak director > ortak actor sayısına göre sırala
+    // Skor > ortak 5★ > ortak favori > ortak watchlist > ortak genre > ortak director > ortak actor sayısına göre sırala
     out.sort((a, b) {
       final s = b.score.compareTo(a.score);
       if (s != 0) return s;
@@ -193,6 +231,8 @@ class MatchService {
       if (f5 != 0) return f5;
       final fav = b.commonFavCount.compareTo(a.commonFavCount);
       if (fav != 0) return fav;
+      final w = b.commonWatchCount.compareTo(a.commonWatchCount);
+      if (w != 0) return w;
       final g = b.commonGenreCount.compareTo(a.commonGenreCount);
       if (g != 0) return g;
       final d0 = b.commonDirectorCount.compareTo(a.commonDirectorCount);
@@ -200,6 +240,8 @@ class MatchService {
       return b.commonActorCount.compareTo(a.commonActorCount);
     });
 
+    // Store in short-term cache
+    _findCache[myUid] = _FindCache(out, DateTime.now());
     return out;
   }
 
@@ -223,6 +265,9 @@ class MatchService {
     final myFavs = Set<String>.from(
       (meDoc.data()?['favoritesKeys'] ?? const []) as List,
     );
+    final myWatch = Set<String>.from(
+      (meDoc.data()?['watchlistKeys'] ?? const []) as List,
+    );
     final myDis = Set<String>.from(
       (meDoc.data()?['dislikedKeys'] ?? const []) as List,
     );
@@ -241,12 +286,16 @@ class MatchService {
       final theirFavs = Set<String>.from(
         (data['favoritesKeys'] ?? const []) as List,
       );
+      final theirWatch = Set<String>.from(
+        (data['watchlistKeys'] ?? const []) as List,
+      );
       final theirDis = Set<String>.from(
         (data['dislikedKeys'] ?? const []) as List,
       );
 
       final c5 = myFive.intersection(theirFive);
       final cf = myFavs.intersection(theirFavs);
+      final cw = myWatch.intersection(theirWatch);
       final cd = myDis.intersection(theirDis);
 
       // NEW: semantic overlaps
@@ -264,7 +313,11 @@ class MatchService {
 
       final meetsA = c5.length >= minCommonFive && cf.length >= minCommonFav;
       final meetsB = cd.length >= minCommonDisliked;
-      if (!meetsA && !meetsB) continue;
+      // NEW: allow watchlist synergy as an alternative path
+      const int minCommonWatchlist = 3; // tweakable threshold
+      final meetsC =
+          c5.length >= minCommonFive && cw.length >= minCommonWatchlist;
+      if (!meetsA && !meetsB && !meetsC) continue;
 
       final pairId = pairIdOf(myUid, uid);
       final meIsA = myUid.compareTo(uid) < 0;
@@ -282,13 +335,16 @@ class MatchService {
         'bProfile': bProfile,
         'commonFiveStarsCount': c5.length,
         'commonFavoritesCount': cf.length,
+        'commonWatchlistCount': cw.length,
         'commonDislikedCount': cd.length,
         'commonGenresCount': cG.length,
         'commonDirectorsCount': cDir.length,
         'commonActorsCount': cAct.length,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'source': meetsB ? 'auto:disliked' : 'auto:five+fav',
+        'source': meetsB
+            ? 'auto:disliked'
+            : (meetsC ? 'auto:five+watch' : 'auto:five+fav'),
       }, SetOptions(merge: true));
 
       touched++;
