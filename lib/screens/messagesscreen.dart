@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/services/chat_service.dart';
+import 'dart:async';
 
 class MessagesPage extends StatelessWidget {
   const MessagesPage({super.key});
@@ -47,6 +49,7 @@ class MessagesPage extends StatelessWidget {
 
           return ListView.separated(
             itemCount: docs.length,
+            cacheExtent: 800,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final d = docs[i];
@@ -96,30 +99,73 @@ class MessagesPage extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: lastAt != null
-                        ? Text(
-                            _formatTime(lastAt),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          )
-                        : null,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (lastAt != null)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Text(
+                              _formatTime(lastAt),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        StreamBuilder<int>(
+                          stream: ChatService.instance.unreadCountForChat(
+                            d.id,
+                            uid,
+                          ),
+                          builder: (context, cSnap) {
+                            final count = cSnap.data ?? 0;
+                            if (count <= 0) return const SizedBox.shrink();
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                count.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                     onTap: () async {
                       final chatId = d.id; // chats id zaten pairId
-                      // chat stub onarımı (emin olmak için)
-                      await fs.collection('chats').doc(chatId).set({
-                        'participants': parts,
-                        'updatedAt': FieldValue.serverTimestamp(),
-                      }, SetOptions(merge: true));
-                      if (!context.mounted) return;
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ChatRoomScreen(
-                            chatId: chatId,
-                            otherUid: otherUid,
-                            otherTitle: title,
+
+                      // Hemen odaya git (UI bloklanmasın)
+                      if (context.mounted) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatRoomScreen(
+                              chatId: chatId,
+                              otherUid: otherUid,
+                              otherTitle: title,
+                            ),
                           ),
-                        ),
+                        );
+                      }
+
+                      // Arkadan chat stub onarımı + okundu işareti (fire-and-forget)
+                      unawaited(
+                        fs.collection('chats').doc(chatId).set({
+                          'participants': parts,
+                          'updatedAt': FieldValue.serverTimestamp(),
+                        }, SetOptions(merge: true)),
                       );
+
+                      unawaited(ChatService.instance.markAsRead(chatId, uid));
                     },
                   );
                 },
@@ -177,35 +223,99 @@ class _MatchesFallbackList extends StatelessWidget {
         });
         return ListView.separated(
           itemCount: docs.length,
+          cacheExtent: 800,
           separatorBuilder: (_, __) => const Divider(height: 1),
           itemBuilder: (context, i) {
             final d = docs[i].data();
             final uids = List<String>.from(d['uids'] ?? const []);
             if (uids.length < 2) return const SizedBox.shrink();
             final otherUid = (uids[0] == uid) ? uids[1] : uids[0];
-            return ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.person)),
-              title: Text(otherUid),
-              subtitle: const Text('Eşleşme'),
-              onTap: () async {
+            return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              future: fs.collection('users').doc(otherUid).get(),
+              builder: (context, uSnap) {
+                String title = otherUid;
+                String? photoURL;
+                if (uSnap.hasData && uSnap.data!.exists) {
+                  final u = uSnap.data!.data()!;
+                  final username = (u['username'] ?? '') as String;
+                  final displayName = (u['displayName'] ?? '') as String;
+                  final lb = (u['letterboxdUsername'] ?? '') as String;
+                  photoURL = (u['photoURL'] ?? '') as String;
+                  title = username.isNotEmpty
+                      ? username
+                      : (displayName.isNotEmpty
+                            ? displayName
+                            : (lb.isNotEmpty ? '@$lb' : otherUid));
+                }
+
                 final chatId = (uid.compareTo(otherUid) < 0)
                     ? '${uid}_$otherUid'
                     : '${otherUid}_$uid';
-                await fs.collection('chats').doc(chatId).set({
-                  'participants': [uid, otherUid],
-                  'updatedAt': FieldValue.serverTimestamp(),
-                }, SetOptions(merge: true));
-                if (!context.mounted) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChatRoomScreen(
-                      chatId: chatId,
-                      otherUid: otherUid,
-                      otherTitle:
-                          otherUid, // replace with pre-resolved username if available
-                    ),
+
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundImage: (photoURL != null && photoURL.isNotEmpty)
+                        ? NetworkImage(photoURL)
+                        : null,
+                    child: (photoURL == null || photoURL.isEmpty)
+                        ? const Icon(Icons.person)
+                        : null,
                   ),
+                  title: Text(title, overflow: TextOverflow.ellipsis),
+                  subtitle: const Text('Eşleşme'),
+                  trailing: StreamBuilder<int>(
+                    stream: ChatService.instance.unreadCountForChat(
+                      chatId,
+                      uid,
+                    ),
+                    builder: (context, cSnap) {
+                      final count = cSnap.data ?? 0;
+                      if (count <= 0) return const SizedBox.shrink();
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          count.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  onTap: () async {
+                    // Hemen odaya git
+                    if (context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ChatRoomScreen(
+                            chatId: chatId,
+                            otherUid: otherUid,
+                            otherTitle: title,
+                          ),
+                        ),
+                      );
+                    }
+
+                    // Arkadan chat stub ve okundu
+                    unawaited(
+                      fs.collection('chats').doc(chatId).set({
+                        'participants': [uid, otherUid],
+                        'updatedAt': FieldValue.serverTimestamp(),
+                      }, SetOptions(merge: true)),
+                    );
+
+                    unawaited(ChatService.instance.markAsRead(chatId, uid));
+                  },
                 );
               },
             );

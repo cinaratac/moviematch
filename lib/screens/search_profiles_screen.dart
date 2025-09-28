@@ -154,6 +154,20 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
         }
       }
 
+      // 3b) username exact (case-sensitive) — in case username_lc is missing
+      try {
+        final rUxCs = await _fs
+            .collection('users')
+            .where('username', isEqualTo: q)
+            .limit(10)
+            .get();
+        for (final d in rUxCs.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        /* ignore */
+      }
+
       // 4) username prefix (lc) with fallback
       try {
         final rUp = await _fs
@@ -167,11 +181,25 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
           _pushUnique(buf, d);
         }
       } catch (_) {
-        final snap = await _fs.collection('users').limit(200).get();
+        final snap = await _fs.collection('users').limit(400).get();
         for (final d in snap.docs) {
           final u = (d.data()['username'] ?? '').toString().toLowerCase();
           if (u.startsWith(qLc)) _pushUnique(buf, d);
         }
+      }
+
+      // 4b) displayName exact (case-sensitive) — if displayName_lc not populated
+      try {
+        final rDnEq = await _fs
+            .collection('users')
+            .where('displayName', isEqualTo: q)
+            .limit(10)
+            .get();
+        for (final d in rDnEq.docs) {
+          _pushUnique(buf, d);
+        }
+      } catch (_) {
+        /* ignore */
       }
 
       // 5) displayName prefix (lc) with fallback
@@ -187,7 +215,7 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
           _pushUnique(buf, d);
         }
       } catch (_) {
-        final snap = await _fs.collection('users').limit(200).get();
+        final snap = await _fs.collection('users').limit(400).get();
         for (final d in snap.docs) {
           final dn = (d.data()['displayName'] ?? '').toString().toLowerCase();
           if (dn.startsWith(qLc)) _pushUnique(buf, d);

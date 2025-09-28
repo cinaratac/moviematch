@@ -7,13 +7,24 @@ class MatchResult {
   final List<String> commonFiveStars;
   final List<String> commonFavorites;
   final List<String> commonDisliked;
+
+  // NEW: profile snippet (already existed)
   final String? displayName;
   final String? letterboxdUsername;
   final String? photoURL;
 
+  // NEW: semantic overlaps
+  final List<String> commonGenres;
+  final List<String> commonDirectors;
+  final List<String> commonActors;
+
   int get commonFiveCount => commonFiveStars.length;
   int get commonFavCount => commonFavorites.length;
   int get commonDisCount => commonDisliked.length;
+
+  int get commonGenreCount => commonGenres.length;
+  int get commonDirectorCount => commonDirectors.length;
+  int get commonActorCount => commonActors.length;
 
   MatchResult({
     required this.uid,
@@ -21,6 +32,9 @@ class MatchResult {
     required this.commonFiveStars,
     required this.commonFavorites,
     required this.commonDisliked,
+    required this.commonGenres,
+    required this.commonDirectors,
+    required this.commonActors,
     this.displayName,
     this.letterboxdUsername,
     this.photoURL,
@@ -33,6 +47,14 @@ class MatchService {
       _db.collection('users');
   CollectionReference<Map<String, dynamic>> get _matches =>
       _db.collection('matches');
+
+  Set<String> _lcSet(Map<String, dynamic> src, String key) {
+    final raw = (src[key] ?? const []) as List;
+    return raw
+        .map((e) => e.toString().trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+  }
 
   Map<String, dynamic> _profileSnippet(Map<String, dynamic> u, String uid) => {
     'uid': uid,
@@ -52,17 +74,30 @@ class MatchService {
     final meDoc = await _users.doc(myUid).get();
     if (!meDoc.exists) return [];
 
-    final Set<String> myFive = Set<String>.from(
+    final myFive = Set<String>.from(
       (meDoc.data()?['fiveStarKeys'] ?? const []) as List,
     );
-    final Set<String> myFavs = Set<String>.from(
+    final myFavs = Set<String>.from(
       (meDoc.data()?['favoritesKeys'] ?? const []) as List,
     );
-    final Set<String> myDis = Set<String>.from(
+    final myDis = Set<String>.from(
       (meDoc.data()?['dislikedKeys'] ?? const []) as List,
     );
 
-    if (myFive.isEmpty && myFavs.isEmpty && myDis.isEmpty) return [];
+    // NEW: profile vectors (lowercased)
+    final meMap = meDoc.data() ?? {};
+    final myGenres = _lcSet(meMap, 'favGenres');
+    final myDirectors = _lcSet(meMap, 'favDirectors');
+    final myActors = _lcSet(meMap, 'favActors');
+
+    if (myFive.isEmpty &&
+        myFavs.isEmpty &&
+        myDis.isEmpty &&
+        myGenres.isEmpty &&
+        myDirectors.isEmpty &&
+        myActors.isEmpty) {
+      return [];
+    }
 
     // Tüm kullanıcıları oku (geliştirme için uygun; üretimde pagination düşünebilirsin)
     final all = await _users.get();
@@ -73,6 +108,8 @@ class MatchService {
       if (uid == myUid) continue;
 
       final data = d.data();
+
+      // ratings-based keys
       final theirFive = Set<String>.from(
         (data['fiveStarKeys'] ?? const []) as List,
       );
@@ -83,23 +120,53 @@ class MatchService {
         (data['dislikedKeys'] ?? const []) as List,
       );
 
-      if (theirFive.isEmpty && theirFavs.isEmpty && theirDis.isEmpty) continue;
+      // semantic vectors (lowercased)
+      final theirGenres = _lcSet(data, 'favGenres');
+      final theirDirectors = _lcSet(data, 'favDirectors');
+      final theirActors = _lcSet(data, 'favActors');
 
+      // intersections
       final common5 = myFive.intersection(theirFive).toList()..sort();
       final commonF = myFavs.intersection(theirFavs).toList()..sort();
       final commonD = myDis.intersection(theirDis).toList()..sort();
 
-      // En az bir ortaklık olmalı
-      if (common5.isEmpty && commonF.isEmpty && commonD.isEmpty) continue;
+      final commonG = myGenres.intersection(theirGenres).toList()..sort();
+      final commonDir = myDirectors.intersection(theirDirectors).toList()
+        ..sort();
+      final commonAct = myActors.intersection(theirActors).toList()..sort();
 
-      // Skor: 5★ iki kat ağırlık
-      final denom =
-          2 * (myFive.length + theirFive.length) +
-          (myFavs.length + theirFavs.length);
-      final score = denom == 0
-          ? 0.0
-          : (100.0 * ((2 * common5.length + commonF.length) / denom))
-                .toDouble();
+      if (common5.isEmpty &&
+          commonF.isEmpty &&
+          commonD.isEmpty &&
+          commonG.isEmpty &&
+          commonDir.isEmpty &&
+          commonAct.isEmpty) {
+        continue;
+      }
+
+      // Weighted score: 5★ (w=3), favorites (w=2), genres (w=1.5), directors (w=1.8), actors (w=1.2)
+      // Denominators use sum of both sides for each vector, to keep score in 0..100.
+      double part(double common, double total, double w) =>
+          total == 0 ? 0.0 : w * (common / total);
+
+      final totalFive = (myFive.length + theirFive.length).toDouble();
+      final totalFavs = (myFavs.length + theirFavs.length).toDouble();
+      final totalG = (myGenres.length + theirGenres.length).toDouble();
+      final totalDir = (myDirectors.length + theirDirectors.length).toDouble();
+      final totalAct = (myActors.length + theirActors.length).toDouble();
+
+      // weights
+      const w5 = 3.0, wFav = 2.0, wG = 1.5, wDir = 1.8, wAct = 1.2;
+
+      final maxScoreUnit = w5 + wFav + wG + wDir + wAct;
+      final unitScore =
+          part(common5.length.toDouble(), totalFive, w5) +
+          part(commonF.length.toDouble(), totalFavs, wFav) +
+          part(commonG.length.toDouble(), totalG, wG) +
+          part(commonDir.length.toDouble(), totalDir, wDir) +
+          part(commonAct.length.toDouble(), totalAct, wAct);
+
+      final score = (unitScore / maxScoreUnit) * 100.0;
 
       out.add(
         MatchResult(
@@ -108,6 +175,9 @@ class MatchService {
           commonFiveStars: common5,
           commonFavorites: commonF,
           commonDisliked: commonD,
+          commonGenres: commonG,
+          commonDirectors: commonDir,
+          commonActors: commonAct,
           displayName: data['displayName'] as String?,
           letterboxdUsername: data['letterboxdUsername'] as String?,
           photoURL: data['photoURL'] as String?,
@@ -115,13 +185,19 @@ class MatchService {
       );
     }
 
-    // Skor > ortak 5★ > ortak favori sayısına göre sırala
+    // Skor > ortak 5★ > ortak favori > ortak genre > ortak director > ortak actor sayısına göre sırala
     out.sort((a, b) {
       final s = b.score.compareTo(a.score);
       if (s != 0) return s;
       final f5 = b.commonFiveCount.compareTo(a.commonFiveCount);
       if (f5 != 0) return f5;
-      return b.commonFavCount.compareTo(a.commonFavCount);
+      final fav = b.commonFavCount.compareTo(a.commonFavCount);
+      if (fav != 0) return fav;
+      final g = b.commonGenreCount.compareTo(a.commonGenreCount);
+      if (g != 0) return g;
+      final d0 = b.commonDirectorCount.compareTo(a.commonDirectorCount);
+      if (d0 != 0) return d0;
+      return b.commonActorCount.compareTo(a.commonActorCount);
     });
 
     return out;
@@ -173,6 +249,19 @@ class MatchService {
       final cf = myFavs.intersection(theirFavs);
       final cd = myDis.intersection(theirDis);
 
+      // NEW: semantic overlaps
+      final myGenres = _lcSet(meDoc.data() ?? {}, 'favGenres');
+      final myDirectors = _lcSet(meDoc.data() ?? {}, 'favDirectors');
+      final myActors = _lcSet(meDoc.data() ?? {}, 'favActors');
+
+      final theirGenres = _lcSet(data, 'favGenres');
+      final theirDirectors = _lcSet(data, 'favDirectors');
+      final theirActors = _lcSet(data, 'favActors');
+
+      final cG = myGenres.intersection(theirGenres);
+      final cDir = myDirectors.intersection(theirDirectors);
+      final cAct = myActors.intersection(theirActors);
+
       final meetsA = c5.length >= minCommonFive && cf.length >= minCommonFav;
       final meetsB = cd.length >= minCommonDisliked;
       if (!meetsA && !meetsB) continue;
@@ -194,6 +283,9 @@ class MatchService {
         'commonFiveStarsCount': c5.length,
         'commonFavoritesCount': cf.length,
         'commonDislikedCount': cd.length,
+        'commonGenresCount': cG.length,
+        'commonDirectorsCount': cDir.length,
+        'commonActorsCount': cAct.length,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'source': meetsB ? 'auto:disliked' : 'auto:five+fav',

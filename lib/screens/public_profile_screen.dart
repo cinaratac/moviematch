@@ -135,11 +135,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                           onPressed: () async {
                             final myUid =
                                 FirebaseAuth.instance.currentUser!.uid;
-                            final chatId = await ChatService().getOrCreateChat(
-                              myUid,
-                              widget.uid,
-                            );
-                            if (!mounted) return;
+                            final chatId = await ChatService.instance
+                                .getOrCreateChat(myUid, widget.uid);
+                            if (!context.mounted) return;
                             Navigator.push(
                               context,
                               MaterialPageRoute(

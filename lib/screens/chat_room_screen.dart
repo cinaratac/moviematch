@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String chatId;
@@ -23,6 +25,7 @@ class ChatRoomScreen extends StatefulWidget {
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _svc = ChatService();
   final _ctrl = TextEditingController();
+  StreamSubscription? _latestSub;
 
   @override
   void initState() {
@@ -30,10 +33,35 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     // Katılımcılar alanını garantiye al (kalıcılık için kritik)
     _svc.ensureChat(widget.chatId, myUid, widget.otherUid);
+
+    // Oda açıkken yeni mesaj geldikçe okundu işaretle
+    _latestSub = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(widget.chatId)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snap) {
+          if (snap.docs.isEmpty) return;
+          final data = snap.docs.first.data();
+          final author = (data['authorId'] ?? data['from'] ?? '') as String;
+          if (author != myUid) {
+            _svc.markAsRead(widget.chatId, myUid);
+          }
+        });
+
+    // İlk girişte de okundu bas
+    _svc.markAsRead(widget.chatId, myUid);
   }
 
   @override
   void dispose() {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid != null) {
+      _svc.markAsRead(widget.chatId, myUid);
+    }
+    _latestSub?.cancel();
     _ctrl.dispose();
     super.dispose();
   }
@@ -75,7 +103,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   .doc(widget.chatId)
                   .collection('messages')
                   .orderBy('createdAt', descending: true)
-                  .limit(200)
+                  .limit(60)
                   .snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
@@ -87,10 +115,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 }
                 return ListView.builder(
                   reverse: true,
+                  cacheExtent: 800,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
                   itemCount: docs.length,
                   itemBuilder: (context, i) {
                     final m = docs[i].data();
-                    final mine = m['from'] == myUid;
+                    final author = (m['authorId'] ?? m['from'] ?? '') as String;
+                    final mine = author == myUid;
                     final text = (m['text'] ?? '') as String;
                     final ts = (m['createdAt'] as Timestamp?);
                     final dt = ts?.toDate();
@@ -140,7 +172,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                   _formatTime(dt),
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: Colors.white.withOpacity(0.8),
+                                    color: Colors.white.withValues(alpha: 0.8),
                                   ),
                                 ),
                               ],
@@ -205,45 +237,86 @@ class _ChatAppBarTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Eğer dışarıdan başlık (username) verildiyse direkt onu göster (UID flaşlamaz)
-    if (initialTitle != null && initialTitle!.isNotEmpty) {
-      return Text(initialTitle!, overflow: TextOverflow.ellipsis);
-    }
-
-    // Öncelik: chats/{chatId}.participantsMeta[otherUid]
+    // If an initial title is provided, we still fetch photo from users to show avatar fast.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('chats')
           .doc(chatId)
           .snapshots(),
       builder: (context, snap) {
-        Map<String, dynamic>? meta;
+        String titleFromChat = initialTitle ?? '';
+        String photoFromChat = '';
+
+        // Try to read participantsMeta from chats
         if (snap.hasData && snap.data!.exists) {
           final d = snap.data!.data()!;
           final m = d['participantsMeta'];
           if (m is Map) {
             final m2 = Map<String, dynamic>.from(m);
             if (m2.containsKey(otherUid) && m2[otherUid] is Map) {
-              meta = Map<String, dynamic>.from(m2[otherUid] as Map);
+              final meta = Map<String, dynamic>.from(m2[otherUid] as Map);
+              final username = (meta['username'] ?? '') as String;
+              final displayName = (meta['displayName'] ?? '') as String;
+              final lb =
+                  (meta['lb'] ?? meta['letterboxdUsername'] ?? '') as String;
+              final photo =
+                  (meta['photoURL'] ?? meta['avatar'] ?? '') as String? ?? '';
+              titleFromChat = titleFromChat.isNotEmpty
+                  ? titleFromChat
+                  : (username.isNotEmpty
+                        ? username
+                        : (displayName.isNotEmpty
+                              ? displayName
+                              : (lb.isNotEmpty ? '@$lb' : '')));
+              photoFromChat = photo;
             }
           }
         }
 
-        if (meta != null) {
-          final username = (meta['username'] ?? '') as String;
-          final displayName = (meta['displayName'] ?? '') as String;
-          final lb = (meta['lb'] ?? meta['letterboxdUsername'] ?? '') as String;
-          final title = username.isNotEmpty
-              ? username
-              : (displayName.isNotEmpty
-                    ? displayName
-                    : (lb.isNotEmpty ? '@$lb' : ''));
-          if (title.isNotEmpty) {
-            return Text(title, overflow: TextOverflow.ellipsis);
-          }
+        // Build a child that can be updated later if we fetch more
+        Widget makeTile(String title, String photoUrl) {
+          final showTitle = title.isNotEmpty ? title : '';
+          return InkWell(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PublicProfileScreen(uid: otherUid),
+                ),
+              );
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundImage: (photoUrl.isNotEmpty)
+                      ? NetworkImage(photoUrl)
+                      : null,
+                  child: (photoUrl.isEmpty)
+                      ? const Icon(Icons.person, size: 18)
+                      : null,
+                ),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 180),
+                  child: Text(
+                    showTitle,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+          );
         }
 
-        // Fallback (bir defa): matches/{chatId} içinden doldurup chats'e persist et
+        // If we have at least a name or photo from chat meta, render immediately.
+        if (titleFromChat.isNotEmpty || photoFromChat.isNotEmpty) {
+          return makeTile(titleFromChat, photoFromChat);
+        }
+
+        // Fallback 1: matches/{chatId} to seed chats.participantsMeta (and get a title/photo)
         return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           future: FirebaseFirestore.instance
               .collection('matches')
@@ -251,6 +324,7 @@ class _ChatAppBarTitle extends StatelessWidget {
               .get(),
           builder: (context, mSnap) {
             String title = '';
+            String photo = '';
             if (mSnap.hasData && mSnap.data!.exists) {
               final md = mSnap.data!.data()!;
               final aP = md['aProfile'] as Map<String, dynamic>?;
@@ -264,10 +338,13 @@ class _ChatAppBarTitle extends StatelessWidget {
                 final lb =
                     (otherP['lb'] ?? otherP['letterboxdUsername'] ?? '')
                         as String;
+                photo =
+                    (otherP['photoURL'] ?? otherP['avatar'] ?? '') as String? ??
+                    '';
                 title = username.isNotEmpty
                     ? username
                     : (disp.isNotEmpty ? disp : (lb.isNotEmpty ? '@$lb' : ''));
-
+                // Persist minimal meta to chats for next time
                 FirebaseFirestore.instance.collection('chats').doc(chatId).set({
                   'participantsMeta': {
                     otherUid: {
@@ -275,14 +352,40 @@ class _ChatAppBarTitle extends StatelessWidget {
                       'username': username,
                       'displayName': disp,
                       'lb': lb,
+                      'photoURL': photo,
                     },
                   },
                 }, SetOptions(merge: true));
               }
             }
-            return Text(
-              title.isNotEmpty ? title : '',
-              overflow: TextOverflow.ellipsis,
+
+            // Fallback 2: users/{uid}
+            return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              future: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(otherUid)
+                  .get(),
+              builder: (context, uSnap) {
+                String uname = title;
+                String uphoto = photo;
+                if (uSnap.hasData && uSnap.data!.exists) {
+                  final u = uSnap.data!.data()!;
+                  final username = (u['username'] ?? '') as String;
+                  final disp = (u['displayName'] ?? '') as String;
+                  final lb = (u['letterboxdUsername'] ?? '') as String;
+                  final purl = (u['photoURL'] ?? '') as String;
+                  if (uname.isEmpty) {
+                    uname = username.isNotEmpty
+                        ? username
+                        : (disp.isNotEmpty
+                              ? disp
+                              : (lb.isNotEmpty ? '@$lb' : ''));
+                  }
+                  if (uphoto.isEmpty) uphoto = purl;
+                }
+
+                return makeTile(uname, uphoto);
+              },
             );
           },
         );
