@@ -8,8 +8,91 @@ import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 /// Lists other users ordered by computed match score using `MatchService().findMatches(...)`.
-class MatchListScreen extends StatelessWidget {
+class MatchListScreen extends StatefulWidget {
   const MatchListScreen({super.key});
+
+  @override
+  State<MatchListScreen> createState() => _MatchListScreenState();
+}
+
+class _MatchListScreenState extends State<MatchListScreen> {
+  final _scrollController = ScrollController();
+  final _pageSize = 12; // how many cards per "page"
+  List<global_match.MatchResult> _all = const [];
+  int _visibleCount = 0;
+  bool _initialLoading = true;
+  bool _loadingMore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitial();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadInitial() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) {
+      setState(() {
+        _initialLoading = false;
+        _all = const [];
+      });
+      return;
+    }
+    try {
+      // NOTE: We fetch once, then reveal incrementally for quick first paint.
+      final results = await global_match.MatchService().findMatches(me.uid);
+      if (!mounted) return;
+      setState(() {
+        _all = results;
+        _visibleCount = results.isEmpty
+            ? 0
+            : (_pageSize).clamp(0, results.length);
+        _initialLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // propagate via Scaffold below
+      setState(() {
+        _all = const [];
+        _initialLoading = false;
+      });
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Eşleşmeler alınamadı: $e')));
+    }
+  }
+
+  void _onScroll() {
+    if (_loadingMore || _initialLoading) return;
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    // When user is within 400px of bottom, reveal next page
+    if (position.pixels > position.maxScrollExtent - 400) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_visibleCount >= _all.length) return;
+    setState(() => _loadingMore = true);
+    await Future<void>.delayed(
+      const Duration(milliseconds: 50),
+    ); // allow a frame
+    if (!mounted) return;
+    final next = (_visibleCount + _pageSize).clamp(0, _all.length);
+    setState(() {
+      _visibleCount = next;
+      _loadingMore = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,69 +105,80 @@ class MatchListScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Eşleşmeler')),
-      body: FutureBuilder<List<global_match.MatchResult>>(
-        future: global_match.MatchService().findMatches(me.uid),
-        builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snap.hasError) {
-            return Center(child: Text('Hata: ${snap.error}'));
-          }
-          final items = snap.data ?? const [];
-          if (items.isEmpty) {
-            return const Center(child: Text('Şu an eşleşme yok.'));
-          }
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final m = items[i];
-              return _MatchCard(
-                result: m,
-                onOpen: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => MatchScreen(result: m)),
-                  );
-                },
-                onLike: () async {
-                  try {
-                    await LikeService.instance.likeUser(
-                      m.uid,
-                      commonFavoritesCount: m.commonFavCount,
-                      commonFiveStarsCount: m.commonFiveCount,
-                    );
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('Beğenildi')));
-                  } catch (e) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Beğenme hatası: $e')),
-                    );
-                  }
-                },
-                onPass: () async {
-                  try {
-                    await LikeService.instance.passUser(m.uid);
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(const SnackBar(content: Text('Geçildi')));
-                  } catch (e) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('Geç hatası: $e')));
-                  }
-                },
-              );
-            },
-          );
-        },
-      ),
+      body: _initialLoading
+          ? const Center(child: CircularProgressIndicator())
+          : (_all.isEmpty
+                ? const Center(child: Text('Şu an eşleşme yok.'))
+                : RefreshIndicator(
+                    onRefresh: _loadInitial,
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: _visibleCount + 1, // +1 for loader at the end
+                      itemBuilder: (context, i) {
+                        if (i >= _visibleCount) {
+                          final hasMore = _visibleCount < _all.length;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Center(
+                              child: hasMore
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Hepsi bu kadar 👋'),
+                            ),
+                          );
+                        }
+                        final m = _all[i];
+                        return _MatchCard(
+                          result: m,
+                          onOpen: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => MatchScreen(result: m),
+                              ),
+                            );
+                          },
+                          onLike: () async {
+                            try {
+                              await LikeService.instance.likeUser(
+                                m.uid,
+                                commonFavoritesCount: m.commonFavCount,
+                                commonFiveStarsCount: m.commonFiveCount,
+                              );
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Beğenildi')),
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Beğenme hatası: $e')),
+                              );
+                            }
+                          },
+                          onPass: () async {
+                            try {
+                              await LikeService.instance.passUser(m.uid);
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Geçildi')),
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Geç hatası: $e')),
+                              );
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  )),
     );
   }
 }
@@ -301,6 +395,10 @@ class MatchScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Normalize possible nulls from MatchResult for new common fields
+    final commonGenres = result.commonGenres ?? const <String>[];
+    final commonDirectors = result.commonDirectors ?? const <String>[];
+    final commonActors = result.commonActors ?? const <String>[];
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -373,6 +471,22 @@ class MatchScreen extends StatelessWidget {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      if (commonGenres.isNotEmpty)
+                        _ChipsRow(
+                          label: 'Ortak Türler',
+                          values: commonGenres.take(8).toList(),
+                        ),
+                      if (commonDirectors.isNotEmpty)
+                        _ChipsRow(
+                          label: 'Ortak Yönetmenler',
+                          values: commonDirectors.take(6).toList(),
+                        ),
+                      if (commonActors.isNotEmpty)
+                        _ChipsRow(
+                          label: 'Ortak Oyuncular',
+                          values: commonActors.take(6).toList(),
+                        ),
                     ],
                   ),
                 ),
@@ -412,7 +526,7 @@ class MatchScreen extends StatelessWidget {
   Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
     final db = FirebaseFirestore.instance;
 
-    Future<List<FilmItem>> _read(List<String> keys) async {
+    Future<List<FilmItem>> readChunk(List<String> keys) async {
       if (keys.isEmpty) return const [];
       final items = <FilmItem>[];
       const chunkSize = 10; // Firestore whereIn max 10
@@ -436,8 +550,8 @@ class MatchScreen extends StatelessWidget {
       return items;
     }
 
-    final favs = await _read(m.commonFavorites);
-    final fives = await _read(m.commonFiveStars);
+    final favs = await readChunk(m.commonFavorites);
+    final fives = await readChunk(m.commonFiveStars);
     return _Resolved(favorites: favs, fiveStars: fives);
   }
 }
@@ -528,6 +642,9 @@ class _Grid extends StatelessWidget {
                     Image.network(
                       film.posterUrl,
                       fit: BoxFit.cover,
+                      cacheWidth:
+                          300, // ~2x of 150px width; lets engine request smaller bitmaps
+                      filterQuality: FilterQuality.low,
                       errorBuilder: (_, __, ___) => Container(
                         color: Theme.of(
                           context,
@@ -649,7 +766,7 @@ Future<_CardData> _loadCardData(global_match.MatchResult m) async {
 class _ChipsRow extends StatelessWidget {
   final String label;
   final List<String> values;
-  const _ChipsRow({required this.label, required this.values, super.key});
+  const _ChipsRow({required this.label, required this.values});
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -681,7 +798,7 @@ class _ChipsRow extends StatelessWidget {
 
 class _SectionLabel extends StatelessWidget {
   final String text;
-  const _SectionLabel({required this.text, super.key});
+  const _SectionLabel({required this.text});
   @override
   Widget build(BuildContext context) {
     return Text(text, style: Theme.of(context).textTheme.bodyLarge);
@@ -690,7 +807,7 @@ class _SectionLabel extends StatelessWidget {
 
 class _PosterStrip extends StatelessWidget {
   final List<String> urls;
-  const _PosterStrip({required this.urls, super.key});
+  const _PosterStrip({required this.urls});
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -708,6 +825,8 @@ class _PosterStrip extends StatelessWidget {
               child: Image.network(
                 u,
                 fit: BoxFit.cover,
+                cacheWidth: 240, // ~120px * 2 devicePixelRatio
+                filterQuality: FilterQuality.low,
                 errorBuilder: (_, __, ___) => Container(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   child: const Center(child: Icon(Icons.image_not_supported)),
@@ -722,7 +841,7 @@ class _PosterStrip extends StatelessWidget {
 }
 
 class _SkeletonLine extends StatelessWidget {
-  const _SkeletonLine({super.key});
+  const _SkeletonLine();
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -736,7 +855,7 @@ class _SkeletonLine extends StatelessWidget {
 }
 
 class _SkeletonPosters extends StatelessWidget {
-  const _SkeletonPosters({super.key});
+  const _SkeletonPosters();
   @override
   Widget build(BuildContext context) {
     return SizedBox(
