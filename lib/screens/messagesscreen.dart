@@ -25,8 +25,7 @@ class MessagesPage extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
           if (s.hasError) {
-            // Chats sorgusu yetkiden düştüyse: matches fallback
-            return _MatchesFallbackList(uid: uid);
+            return Center(child: Text('Sohbetler yüklenemedi'));
           }
 
           // Local sort by lastMessageAt desc to avoid composite index
@@ -35,16 +34,19 @@ class MessagesPage extends StatelessWidget {
                 <QueryDocumentSnapshot<Map<String, dynamic>>>[]),
           ];
           docs.sort((a, b) {
-            final ta = a.data()['lastMessageAt'] as Timestamp?;
-            final tb = b.data()['lastMessageAt'] as Timestamp?;
-            final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-            final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-            return db.compareTo(da);
+            final ta = a.data()['lastMessageAt'];
+            final tb = b.data()['lastMessageAt'];
+            final da = (ta is Timestamp)
+                ? ta.toDate()
+                : DateTime.fromMillisecondsSinceEpoch(0);
+            final db = (tb is Timestamp)
+                ? tb.toDate()
+                : DateTime.fromMillisecondsSinceEpoch(0);
+            return db.compareTo(da); // newest first strictly by lastMessageAt
           });
 
           if (docs.isEmpty) {
-            // Hiç chat yoksa (veya görünmüyorsa) matches fallback göster
-            return _MatchesFallbackList(uid: uid);
+            return const Center(child: Text('Henüz mesaj yok'));
           }
 
           return ListView.separated(
@@ -94,22 +96,76 @@ class MessagesPage extends StatelessWidget {
                           : null,
                     ),
                     title: Text(title, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      last,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    subtitle:
+                        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: fs
+                              .collection('chats')
+                              .doc(d.id)
+                              .collection('messages')
+                              .orderBy('createdAt', descending: true)
+                              .limit(1)
+                              .snapshots(),
+                          builder: (context, mSnap) {
+                            String preview = last;
+                            if (mSnap.hasData && mSnap.data!.docs.isNotEmpty) {
+                              final m = mSnap.data!.docs.first.data();
+                              preview =
+                                  (m['text'] ??
+                                          m['message'] ??
+                                          m['content'] ??
+                                          preview)
+                                      .toString();
+                            }
+                            return Text(
+                              preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (lastAt != null)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: Text(
-                              _formatTime(lastAt),
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
+                        // Last message sent time (live)
+                        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: FirebaseFirestore.instance
+                              .collection('chats')
+                              .doc(d.id)
+                              .collection('messages')
+                              .orderBy('createdAt', descending: true)
+                              .limit(1)
+                              .snapshots(),
+                          builder: (context, ms) {
+                            DateTime? lastDt;
+                            if (ms.hasData && ms.data!.docs.isNotEmpty) {
+                              final doc = ms.data!.docs.first;
+                              final m = doc.data();
+                              final raw = m['createdAt'];
+                              if (raw is Timestamp) {
+                                lastDt = raw.toDate().toLocal();
+                              } else if (doc.metadata.hasPendingWrites) {
+                                lastDt = DateTime.now();
+                              }
+                            }
+
+                            DateTime? showAt =
+                                lastDt ??
+                                lastAt ??
+                                (data['updatedAt'] as Timestamp?)?.toDate();
+                            final t = (showAt != null)
+                                ? _formatTime(showAt)
+                                : '';
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(
+                                t,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Unread badge
                         StreamBuilder<int>(
                           stream: ChatService.instance.unreadCountForChat(
                             d.id,
@@ -179,149 +235,14 @@ class MessagesPage extends StatelessWidget {
 }
 
 String _formatTime(DateTime dt) {
+  final local = dt.toLocal();
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
-  final thatDay = DateTime(dt.year, dt.month, dt.day);
+  final thatDay = DateTime(local.year, local.month, local.day);
   if (thatDay == today) {
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
     return '$hh:$mm';
   }
-  return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
-}
-
-class _MatchesFallbackList extends StatelessWidget {
-  final String uid;
-  const _MatchesFallbackList({required this.uid});
-
-  @override
-  Widget build(BuildContext context) {
-    final fs = FirebaseFirestore.instance;
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: fs
-          .collection('matches')
-          .where('uids', arrayContains: uid)
-          .snapshots(),
-      builder: (context, s) {
-        if (s.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (s.hasError) {
-          return Center(child: Text('Hata: ${s.error}'));
-        }
-        final docs = [...(s.data?.docs ?? const [])];
-        if (docs.isEmpty) {
-          return const Center(child: Text('Sohbet yok'));
-        }
-        // Client-side sort by updatedAt DESC to avoid composite index
-        docs.sort((a, b) {
-          final ta = a.data()['updatedAt'] as Timestamp?;
-          final tb = b.data()['updatedAt'] as Timestamp?;
-          final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return db.compareTo(da);
-        });
-        return ListView.separated(
-          itemCount: docs.length,
-          cacheExtent: 800,
-          separatorBuilder: (_, __) => const Divider(height: 1),
-          itemBuilder: (context, i) {
-            final d = docs[i].data();
-            final uids = List<String>.from(d['uids'] ?? const []);
-            if (uids.length < 2) return const SizedBox.shrink();
-            final otherUid = (uids[0] == uid) ? uids[1] : uids[0];
-            return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              future: fs.collection('users').doc(otherUid).get(),
-              builder: (context, uSnap) {
-                String title = otherUid;
-                String? photoURL;
-                if (uSnap.hasData && uSnap.data!.exists) {
-                  final u = uSnap.data!.data()!;
-                  final username = (u['username'] ?? '') as String;
-                  final displayName = (u['displayName'] ?? '') as String;
-                  final lb = (u['letterboxdUsername'] ?? '') as String;
-                  photoURL = (u['photoURL'] ?? '') as String;
-                  title = username.isNotEmpty
-                      ? username
-                      : (displayName.isNotEmpty
-                            ? displayName
-                            : (lb.isNotEmpty ? '@$lb' : otherUid));
-                }
-
-                final chatId = (uid.compareTo(otherUid) < 0)
-                    ? '${uid}_$otherUid'
-                    : '${otherUid}_$uid';
-
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundImage: (photoURL != null && photoURL.isNotEmpty)
-                        ? NetworkImage(photoURL)
-                        : null,
-                    child: (photoURL == null || photoURL.isEmpty)
-                        ? const Icon(Icons.person)
-                        : null,
-                  ),
-                  title: Text(title, overflow: TextOverflow.ellipsis),
-                  subtitle: const Text('Eşleşme'),
-                  trailing: StreamBuilder<int>(
-                    stream: ChatService.instance.unreadCountForChat(
-                      chatId,
-                      uid,
-                    ),
-                    builder: (context, cSnap) {
-                      final count = cSnap.data ?? 0;
-                      if (count <= 0) return const SizedBox.shrink();
-                      return Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          count.toString(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  onTap: () async {
-                    // Hemen odaya git
-                    if (context.mounted) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ChatRoomScreen(
-                            chatId: chatId,
-                            otherUid: otherUid,
-                            otherTitle: title,
-                          ),
-                        ),
-                      );
-                    }
-
-                    // Arkadan chat stub ve okundu
-                    unawaited(
-                      fs.collection('chats').doc(chatId).set({
-                        'participants': [uid, otherUid],
-                        'updatedAt': FieldValue.serverTimestamp(),
-                      }, SetOptions(merge: true)),
-                    );
-
-                    unawaited(ChatService.instance.markAsRead(chatId, uid));
-                  },
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
+  return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}';
 }

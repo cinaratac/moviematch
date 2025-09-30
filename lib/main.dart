@@ -2,7 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/theme.dart';
-import 'package:fluttergirdi/auth/auth_gate.dart';
+import 'package:fluttergirdi/shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +21,7 @@ class MyApp extends StatelessWidget {
       themeMode: ThemeMode.dark,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      home: const AuthGate(),
+      home: const HomeShell(),
     );
   }
 }

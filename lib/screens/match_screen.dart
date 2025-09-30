@@ -461,7 +461,7 @@ class _MatchScreenState extends State<MatchScreen>
               ? widget.result.displayName!
               : (widget.result.letterboxdUsername != null &&
                         widget.result.letterboxdUsername!.isNotEmpty
-                    ? '@${widget.result.letterboxdUsername}'
+                    ? '${widget.result.letterboxdUsername}'
                     : widget.result.uid),
           overflow: TextOverflow.ellipsis,
           maxLines: 1,

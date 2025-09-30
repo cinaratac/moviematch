@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:math' as math;
 
 // Short‑term cache container for findMatches
 class _FindCache {
@@ -175,35 +176,37 @@ class MatchService {
       }
 
       // Weighted score: 5★ (w=3), favorites (w=2), watchlist (w=1.6), genres (w=1.5), directors (w=1.8), actors (w=1.2)
-      // Denominators use sum of both sides for each vector, to keep score in 0..100.
-      double part(double common, double total, double w) =>
-          total == 0 ? 0.0 : w * (common / total);
+      // New denominator: double the intersection count
+      double part(double common, double total, double w) {
+        if (common <= 0) return 0.0;
+        final denom = common * 2; // ortak kümenin iki katı
+        return w * (common / denom);
+      }
 
-      final totalFive = (myFive.length + theirFive.length).toDouble();
-      final totalFavs = (myFavs.length + theirFavs.length).toDouble();
-      final totalWatch = (myWatch.length + theirWatch.length).toDouble();
-      final totalG = (myGenres.length + theirGenres.length).toDouble();
-      final totalDir = (myDirectors.length + theirDirectors.length).toDouble();
-      final totalAct = (myActors.length + theirActors.length).toDouble();
-
-      // weights
+      // weights (favoriler boosted)
       const w5 = 3.0,
-          wFav = 2.0,
+          wFav = 4.0,
           wWatch = 1.6,
           wG = 1.5,
-          wDir = 1.8,
-          wAct = 1.2;
+          wDir = 0.0,
+          wAct = 0.0;
 
       final maxScoreUnit = w5 + wFav + wWatch + wG + wDir + wAct;
       final unitScore =
-          part(common5.length.toDouble(), totalFive, w5) +
-          part(commonF.length.toDouble(), totalFavs, wFav) +
-          part(commonW.length.toDouble(), totalWatch, wWatch) +
-          part(commonG.length.toDouble(), totalG, wG) +
-          part(commonDir.length.toDouble(), totalDir, wDir) +
-          part(commonAct.length.toDouble(), totalAct, wAct);
+          part(common5.length.toDouble(), 0, w5) +
+          part(commonF.length.toDouble(), 0, wFav) +
+          part(commonW.length.toDouble(), 0, wWatch) +
+          part(commonG.length.toDouble(), 0, wG) +
+          part(commonDir.length.toDouble(), 0, wDir) +
+          part(commonAct.length.toDouble(), 0, wAct);
 
-      final score = (unitScore / maxScoreUnit) * 100.0;
+      // --- Calibration for a slightly higher, friendlier score distribution ---
+      // raw in [0,100]
+      final raw = (unitScore / maxScoreUnit) * 100.0;
+      const double gamma = 0.85; // <1.0 → boosts mid/low scores gently
+      const double lift = 33.0; // constant lift, capped later
+      final boosted = math.pow(raw / 100.0, gamma) * 100.0;
+      final score = math.min(100.0, boosted + lift);
 
       out.add(
         MatchResult(

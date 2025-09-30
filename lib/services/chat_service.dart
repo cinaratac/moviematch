@@ -1,7 +1,4 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 @pragma('vm:entry-point')
@@ -26,7 +23,6 @@ class ChatService {
     final ref = _fs.collection('chats').doc(id);
     await ref.set({
       'participants': FieldValue.arrayUnion([uidA, uidB]),
-      'lastMessageAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     return id;
   }
@@ -36,16 +32,18 @@ class ChatService {
     final ref = _fs.collection('chats').doc(chatId);
     await ref.set({
       'participants': FieldValue.arrayUnion([uidA, uidB]),
-      'lastMessageAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> messages(String chatId) {
+  Stream<QuerySnapshot<Map<String, dynamic>>> messages(
+    String chatId, {
+    bool newestFirst = true,
+  }) {
     return _fs
         .collection('chats')
         .doc(chatId)
         .collection('messages')
-        .orderBy('createdAt', descending: true)
+        .orderBy('createdAt', descending: newestFirst)
         .limit(100)
         .snapshots();
   }
@@ -61,17 +59,24 @@ class ChatService {
     final msgRef = chatRef.collection('messages').doc();
 
     final batch = _fs.batch();
+    final trimmed = text.trim();
     batch.set(msgRef, {
       'authorId': fromUid, // REQUIRED by rules
       'from': fromUid, // optional/back-compat
-      'text': text.trim(),
+      'text': trimmed,
+      'message': trimmed, // for UIs reading `message`
+      'content': trimmed, // for UIs reading `content`
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.set(chatRef, {
       'participants': FieldValue.arrayUnion([fromUid, otherUid]),
-      'lastMessage': text.trim(),
+      'lastMessage': trimmed,
       'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastMessageAuthorId': fromUid,
+      'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    // Use dotted-path update so Firestore reliably increments nested counters
+    batch.update(chatRef, {'unreadCounts.$otherUid': FieldValue.increment(1)});
     await batch.commit();
   }
 
@@ -110,6 +115,7 @@ class ChatService {
       },
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    await chatRef.update({'unreadCounts.$uid': 0});
   }
 
   /// Stream the unread message count for a chat **for this user**.
@@ -161,6 +167,57 @@ class ChatService {
               return count;
             });
       });
+    });
+  }
+
+  /// Total unread conversations count for a user.
+  /// Counts chats where the last message is newer than my lastReadAt and
+  /// authored by someone else.
+  Stream<int> totalUnreadFor(String myUid) {
+    final q = _fs
+        .collection('chats')
+        .where('participants', arrayContains: myUid);
+
+    return q.snapshots().map((qs) {
+      int unread = 0;
+      for (final d in qs.docs) {
+        final data = d.data();
+        final lastAuthor =
+            (data['lastMessageAuthorId'] ?? data['lastAuthorId'] ?? '')
+                as String?;
+        final lastTs = data['lastMessageAt'] as Timestamp?;
+        final reads = (data['reads'] as Map<String, dynamic>?) ?? const {};
+        final mine = (reads[myUid] as Map<String, dynamic>?) ?? const {};
+        final lastRead = mine['lastReadAt'] as Timestamp?;
+
+        if (lastTs == null) continue;
+        if (lastAuthor == myUid) continue; // my own last message → not unread
+        if (lastRead == null || lastTs.toDate().isAfter(lastRead.toDate())) {
+          unread++;
+        }
+      }
+      return unread;
+    });
+  }
+
+  /// Total unread **messages** for this user across all chats.
+  Stream<int> totalUnreadMessagesFor(String myUid) {
+    final q = _fs
+        .collection('chats')
+        .where('participants', arrayContains: myUid);
+    return q.snapshots().map((qs) {
+      int total = 0;
+      for (final d in qs.docs) {
+        final data = d.data();
+        final counts = data['unreadCounts'];
+        if (counts is Map) {
+          final v = counts[myUid];
+          if (v is num) {
+            total += v.toInt();
+          }
+        }
+      }
+      return total;
     });
   }
 }
