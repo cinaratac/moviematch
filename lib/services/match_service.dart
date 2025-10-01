@@ -125,6 +125,31 @@ class MatchService {
       return [];
     }
 
+    // --- Exclude users that are already liked/passed/matched by me ---
+    final hiddenUids = <String>{};
+    try {
+      final likesQs = await _db
+          .collection('likes')
+          .where('uids', arrayContains: myUid)
+          .get();
+      for (final doc in likesQs.docs) {
+        final m = doc.data();
+        final a = m['a'] as String?;
+        final b = m['b'] as String?;
+        if (a == null || b == null) continue;
+        final meIsA = (myUid == a);
+        final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
+        final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
+        final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
+        final matched = myLiked && otherLiked;
+        if (myPass || matched || (myLiked && !matched)) {
+          hiddenUids.add(meIsA ? b : a);
+        }
+      }
+    } catch (_) {
+      // ignore filtering errors — better to show more than crash
+    }
+
     // Tüm kullanıcıları oku (geliştirme için uygun; üretimde pagination düşünebilirsin)
     final all = await _users.get();
 
@@ -132,6 +157,7 @@ class MatchService {
     for (final d in all.docs) {
       final uid = d.id;
       if (uid == myUid) continue;
+      if (hiddenUids.contains(uid)) continue; // already liked/passed/matched
 
       final data = d.data();
 

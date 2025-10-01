@@ -36,66 +36,94 @@ class LikeService {
     final pairId = pairIdOf(me, otherUid);
     final docRef = _likesCol.doc(pairId);
 
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(docRef);
-      late final String a;
-      late final String b;
-      if (!snap.exists) {
-        // First interaction for this pair
-        a = (me.compareTo(otherUid) < 0) ? me : otherUid;
-        b = (a == me) ? otherUid : me;
-        final data = <String, dynamic>{
-          'a': a,
-          'b': b,
-          'aLiked': a == me,
-          'bLiked': b == me,
-          'aPass': false,
-          'bPass': false,
-          'updatedAt': FieldValue.serverTimestamp(),
-        };
-        tx.set(docRef, data);
-        // Not a match yet, return from transaction
-        return;
-      }
+    try {
+      await _db.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        late String a;
+        late String b;
+        if (!snap.exists) {
+          // First interaction for this pair
+          a = (me.compareTo(otherUid) < 0) ? me : otherUid;
+          b = (a == me) ? otherUid : me;
+          tx.set(docRef, {
+            'a': a,
+            'b': b,
+            'uids': [a, b],
+            'aLiked': a == me,
+            'bLiked': b == me,
+            'aPass': false,
+            'bPass': false,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          return;
+        }
 
-      final data = Map<String, dynamic>.from(snap.data()!);
-      a = data['a'] as String;
-      b = data['b'] as String;
-      final meIsA = me == a;
-      final likeField = meIsA ? 'aLiked' : 'bLiked';
-      final passField = meIsA ? 'aPass' : 'bPass';
+        final data = Map<String, dynamic>.from(snap.data()!);
+        a = data['a'] as String;
+        b = data['b'] as String;
+        final meIsA = me == a;
+        final likeField = meIsA ? 'aLiked' : 'bLiked';
+        final passField = meIsA ? 'aPass' : 'bPass';
 
-      if (data[likeField] == true) {
-        // already liked – nothing to do
-      } else {
-        data[likeField] = true;
-        data[passField] = false; // like overrides pass
-        data['updatedAt'] = FieldValue.serverTimestamp();
-        tx.update(docRef, data);
-      }
+        final newALiked = meIsA ? true : (data['aLiked'] == true);
+        final newBLiked = meIsA ? (data['bLiked'] == true) : true;
+        final willBothLike = newALiked && newBLiked;
 
-      final bothLiked = (data['aLiked'] == true) && (data['bLiked'] == true);
-      if (bothLiked) {
-        final matchId = pairId; // use the same id for simplicity
-        final matchRef = _matchesCol.doc(matchId);
-        final now = FieldValue.serverTimestamp();
-        tx.set(matchRef, {
-          'uids': [a, b],
-          'commonFavoritesCount': commonFavoritesCount,
-          'commonFiveStarsCount': commonFiveStarsCount,
-          'createdAt': now,
-          'updatedAt': now,
-        }, SetOptions(merge: true));
+        if (data[likeField] != true || data[passField] == true) {
+          tx.update(docRef, {
+            likeField: true,
+            passField: false, // like overrides pass
+            'uids': FieldValue.arrayUnion([a, b]),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
 
-        // Ensure chat stub exists (optional)
-        final chatRef = _chatsCol.doc(matchId);
-        tx.set(chatRef, {
-          'participants': [a, b],
-          'createdAt': now,
-          'updatedAt': now,
-        }, SetOptions(merge: true));
-      }
-    });
+        if (willBothLike) {
+          final matchId = pairId; // use the same id for simplicity
+          final matchRef = _matchesCol.doc(matchId);
+          final now = FieldValue.serverTimestamp();
+          tx.set(matchRef, {
+            'uids': [a, b],
+            'commonFavoritesCount': commonFavoritesCount,
+            'commonFiveStarsCount': commonFiveStarsCount,
+            'createdAt': now,
+            'updatedAt': now,
+          }, SetOptions(merge: true));
+
+          // Ensure chat stub exists (optional)
+          final chatRef = _chatsCol.doc(matchId);
+          tx.set(chatRef, {
+            'participants': [a, b],
+            'createdAt': now,
+            'updatedAt': now,
+            'lastMessageAt': now,
+          }, SetOptions(merge: true));
+        }
+      });
+    } catch (e) {
+      // Fallback merge write so like is not lost if transaction fails (e.g., permissions/index)
+      await docRef.set({
+        'a': (me.compareTo(otherUid) < 0) ? me : otherUid,
+        'b': (me.compareTo(otherUid) < 0) ? otherUid : me,
+        'uids': [me, otherUid],
+        // mark my side like, clear my pass
+        (me.compareTo(otherUid) < 0) ? 'aLiked' : 'bLiked': true,
+        (me.compareTo(otherUid) < 0) ? 'aPass' : 'bPass': false,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+    // Mirror log to a separate collection
+    try {
+      await _db.collection('likeLogs').add({
+        'from': me,
+        'to': otherUid,
+        'action': 'like',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // non-fatal
+    }
   }
 
   /// Register a pass (skip). This does not delete likes; it just marks pass.
@@ -106,34 +134,62 @@ class LikeService {
     final pairId = pairIdOf(me, otherUid);
     final docRef = _likesCol.doc(pairId);
 
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(docRef);
-      late final String a;
-      late final String b;
-      if (!snap.exists) {
-        a = (me.compareTo(otherUid) < 0) ? me : otherUid;
-        b = (a == me) ? otherUid : me;
-        tx.set(docRef, {
-          'a': a,
-          'b': b,
-          'aLiked': false,
-          'bLiked': false,
-          'aPass': a == me,
-          'bPass': b == me,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-        return;
-      }
+    try {
+      await _db.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        late String a;
+        late String b;
+        if (!snap.exists) {
+          a = (me.compareTo(otherUid) < 0) ? me : otherUid;
+          b = (a == me) ? otherUid : me;
+          tx.set(docRef, {
+            'a': a,
+            'b': b,
+            'uids': [a, b],
+            'aLiked': false,
+            'bLiked': false,
+            'aPass': a == me,
+            'bPass': b == me,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          return;
+        }
 
-      final data = Map<String, dynamic>.from(snap.data()!);
-      a = data['a'] as String;
-      b = data['b'] as String;
-      final meIsA = me == a;
-      final passField = meIsA ? 'aPass' : 'bPass';
-      data[passField] = true;
-      data['updatedAt'] = FieldValue.serverTimestamp();
-      tx.update(docRef, data);
-    });
+        final data = Map<String, dynamic>.from(snap.data()!);
+        a = data['a'] as String;
+        b = data['b'] as String;
+        final meIsA = me == a;
+        final passField = meIsA ? 'aPass' : 'bPass';
+        if (data[passField] != true) {
+          tx.update(docRef, {
+            passField: true,
+            'uids': FieldValue.arrayUnion([a, b]),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+    } catch (e) {
+      // Fallback merge write so pass is not lost if transaction fails
+      await docRef.set({
+        'a': (me.compareTo(otherUid) < 0) ? me : otherUid,
+        'b': (me.compareTo(otherUid) < 0) ? otherUid : me,
+        'uids': [me, otherUid],
+        (me.compareTo(otherUid) < 0) ? 'aPass' : 'bPass': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+    // Mirror log to a separate collection
+    try {
+      await _db.collection('likeLogs').add({
+        'from': me,
+        'to': otherUid,
+        'action': 'pass',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // non-fatal
+    }
   }
 
   /// Remove a match for this pair. Keeps the like history unless [alsoClearLikes] is true.

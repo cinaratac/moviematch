@@ -6,6 +6,9 @@ import 'package:fluttergirdi/services/match_service.dart'
     as global_match; // uses services/match_service.dart
 import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:fluttergirdi/screens/likes_page.dart';
+import 'package:fluttergirdi/screens/passes_page.dart';
+import 'package:swipe_cards/swipe_cards.dart';
 
 /// Lists other users ordered by computed match score using `MatchService().findMatches(...)`.
 class MatchListScreen extends StatefulWidget {
@@ -16,82 +19,75 @@ class MatchListScreen extends StatefulWidget {
 }
 
 class _MatchListScreenState extends State<MatchListScreen> {
-  final _scrollController = ScrollController();
-  final _pageSize = 12; // how many cards per "page"
   List<global_match.MatchResult> _all = const [];
-  int _visibleCount = 0;
-  bool _initialLoading = true;
-  bool _loadingMore = false;
+  final List<SwipeItem> _swipeItems = [];
+  late MatchEngine _matchEngine;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadInitial();
-    _scrollController.addListener(_onScroll);
+    _loadMatches();
   }
 
   @override
   void dispose() {
-    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadInitial() async {
+  Future<void> _loadMatches() async {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) {
       setState(() {
-        _initialLoading = false;
+        _loading = false;
         _all = const [];
+        _swipeItems.clear();
       });
       return;
     }
     try {
-      // NOTE: We fetch once, then reveal incrementally for quick first paint.
       final results = await global_match.MatchService().findMatches(me.uid);
       if (!mounted) return;
+
+      _all = results;
+      _swipeItems.clear();
+
+      for (final m in _all) {
+        _swipeItems.add(
+          SwipeItem(
+            content: m,
+            likeAction: () async {
+              await LikeService.instance.likeUser(
+                m.uid,
+                commonFavoritesCount: m.commonFavCount,
+                commonFiveStarsCount: m.commonFiveCount,
+              );
+              // Sekmeyi Beğenilenler'e al (0: Eşleşmeler, 1: Geçilenler, 2: Beğenilenler)
+              DefaultTabController.of(context)?.animateTo(2);
+            },
+            nopeAction: () async {
+              await LikeService.instance.passUser(m.uid);
+              DefaultTabController.of(context)?.animateTo(1);
+            },
+          ),
+        );
+      }
+
       setState(() {
-        _all = results;
-        _visibleCount = results.isEmpty
-            ? 0
-            : (_pageSize).clamp(0, results.length);
-        _initialLoading = false;
+        _matchEngine = MatchEngine(swipeItems: _swipeItems);
+        _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      // propagate via Scaffold below
       setState(() {
+        _loading = false;
         _all = const [];
-        _initialLoading = false;
+        _swipeItems.clear();
       });
-      // ignore: use_build_context_synchronously
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Eşleşmeler alınamadı: $e')));
     }
-  }
-
-  void _onScroll() {
-    if (_loadingMore || _initialLoading) return;
-    if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
-    // When user is within 400px of bottom, reveal next page
-    if (position.pixels > position.maxScrollExtent - 400) {
-      _loadMore();
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (_visibleCount >= _all.length) return;
-    setState(() => _loadingMore = true);
-    await Future<void>.delayed(
-      const Duration(milliseconds: 50),
-    ); // allow a frame
-    if (!mounted) return;
-    final next = (_visibleCount + _pageSize).clamp(0, _all.length);
-    setState(() {
-      _visibleCount = next;
-      _loadingMore = false;
-    });
   }
 
   @override
@@ -103,87 +99,75 @@ class _MatchListScreenState extends State<MatchListScreen> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Eşleşmeler')),
-      body: _initialLoading
-          ? const Center(child: CircularProgressIndicator())
-          : (_all.isEmpty
-                ? const Center(child: Text('Şu an eşleşme yok.'))
-                : RefreshIndicator(
-                    onRefresh: _loadInitial,
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(12),
-                      itemCount: _visibleCount + 1, // +1 for loader at the end
-                      cacheExtent: 800,
-                      addAutomaticKeepAlives: true,
-                      itemBuilder: (context, i) {
-                        if (i >= _visibleCount) {
-                          final hasMore = _visibleCount < _all.length;
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 24),
-                            child: Center(
-                              child: hasMore
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Text('Hepsi bu kadar 👋'),
-                            ),
-                          );
-                        }
-                        final m = _all[i];
-                        return RepaintBoundary(
-                          child: _MatchCard(
-                            key: ValueKey(m.uid),
-                            result: m,
-                            onOpen: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => MatchScreen(result: m),
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Eşleşmeler'),
+          bottom: TabBar(
+            tabs: [
+              const Tab(text: 'Eşleşmeler'),
+              const Tab(text: 'Geçilenler'),
+              const Tab(text: 'Beğenilenler'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // --- Tab 1: mevcut eşleşme listesi ---
+            _loading
+                ? const Center(child: CircularProgressIndicator())
+                : (_swipeItems.isEmpty
+                      ? const Center(child: Text('Şu an eşleşme yok.'))
+                      : Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: SwipeCards(
+                            matchEngine: _matchEngine,
+                            // allow inner vertical scroll by disabling up-swipe capture
+                            upSwipeAllowed: false,
+                            fillSpace: true,
+                            onStackFinished: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Hepsi bu kadar 👋'),
                                 ),
                               );
                             },
-                            onLike: () async {
-                              try {
-                                await LikeService.instance.likeUser(
-                                  m.uid,
-                                  commonFavoritesCount: m.commonFavCount,
-                                  commonFiveStarsCount: m.commonFiveCount,
-                                );
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Beğenildi')),
-                                );
-                              } catch (e) {
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Beğenme hatası: $e')),
-                                );
-                              }
-                            },
-                            onPass: () async {
-                              try {
-                                await LikeService.instance.passUser(m.uid);
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Geçildi')),
-                                );
-                              } catch (e) {
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Geç hatası: $e')),
-                                );
-                              }
+                            itemBuilder: (context, index) {
+                              final m =
+                                  _swipeItems[index].content
+                                      as global_match.MatchResult;
+                              return _MatchCard(
+                                key: ValueKey(m.uid),
+                                result: m,
+                                onOpen: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => MatchScreen(result: m),
+                                    ),
+                                  );
+                                },
+                                onLike: () {
+                                  // Right swipe (LIKE): service is executed via SwipeItem.likeAction
+                                  _matchEngine.currentItem?.like();
+                                },
+                                onPass: () {
+                                  // Left swipe (PASS): service is executed via SwipeItem.nopeAction
+                                  _matchEngine.currentItem?.nope();
+                                },
+                              );
                             },
                           ),
-                        );
-                      },
-                    ),
-                  )),
+                        )),
+
+            // --- Tab 2: Geçilenler ---
+            const PassesListBody(),
+
+            // --- Tab 3: Beğenilenler ---
+            const LikesListBody(),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -250,119 +234,143 @@ class _MatchCardState extends State<_MatchCard>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Header row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 40,
-                        backgroundImage:
-                            (m.photoURL != null && m.photoURL!.isNotEmpty)
-                            ? NetworkImage(m.photoURL!)
-                            : null,
-                        child: (m.photoURL == null || m.photoURL!.isEmpty)
-                            ? const Icon(Icons.person, size: 40)
-                            : null,
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium,
-                            ),
+                  // Scrollable content
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.zero,
+                      physics: const BouncingScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Header row
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 40,
+                                backgroundImage:
+                                    (m.photoURL != null &&
+                                        m.photoURL!.isNotEmpty)
+                                    ? NetworkImage(m.photoURL!)
+                                    : null,
+                                child:
+                                    (m.photoURL == null || m.photoURL!.isEmpty)
+                                    ? const Icon(Icons.person, size: 40)
+                                    : null,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          _Pill(
+                                            icon: Icons.percent,
+                                            text: '%$pct uyum',
+                                          ),
+                                          _Pill(
+                                            icon: Icons.star_rate_rounded,
+                                            text:
+                                                'Ortak 5★: ${m.commonFiveCount}',
+                                          ),
+                                          _Pill(
+                                            icon: Icons.favorite_outline,
+                                            text:
+                                                'Ortak fav: ${m.commonFavCount}',
+                                          ),
+                                          if (m.commonWatchCount > 0)
+                                            _Pill(
+                                              icon: Icons.visibility_outlined,
+                                              text:
+                                                  'Ortak watchlist: ${m.commonWatchCount}',
+                                            ),
+                                          if (cd?.age != null)
+                                            _Pill(
+                                              icon: Icons.cake_outlined,
+                                              text: 'Yaş: ${cd!.age}',
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Favorite genres / directors / actors chips (limited)
+                          if (cd != null) ...[
+                            if (cd.genres.isNotEmpty)
+                              _ChipsRow(
+                                label: 'Sevdiği Türler',
+                                values: cd.genres.take(6).toList(),
+                              ),
+                            if (cd.directors.isNotEmpty)
+                              _ChipsRow(
+                                label: 'Sevdiği Yönetmenler',
+                                values: cd.directors.take(4).toList(),
+                              ),
+                            if (cd.actors.isNotEmpty)
+                              _ChipsRow(
+                                label: 'Sevdiği Oyuncular',
+                                values: cd.actors.take(4).toList(),
+                              ),
                             const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _Pill(icon: Icons.percent, text: '%$pct uyum'),
-                                _Pill(
-                                  icon: Icons.star_rate_rounded,
-                                  text: 'Ortak 5★: ${m.commonFiveCount}',
-                                ),
-                                _Pill(
-                                  icon: Icons.favorite_outline,
-                                  text: 'Ortak fav: ${m.commonFavCount}',
-                                ),
-                                if (m.commonWatchCount > 0)
-                                  _Pill(
-                                    icon: Icons.visibility_outlined,
-                                    text:
-                                        'Ortak watchlist: ${m.commonWatchCount}',
-                                  ),
-                                if (cd?.age != null)
-                                  _Pill(
-                                    icon: Icons.cake_outlined,
-                                    text: 'Yaş: ${cd!.age}',
-                                  ),
-                              ],
-                            ),
+                          ] else ...[
+                            const _SkeletonLine(),
+                            const SizedBox(height: 8),
                           ],
-                        ),
+
+                          // Common film posters preview (five★, favorites, watchlist)
+                          if (cd != null &&
+                              (cd.favPosters.isNotEmpty ||
+                                  cd.fivePosters.isNotEmpty ||
+                                  cd.watchPosters.isNotEmpty)) ...[
+                            if (cd.fivePosters.isNotEmpty) ...[
+                              const _SectionLabel(text: 'Ortak 5★ Filmler'),
+                              const SizedBox(height: 8),
+                              _PosterStrip(urls: cd.fivePosters),
+                              const SizedBox(height: 12),
+                            ],
+                            if (cd.favPosters.isNotEmpty) ...[
+                              const _SectionLabel(text: 'Ortak Favoriler'),
+                              const SizedBox(height: 8),
+                              _PosterStrip(urls: cd.favPosters),
+                              const SizedBox(height: 12),
+                            ],
+                            if (cd.watchPosters.isNotEmpty) ...[
+                              const _SectionLabel(text: 'Ortak Watchlist'),
+                              const SizedBox(height: 8),
+                              _PosterStrip(urls: cd.watchPosters),
+                              const SizedBox(height: 12),
+                            ],
+                          ] else ...[
+                            if (snap.connectionState == ConnectionState.waiting)
+                              const _SkeletonPosters(),
+                          ],
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-
-                  const SizedBox(height: 16),
-
-                  // Favorite genres / directors / actors chips (limited)
-                  if (cd != null) ...[
-                    if (cd.genres.isNotEmpty)
-                      _ChipsRow(
-                        label: 'Sevdiği Türler',
-                        values: cd.genres.take(6).toList(),
-                      ),
-                    if (cd.directors.isNotEmpty)
-                      _ChipsRow(
-                        label: 'Sevdiği Yönetmenler',
-                        values: cd.directors.take(4).toList(),
-                      ),
-                    if (cd.actors.isNotEmpty)
-                      _ChipsRow(
-                        label: 'Sevdiği Oyuncular',
-                        values: cd.actors.take(4).toList(),
-                      ),
-                    const SizedBox(height: 8),
-                  ] else ...[
-                    const _SkeletonLine(),
-                    const SizedBox(height: 8),
-                  ],
-
-                  // Common film posters preview (five★, favorites, watchlist)
-                  if (cd != null &&
-                      (cd.favPosters.isNotEmpty ||
-                          cd.fivePosters.isNotEmpty ||
-                          cd.watchPosters.isNotEmpty)) ...[
-                    if (cd.fivePosters.isNotEmpty) ...[
-                      const _SectionLabel(text: 'Ortak 5★ Filmler'),
-                      const SizedBox(height: 8),
-                      _PosterStrip(urls: cd.fivePosters),
-                      const SizedBox(height: 12),
-                    ],
-                    if (cd.favPosters.isNotEmpty) ...[
-                      const _SectionLabel(text: 'Ortak Favoriler'),
-                      const SizedBox(height: 8),
-                      _PosterStrip(urls: cd.favPosters),
-                      const SizedBox(height: 12),
-                    ],
-                    if (cd.watchPosters.isNotEmpty) ...[
-                      const _SectionLabel(text: 'Ortak Watchlist'),
-                      const SizedBox(height: 8),
-                      _PosterStrip(urls: cd.watchPosters),
-                      const SizedBox(height: 12),
-                    ],
-                  ] else ...[
-                    if (snap.connectionState == ConnectionState.waiting)
-                      const _SkeletonPosters(),
-                  ],
 
                   const SizedBox(height: 12),
 
+                  // Fixed bottom action buttons
                   Row(
                     children: [
                       Expanded(
