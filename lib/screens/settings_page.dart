@@ -381,12 +381,7 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _busy ? null : _verifyEmail,
           ),
           const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.logout),
-            title: const Text('Çıkış yap'),
-            onTap: _busy ? null : _logout,
-          ),
-          const Divider(height: 0),
+
           const ListTile(
             leading: Icon(Icons.notifications_outlined),
             title: Text('Bildirimler'),
@@ -403,6 +398,12 @@ class _SettingsPageState extends State<SettingsPage> {
             leading: Icon(Icons.info_outline),
             title: Text('Hakkında'),
             subtitle: Text('Sürüm ve lisanslar'),
+          ),
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Çıkış yap'),
+            onTap: _busy ? null : _logout,
           ),
           const Divider(height: 0),
           ListTile(

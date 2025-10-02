@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/services/match_service.dart';
-import 'package:fluttergirdi/auth/auth_gate.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui' as ui;

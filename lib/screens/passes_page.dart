@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/screens/profilescreen.dart' show ProfilePage;
 
 class PassesPage extends StatelessWidget {
   const PassesPage({super.key});
@@ -96,174 +97,172 @@ class _PassDetailCard extends StatelessWidget {
   final DateTime? when;
   const _PassDetailCard({required this.otherUid, this.when});
 
+  void _openProfile(BuildContext context, String uid) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ProfilePage(),
+        settings: RouteSettings(arguments: uid),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
     final theme = Theme.of(context);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: FutureBuilder<_CardData>(
-          future: _loadCardData(otherUid),
-          builder: (context, snap) {
-            final cd = snap.data;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                      future: fs.collection('users').doc(otherUid).get(),
-                      builder: (context, uSnap) {
-                        String title = otherUid;
-                        String? photoURL;
-                        if (uSnap.hasData && uSnap.data!.exists) {
-                          final u = uSnap.data!.data()!;
-                          final username = (u['username'] ?? '') as String;
-                          final displayName =
-                              (u['displayName'] ?? '') as String;
-                          final lb = (u['letterboxdUsername'] ?? '') as String;
-                          photoURL = (u['photoURL'] ?? '') as String;
-                          title = username.isNotEmpty
-                              ? username
-                              : (displayName.isNotEmpty
-                                    ? displayName
-                                    : (lb.isNotEmpty ? '@$lb' : otherUid));
-                        }
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            CircleAvatar(
-                              radius: 40,
-                              backgroundImage:
-                                  (photoURL != null && photoURL!.isNotEmpty)
-                                  ? NetworkImage(photoURL!)
-                                  : null,
-                              child: (photoURL == null || photoURL!.isEmpty)
-                                  ? const Icon(Icons.person, size: 40)
-                                  : null,
-                            ),
-                            const SizedBox(width: 16),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  style: theme.textTheme.titleMedium,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (when != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Text(
-                                      _formatTimeOrDate(when!),
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(
-                                            color: Colors.grey.shade600,
-                                          ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // Bilgi pill'leri
-                if (cd != null)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _openProfile(context, otherUid),
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: FutureBuilder<_CardData>(
+            future: _loadCardData(otherUid),
+            builder: (context, snap) {
+              final cd = snap.data;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (cd.age != null)
-                        _Pill(
-                          icon: Icons.cake_outlined,
-                          text: 'Yaş: ${cd.age}',
-                        ),
-                      if (cd.commonFiveCount != null)
-                        _Pill(
-                          icon: Icons.star_rate_rounded,
-                          text: 'Ortak 5★: ${cd.commonFiveCount}',
-                        ),
-                      if (cd.commonFavCount != null)
-                        _Pill(
-                          icon: Icons.favorite_outline,
-                          text: 'Ortak fav: ${cd.commonFavCount}',
-                        ),
-                      if (cd.commonWatchCount != null)
-                        _Pill(
-                          icon: Icons.visibility_outlined,
-                          text: 'Ortak watchlist: ${cd.commonWatchCount}',
-                        ),
+                      FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                        future: fs.collection('users').doc(otherUid).get(),
+                        builder: (context, uSnap) {
+                          String title = otherUid;
+                          String? photoURL;
+                          if (uSnap.hasData && uSnap.data!.exists) {
+                            final u = uSnap.data!.data()!;
+                            final username = (u['username'] ?? '') as String;
+                            final displayName =
+                                (u['displayName'] ?? '') as String;
+                            final lb =
+                                (u['letterboxdUsername'] ?? '') as String;
+                            photoURL = (u['photoURL'] ?? '') as String;
+                            title = username.isNotEmpty
+                                ? username
+                                : (displayName.isNotEmpty
+                                      ? displayName
+                                      : (lb.isNotEmpty ? '@$lb' : otherUid));
+                          }
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 40,
+                                backgroundImage:
+                                    (photoURL != null && photoURL.isNotEmpty)
+                                    ? NetworkImage(photoURL)
+                                    : null,
+                                child: (photoURL == null || photoURL.isEmpty)
+                                    ? const Icon(Icons.person, size: 40)
+                                    : null,
+                              ),
+                              const SizedBox(width: 16),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: theme.textTheme.titleMedium,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ],
-                  )
-                else
-                  const _SkeletonLine(),
+                  ),
 
-                const SizedBox(height: 12),
+                  const SizedBox(height: 12),
 
-                // Türler / Yönetmenler / Oyuncular
-                if (cd != null) ...[
-                  if (cd.genres.isNotEmpty)
-                    _ChipsRow(
-                      label: 'Sevdiği Türler',
-                      values: cd.genres.take(6).toList(),
-                    ),
-                  if (cd.directors.isNotEmpty)
-                    _ChipsRow(
-                      label: 'Sevdiği Yönetmenler',
-                      values: cd.directors.take(4).toList(),
-                    ),
-                  if (cd.actors.isNotEmpty)
-                    _ChipsRow(
-                      label: 'Sevdiği Oyuncular',
-                      values: cd.actors.take(4).toList(),
-                    ),
-                ] else ...[
-                  const _SkeletonLine(),
+                  // Bilgi pill'leri
+                  if (cd != null)
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (cd.age != null)
+                          _Pill(
+                            icon: Icons.cake_outlined,
+                            text: 'Yaş: ${cd.age}',
+                          ),
+                        if (cd.commonFiveCount != null)
+                          _Pill(
+                            icon: Icons.star_rate_rounded,
+                            text: 'Ortak 5★: ${cd.commonFiveCount}',
+                          ),
+                        if (cd.commonFavCount != null)
+                          _Pill(
+                            icon: Icons.favorite_outline,
+                            text: 'Ortak fav: ${cd.commonFavCount}',
+                          ),
+                      ],
+                    )
+                  else
+                    const _SkeletonLine(),
+
+                  const SizedBox(height: 12),
+
+                  // Türler / Yönetmenler / Oyuncular
+                  if (cd != null) ...[
+                    if (cd.genres.isNotEmpty)
+                      _ChipsRow(
+                        label: 'Sevdiği Türler',
+                        values: cd.genres.take(6).toList(),
+                      ),
+                    if (cd.directors.isNotEmpty)
+                      _ChipsRow(
+                        label: 'Sevdiği Yönetmenler',
+                        values: cd.directors.take(4).toList(),
+                      ),
+                    if (cd.actors.isNotEmpty)
+                      _ChipsRow(
+                        label: 'Sevdiği Oyuncular',
+                        values: cd.actors.take(4).toList(),
+                      ),
+                  ] else ...[
+                    const _SkeletonLine(),
+                  ],
+
+                  const SizedBox(height: 8),
+
+                  // Poster şeritleri
+                  if (cd != null &&
+                      (cd.fivePosters.isNotEmpty ||
+                          cd.favPosters.isNotEmpty ||
+                          cd.watchPosters.isNotEmpty)) ...[
+                    if (cd.fivePosters.isNotEmpty) ...[
+                      const _SectionLabel(text: 'Ortak 5★ Filmler'),
+                      const SizedBox(height: 8),
+                      _PosterStrip(urls: cd.fivePosters),
+                      const SizedBox(height: 12),
+                    ],
+                    if (cd.favPosters.isNotEmpty) ...[
+                      const _SectionLabel(text: 'Ortak Favoriler'),
+                      const SizedBox(height: 8),
+                      _PosterStrip(urls: cd.favPosters),
+                      const SizedBox(height: 12),
+                    ],
+                    if (cd.watchPosters.isNotEmpty) ...[
+                      const _SectionLabel(text: 'Ortak Watchlist'),
+                      const SizedBox(height: 8),
+                      _PosterStrip(urls: cd.watchPosters),
+                      const SizedBox(height: 12),
+                    ],
+                  ] else ...[
+                    const _SkeletonPosters(),
+                  ],
                 ],
-
-                const SizedBox(height: 8),
-
-                // Poster şeritleri
-                if (cd != null &&
-                    (cd.fivePosters.isNotEmpty ||
-                        cd.favPosters.isNotEmpty ||
-                        cd.watchPosters.isNotEmpty)) ...[
-                  if (cd.fivePosters.isNotEmpty) ...[
-                    const _SectionLabel(text: 'Ortak 5★ Filmler'),
-                    const SizedBox(height: 8),
-                    _PosterStrip(urls: cd.fivePosters),
-                    const SizedBox(height: 12),
-                  ],
-                  if (cd.favPosters.isNotEmpty) ...[
-                    const _SectionLabel(text: 'Ortak Favoriler'),
-                    const SizedBox(height: 8),
-                    _PosterStrip(urls: cd.favPosters),
-                    const SizedBox(height: 12),
-                  ],
-                  if (cd.watchPosters.isNotEmpty) ...[
-                    const _SectionLabel(text: 'Ortak Watchlist'),
-                    const SizedBox(height: 8),
-                    _PosterStrip(urls: cd.watchPosters),
-                    const SizedBox(height: 12),
-                  ],
-                ] else ...[
-                  const _SkeletonPosters(),
-                ],
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -301,16 +300,101 @@ Future<_CardData> _loadCardData(String otherUid) async {
   final me = FirebaseAuth.instance.currentUser!.uid;
 
   // helpers
-  List<String> _ls(dynamic x) {
+  List<String> ls(dynamic x) {
     if (x is List) return x.map((e) => e.toString()).toList();
     return const <String>[];
   }
 
-  List<String> _pickList(Map<String, dynamic> map, List<String> keys) {
+  // More robust extractors: support ["a","b"], [1,2], or [{id:"x"},{poster:"..."}]
+  List<String> extractIds(dynamic v) {
+    final out = <String>[];
+    if (v is List) {
+      for (final e in v) {
+        if (e is String) {
+          if (e.trim().isNotEmpty) out.add(e.trim());
+        } else if (e is num) {
+          out.add(e.toString());
+        } else if (e is Map) {
+          final m = e.cast<String, dynamic>();
+          final candidates = [
+            'id',
+            'key',
+            'filmId',
+            'movieId',
+            'tmdbId',
+            'imdbId',
+            'letterboxdId',
+          ];
+          for (final k in candidates) {
+            final val = m[k];
+            if (val is String && val.trim().isNotEmpty) {
+              out.add(val.trim());
+              break;
+            }
+            if (val is num) {
+              out.add(val.toString());
+              break;
+            }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  List<String> extractPosters(dynamic v) {
+    final out = <String>[];
+    if (v is List) {
+      for (final e in v) {
+        if (e is String) {
+          if (e.trim().isNotEmpty) out.add(e.trim());
+        } else if (e is Map) {
+          final m = e.cast<String, dynamic>();
+          final candidates = [
+            'poster',
+            'posterUrl',
+            'poster_url',
+            'posterPath',
+            'poster_path',
+            'image',
+            'url',
+          ];
+          for (final k in candidates) {
+            final val = m[k];
+            if (val is String && val.trim().isNotEmpty) {
+              out.add(val.trim());
+              break;
+            }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  List<String> pickIds(Map<String, dynamic> map, List<String> keys) {
+    for (final k in keys) {
+      final v = map[k];
+      final ids = extractIds(v);
+      if (ids.isNotEmpty) return ids;
+    }
+    return const <String>[];
+  }
+
+  List<String> pickPosters(Map<String, dynamic> map, List<String> keys) {
+    for (final k in keys) {
+      final v = map[k];
+      final posters = extractPosters(v);
+      if (posters.isNotEmpty) return posters;
+    }
+    return const <String>[];
+  }
+
+  List<String> pickList(Map<String, dynamic> map, List<String> keys) {
     for (final k in keys) {
       final v = map[k];
       if (v != null) {
-        final list = _ls(v);
+        final list = ls(v);
         if (list.isNotEmpty) return list;
       }
     }
@@ -322,7 +406,7 @@ Future<_CardData> _loadCardData(String otherUid) async {
     return a.where(bs.contains).toList();
   }
 
-  Future<List<String>> _fetchPostersByDocIds(List<String> ids) async {
+  Future<List<String>> fetchPostersByDocIds(List<String> ids) async {
     if (ids.isEmpty) return const <String>[];
     const chunk = 10; // whereIn limit
     final posters = <String>[];
@@ -331,14 +415,29 @@ Future<_CardData> _loadCardData(String otherUid) async {
         i,
         i + chunk > ids.length ? ids.length : i + chunk,
       );
-      final qs = await fs
+
+      QuerySnapshot<Map<String, dynamic>> qs = await fs
           .collection('catalog_films')
           .where(FieldPath.documentId, whereIn: part)
           .get();
+
+      if (qs.docs.isEmpty) {
+        // fallback: try matching by 'key' field
+        qs = await fs
+            .collection('catalog_films')
+            .where('key', whereIn: part)
+            .get();
+      }
+
       for (final d in qs.docs) {
         final m = d.data();
-        final p = (m['poster'] ?? m['posterUrl'] ?? m['poster_path'] ?? '')
-            .toString();
+        final p =
+            (m['poster'] ??
+                    m['posterUrl'] ??
+                    m['image'] ??
+                    m['poster_path'] ??
+                    '')
+                .toString();
         if (p.isNotEmpty) posters.add(p);
       }
     }
@@ -351,56 +450,78 @@ Future<_CardData> _loadCardData(String otherUid) async {
   final my = myTaste.data() ?? const <String, dynamic>{};
   final his = hisTaste.data() ?? const <String, dynamic>{};
 
-  final myGenres = _pickList(my, ['genres', 'favoriteGenres']);
-  final hisGenres = _pickList(his, ['genres', 'favoriteGenres']);
-  final myDirectors = _pickList(my, ['directors', 'favoriteDirectors']);
-  final hisDirectors = _pickList(his, ['directors', 'favoriteDirectors']);
-  final myActors = _pickList(my, ['actors', 'favoriteActors']);
-  final hisActors = _pickList(his, ['actors', 'favoriteActors']);
+  final hisGenres = pickList(his, ['genres', 'favoriteGenres']);
+  final hisDirectors = pickList(his, ['directors', 'favoriteDirectors']);
+  final hisActors = pickList(his, ['actors', 'favoriteActors']);
 
-  final myFiveIds = _pickList(my, [
+  final myFiveIds = pickIds(my, [
     'fiveIds',
     'fiveFilmIds',
     'fiveStars',
     'fiveStarIds',
   ]);
-  final hisFiveIds = _pickList(his, [
+  final hisFiveIds = pickIds(his, [
     'fiveIds',
     'fiveFilmIds',
     'fiveStars',
     'fiveStarIds',
   ]);
-  final myFavIds = _pickList(my, [
+  final myFavIds = pickIds(my, [
     'favIds',
     'favoriteFilmIds',
     'favorites',
     'favoriteIds',
   ]);
-  final hisFavIds = _pickList(his, [
+  final hisFavIds = pickIds(his, [
     'favIds',
     'favoriteFilmIds',
     'favorites',
     'favoriteIds',
   ]);
-  final myWatchIds = _pickList(my, ['watchIds', 'watchlistIds', 'watchlist']);
-  final hisWatchIds = _pickList(his, ['watchIds', 'watchlistIds', 'watchlist']);
+  final myWatchIds = pickIds(my, [
+    'watchIds',
+    'watchlistIds',
+    'watchlist',
+    'wlIds',
+    'watch_list',
+    'wl',
+  ]);
+  final hisWatchIds = pickIds(his, [
+    'watchIds',
+    'watchlistIds',
+    'watchlist',
+    'wlIds',
+    'watch_list',
+    'wl',
+  ]);
 
-  final myFivePostersRaw = _pickList(my, ['fivePosters', 'fivePosterUrls']);
-  final hisFivePostersRaw = _pickList(his, ['fivePosters', 'fivePosterUrls']);
-  final myFavPostersRaw = _pickList(my, [
+  final myFivePostersRaw = pickPosters(my, ['fivePosters', 'fivePosterUrls']);
+  final hisFivePostersRaw = pickPosters(his, ['fivePosters', 'fivePosterUrls']);
+  final myFavPostersRaw = pickPosters(my, [
     'favPosters',
     'favoritePosters',
     'favoritePosterUrls',
   ]);
-  final hisFavPostersRaw = _pickList(his, [
+  final hisFavPostersRaw = pickPosters(his, [
     'favPosters',
     'favoritePosters',
     'favoritePosterUrls',
   ]);
-  final myWatchPostersRaw = _pickList(my, ['watchPosters', 'watchPosterUrls']);
-  final hisWatchPostersRaw = _pickList(his, [
+  final myWatchPostersRaw = pickPosters(my, [
     'watchPosters',
     'watchPosterUrls',
+    'watchlistPosters',
+    'watchlistPosterUrls',
+    'wlPosters',
+    'watchlist',
+  ]);
+  final hisWatchPostersRaw = pickPosters(his, [
+    'watchPosters',
+    'watchPosterUrls',
+    'watchlistPosters',
+    'watchlistPosterUrls',
+    'wlPosters',
+    'watchlist',
   ]);
 
   List<String> commonFiveIds = inter(myFiveIds, hisFiveIds);
@@ -408,16 +529,50 @@ Future<_CardData> _loadCardData(String otherUid) async {
   List<String> commonWatchIds = inter(myWatchIds, hisWatchIds);
 
   List<String> fivePosters = commonFiveIds.isNotEmpty
-      ? await _fetchPostersByDocIds(commonFiveIds)
+      ? await fetchPostersByDocIds(commonFiveIds)
       : inter(myFivePostersRaw, hisFivePostersRaw);
 
   List<String> favPosters = commonFavIds.isNotEmpty
-      ? await _fetchPostersByDocIds(commonFavIds)
+      ? await fetchPostersByDocIds(commonFavIds)
       : inter(myFavPostersRaw, hisFavPostersRaw);
 
   List<String> watchPosters = commonWatchIds.isNotEmpty
-      ? await _fetchPostersByDocIds(commonWatchIds)
+      ? await fetchPostersByDocIds(commonWatchIds)
       : inter(myWatchPostersRaw, hisWatchPostersRaw);
+
+  // Fallback: ID listeleri var ama kesişim ve poster-intersection boşsa, ID -> poster çöz ve poster'e göre kesiştir
+  Future<List<String>> resolveAndIntersectByPoster(
+    List<String> mineIds,
+    List<String> hisIds,
+  ) async {
+    if (mineIds.isEmpty || hisIds.isEmpty) return const <String>[];
+    final mine = await fetchPostersByDocIds(mineIds);
+    final his = await fetchPostersByDocIds(hisIds);
+    final hisSet = his.toSet();
+    return mine.where(hisSet.contains).toList();
+  }
+
+  if (commonWatchIds.isEmpty &&
+      watchPosters.isEmpty &&
+      myWatchIds.isNotEmpty &&
+      hisWatchIds.isNotEmpty) {
+    final p = await resolveAndIntersectByPoster(myWatchIds, hisWatchIds);
+    if (p.isNotEmpty) watchPosters = p;
+  }
+  if (commonFavIds.isEmpty &&
+      favPosters.isEmpty &&
+      myFavIds.isNotEmpty &&
+      hisFavIds.isNotEmpty) {
+    final p = await resolveAndIntersectByPoster(myFavIds, hisFavIds);
+    if (p.isNotEmpty) favPosters = p;
+  }
+  if (commonFiveIds.isEmpty &&
+      fivePosters.isEmpty &&
+      myFiveIds.isNotEmpty &&
+      hisFiveIds.isNotEmpty) {
+    final p = await resolveAndIntersectByPoster(myFiveIds, hisFiveIds);
+    if (p.isNotEmpty) fivePosters = p;
+  }
 
   int? age;
   try {
@@ -466,7 +621,7 @@ class _Pill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -557,7 +712,7 @@ class _SkeletonLine extends StatelessWidget {
       height: 16,
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.06),
+        color: Colors.black.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(4),
       ),
     );
@@ -577,24 +732,11 @@ class _SkeletonPosters extends StatelessWidget {
         itemBuilder: (context, i) => Container(
           width: 80,
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(8),
           ),
         ),
       ),
     );
   }
-}
-
-String _formatTimeOrDate(DateTime dt) {
-  final local = dt.toLocal();
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final thatDay = DateTime(local.year, local.month, local.day);
-  if (thatDay == today) {
-    final hh = local.hour.toString().padLeft(2, '0');
-    final mm = local.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
-  }
-  return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}';
 }

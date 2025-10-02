@@ -63,11 +63,11 @@ class _MatchListScreenState extends State<MatchListScreen> {
                 commonFiveStarsCount: m.commonFiveCount,
               );
               // Sekmeyi Beğenilenler'e al (0: Eşleşmeler, 1: Geçilenler, 2: Beğenilenler)
-              DefaultTabController.of(context)?.animateTo(2);
+              DefaultTabController.of(context).animateTo(2);
             },
             nopeAction: () async {
               await LikeService.instance.passUser(m.uid);
-              DefaultTabController.of(context)?.animateTo(1);
+              DefaultTabController.of(context).animateTo(1);
             },
           ),
         );
@@ -100,20 +100,24 @@ class _MatchListScreenState extends State<MatchListScreen> {
     }
 
     return DefaultTabController(
+      initialIndex: 1,
       length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Eşleşmeler'),
           bottom: TabBar(
             tabs: [
-              const Tab(text: 'Eşleşmeler'),
               const Tab(text: 'Geçilenler'),
+              const Tab(text: 'Eşleşmeler'),
+
               const Tab(text: 'Beğenilenler'),
             ],
           ),
         ),
         body: TabBarView(
           children: [
+            // --- Tab 2: Geçilenler ---
+            const PassesListBody(),
             // --- Tab 1: mevcut eşleşme listesi ---
             _loading
                 ? const Center(child: CircularProgressIndicator())
@@ -159,9 +163,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
                             },
                           ),
                         )),
-
-            // --- Tab 2: Geçilenler ---
-            const PassesListBody(),
 
             // --- Tab 3: Beğenilenler ---
             const LikesListBody(),
@@ -819,15 +820,35 @@ Future<_CardData> _loadCardData(global_match.MatchResult m) async {
     const chunk = 10;
     for (var i = 0; i < pick.length; i += chunk) {
       final sub = pick.sublist(i, math.min(i + chunk, pick.length));
+      // Try with documentId first
       final qs = await db
           .collection('catalog_films')
           .where(FieldPath.documentId, whereIn: sub)
           .get();
-      for (final doc in qs.docs) {
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = qs.docs;
+      // Fallback: if no docs, try with 'key' field
+      if (docs.isEmpty) {
+        final altQs = await db
+            .collection('catalog_films')
+            .where('key', whereIn: sub)
+            .get();
+        docs = altQs.docs;
+      }
+      for (final doc in docs) {
         final d = doc.data();
-        final p = (d['posterUrl'] ?? '') as String;
+        final p =
+            (d['posterUrl'] ??
+                    d['poster'] ??
+                    d['image'] ??
+                    d['poster_path'] ??
+                    '')
+                as String;
         if (p.isNotEmpty) posters.add(p);
       }
+      // Optionally add debugPrint to aid diagnosis
+      debugPrint(
+        'readPosters: sub=${sub.length}, posters=${posters.length} (this chunk: ${docs.length})',
+      );
     }
     return posters;
   }
