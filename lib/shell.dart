@@ -29,76 +29,109 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(index: _index, children: _pages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.view_list_outlined),
-            selectedIcon: Icon(Icons.view_list),
-            label: 'Feed',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.favorite_border),
-            selectedIcon: Icon(Icons.favorite),
-            label: 'Match',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-          NavigationDestination(
-            icon: StreamBuilder<int>(
-              stream: ChatService.instance.totalUnreadFor(
-                FirebaseAuth.instance.currentUser?.uid ?? '',
-              ),
-              builder: (context, snap) {
-                final count = snap.data ?? 0;
-                final icon = const Icon(Icons.chat_bubble_outline);
-                if (count <= 0) return icon;
-                return Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    icon,
-                    Positioned(
-                      right: -2,
-                      top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 14,
-                          minHeight: 14,
-                        ),
-                        child: Text(
-                          count > 9 ? '9+' : '$count',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
+      bottomNavigationBar: _buildBottomBar(context),
+    );
+  }
+
+  Widget _buildBottomBar(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SafeArea(
+      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: cs.shadow.withValues(alpha: 0.14),
+              blurRadius: 22,
+              offset: const Offset(0, 8),
             ),
-            selectedIcon: const Icon(Icons.chat_bubble),
-            label: 'Messages',
+          ],
+        ),
+        child: NavigationBarTheme(
+          data: NavigationBarThemeData(
+            height: 64,
+            backgroundColor: Colors.transparent,
+            indicatorColor: cs.primary.withValues(alpha: 0.14),
+            indicatorShape: const StadiumBorder(),
+            labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+            iconTheme: WidgetStateProperty.resolveWith((states) {
+              final selected = states.contains(WidgetState.selected);
+              return IconThemeData(
+                size: 22,
+                color: selected ? cs.primary : cs.onSurfaceVariant,
+              );
+            }),
+            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+              final selected = states.contains(WidgetState.selected);
+              return TextStyle(
+                fontWeight: FontWeight.w600,
+                color: selected ? cs.primary : cs.onSurfaceVariant,
+              );
+            }),
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search),
-            label: 'Search',
+          child: NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: [
+              const NavigationDestination(
+                icon: Icon(Icons.view_list_outlined),
+                selectedIcon: Icon(Icons.view_list),
+                label: 'Feed',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.favorite_border),
+                selectedIcon: Icon(Icons.favorite),
+                label: 'Match',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: Icon(Icons.person),
+                label: 'Profile',
+              ),
+              NavigationDestination(
+                icon: _MessagesIcon(),
+                selectedIcon: _MessagesIcon(selected: true),
+                label: 'Messages',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.search_outlined),
+                selectedIcon: Icon(Icons.search),
+                label: 'Search',
+              ),
+            ],
           ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+class _MessagesIcon extends StatelessWidget {
+  final bool selected;
+  const _MessagesIcon({this.selected = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final baseIcon = Icon(
+      selected ? Icons.chat_bubble : Icons.chat_bubble_outline,
+    );
+
+    return StreamBuilder<int>(
+      stream: ChatService.instance.totalUnreadFor(uid),
+      builder: (context, snap) {
+        final count = snap.data ?? 0;
+        if (count <= 0) return baseIcon;
+        return Badge.count(
+          count: count > 9 ? 9 : count,
+          smallSize: 16,
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          textColor: Colors.white,
+          child: baseIcon,
+        );
+      },
     );
   }
 }
