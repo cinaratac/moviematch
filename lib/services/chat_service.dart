@@ -48,6 +48,36 @@ class ChatService {
         .snapshots();
   }
 
+  // Live latest N messages (descending). Use with ListView(reverse: true).
+  Stream<QuerySnapshot<Map<String, dynamic>>> latestMessagesStream(
+    String chatId, {
+    int limitCount = 30,
+  }) {
+    return _fs
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .limit(limitCount)
+        .snapshots();
+  }
+
+  // One-shot fetch for the next (older) page, starting after a document.
+  Future<QuerySnapshot<Map<String, dynamic>>> fetchOlderMessagesPage(
+    String chatId, {
+    required DocumentSnapshot<Map<String, dynamic>> startAfterDoc,
+    int pageSize = 30,
+  }) {
+    return _fs
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('createdAt', descending: true)
+        .startAfterDocument(startAfterDoc)
+        .limit(pageSize)
+        .get();
+  }
+
   /// Mesaj gönderirken participants alanını da garantiye alır
   Future<void> send(
     String chatId,

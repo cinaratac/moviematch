@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
@@ -303,7 +304,29 @@ class _SearchProfilesScreenState extends State<SearchProfilesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Kullanıcı Ara')),
+      appBar: AppBar(
+        title: const Text('Kullanıcı Ara'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'settings') {
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings_outlined),
+                  title: Text('Ayarlar'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(

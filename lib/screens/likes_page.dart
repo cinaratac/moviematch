@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttergirdi/screens/profilescreen.dart' show ProfilePage;
+import 'package:fluttergirdi/screens/public_profile_screen.dart'
+    show PublicProfileScreen;
 
 class LikesPage extends StatelessWidget {
   const LikesPage({super.key});
@@ -16,21 +17,39 @@ class LikesPage extends StatelessWidget {
 }
 
 /// Pair-doc şemasına göre (likes/{pairId}) beğenilenleri gösterir.
-class LikesListBody extends StatelessWidget {
+class LikesListBody extends StatefulWidget {
   const LikesListBody({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final fs = FirebaseFirestore.instance;
+  State<LikesListBody> createState() => _LikesListBodyState();
+}
 
+class _LikesListBodyState extends State<LikesListBody>
+    with AutomaticKeepAliveClientMixin<LikesListBody> {
+  late final String _uid;
+  late final FirebaseFirestore _fs;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+
+  @override
+  void initState() {
+    super.initState();
+    _uid = FirebaseAuth.instance.currentUser!.uid;
+    _fs = FirebaseFirestore.instance;
+    // Create the stream once; avoid rebuilding it on every build.
+    _stream = _fs
+        .collection('likes')
+        .where('uids', arrayContains: _uid)
+        .snapshots();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // for AutomaticKeepAliveClientMixin
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: fs
-          .collection('likes')
-          .where('uids', arrayContains: uid)
-          .snapshots(),
+      stream: _stream,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !(snapshot.hasData && (snapshot.data?.docs.isNotEmpty ?? false))) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
@@ -47,7 +66,7 @@ class LikesListBody extends StatelessWidget {
           final b = data['b'] as String?;
           if (a == null || b == null) continue;
 
-          final meIsA = (uid == a);
+          final meIsA = (_uid == a);
           final myLike = data[meIsA ? 'aLiked' : 'bLiked'] == true;
           final otherLike = data[meIsA ? 'bLiked' : 'aLiked'] == true;
           final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
@@ -78,11 +97,12 @@ class LikesListBody extends StatelessWidget {
         });
 
         return ListView.builder(
+          key: const PageStorageKey('likes_list'),
           padding: const EdgeInsets.all(12),
           itemCount: items.length,
           itemBuilder: (context, i) {
             final data = items[i].data();
-            final otherUid = (uid == data['a'])
+            final otherUid = (_uid == data['a'])
                 ? data['b'] as String?
                 : data['a'] as String?;
             final whenTs =
@@ -95,6 +115,9 @@ class LikesListBody extends StatelessWidget {
       },
     );
   }
+
+  @override
+  bool get wantKeepAlive => true;
 }
 
 class _LikesDetailCard extends StatelessWidget {
@@ -111,10 +134,7 @@ class _LikesDetailCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       onTap: () {
         Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const ProfilePage(),
-            settings: RouteSettings(arguments: otherUid),
-          ),
+          MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid)),
         );
       },
       child: Card(
@@ -201,11 +221,6 @@ class _LikesDetailCard extends StatelessWidget {
                             icon: Icons.star_rate_rounded,
                             text: 'Ortak 5★: ${cd.commonFiveCount}',
                           ),
-                        if (cd.commonFavCount != null)
-                          _Pill(
-                            icon: Icons.favorite_outline,
-                            text: 'Ortak fav: ${cd.commonFavCount}',
-                          ),
                       ],
                     )
                   else
@@ -247,8 +262,6 @@ class _LikesDetailCard extends StatelessWidget {
                       const SizedBox(height: 12),
                     ],
                     if (cd.favPosters.isNotEmpty) ...[
-                      const _SectionLabel(text: 'Ortak Favoriler'),
-                      const SizedBox(height: 8),
                       _PosterStrip(urls: cd.favPosters),
                       const SizedBox(height: 12),
                     ],

@@ -287,6 +287,18 @@ class UserProfileService {
     }, SetOptions(merge: true));
   }
 
+  /// Mirror disliked keys into users/{uid}.dislikedKeys for visibility
+  Future<void> _mirrorDislikedKeysToUsers({
+    required String uid,
+    required List<String> dislikedKeys,
+  }) async {
+    final clean = _normKeys(dislikedKeys);
+    await _usersRef(uid).set({
+      'dislikedKeys': clean,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   /// Mirror a minimal subset into `users/{uid}` so matching code that queries
   /// `favoritesKeys` can work without reading the full taste profile.
   Future<void> _mirrorFavoritesKeysToUsers({
@@ -295,13 +307,14 @@ class UserProfileService {
     String? letterboxdUsername,
   }) async {
     final cleanLoved = _normKeys(lovedKeys);
-    if (cleanLoved.isEmpty && letterboxdUsername == null) return;
 
     final payload = <String, dynamic>{
       if (letterboxdUsername != null) 'letterboxdUsername': letterboxdUsername,
-      if (cleanLoved.isNotEmpty) 'favoritesKeys': cleanLoved,
+      // Boş liste bile gelse yaz → eski favoritesKeys temizlensin
+      'favoritesKeys': cleanLoved,
       'updatedAt': FieldValue.serverTimestamp(),
     };
+
     await _usersRef(uid).set(payload, SetOptions(merge: true));
   }
 
@@ -335,16 +348,35 @@ class UserProfileService {
     required String uid,
     required TasteProfile profile,
   }) async {
-    final map = profile.toMap();
-    map['updatedAt'] = FieldValue.serverTimestamp();
-    await _tasteRef(uid).set(map, SetOptions(merge: true));
-    // Mirror loved keys + LB username for matching queries that use `users/{uid}`
-    await _mirrorFavoritesKeysToUsers(
-      uid: uid,
-      lovedKeys: profile.loved,
-      letterboxdUsername: profile.letterboxdUsername,
-    );
-    await _mirrorFiveStarKeysToUsers(uid: uid, fiveStarKeys: profile.loved);
+    // Prepare main profile map
+    final map = profile.toMap()..['updatedAt'] = FieldValue.serverTimestamp();
+
+    // Prepare mirrors for users/{uid}
+    final loved = _normKeys(profile.loved);
+    final disliked = _normKeys(profile.disliked);
+
+    final userRef = _usersRef(uid);
+    final tasteRef = _tasteRef(uid);
+
+    final batch = _fs.batch();
+
+    // 1) taste profile (userTasteProfiles/{uid})
+    batch.set(tasteRef, map, SetOptions(merge: true));
+
+    // 2) users/{uid} mirrors (favoritesKeys, fiveStarKeys, dislikedKeys, letterboxdUsername)
+    final mirrorPayload = <String, dynamic>{
+      if (profile.letterboxdUsername != null)
+        'letterboxdUsername': profile.letterboxdUsername,
+      // Boş listeler dâhil yaz → önceki değerler temizlensin
+      'favoritesKeys': loved,
+      'fiveStarKeys': loved,
+      'dislikedKeys': disliked,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    batch.set(userRef, mirrorPayload, SetOptions(merge: true));
+
+    await batch.commit();
   }
 
   /// Patch specific fields without rewriting the whole doc.
@@ -377,6 +409,9 @@ class UserProfileService {
     );
     if (loved != null) {
       await _mirrorFiveStarKeysToUsers(uid: uid, fiveStarKeys: loved);
+    }
+    if (disliked != null) {
+      await _mirrorDislikedKeysToUsers(uid: uid, dislikedKeys: disliked);
     }
   }
 

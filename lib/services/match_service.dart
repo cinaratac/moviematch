@@ -61,7 +61,13 @@ class MatchService {
 
   // In-memory short-term cache for findMatches results per user
   final Map<String, _FindCache> _findCache = {};
-  static const Duration _findCacheTtl = Duration(seconds: 60);
+  static const Duration _findCacheTtl = Duration(seconds: 120);
+  // Cache: my taste profile + hidden uids (likes/passes/matches)
+  final Map<String, Map<String, dynamic>> _myTasteCache = {};
+  final Map<String, DateTime> _myTasteCacheTs = {};
+  final Map<String, Set<String>> _hiddenCache = {};
+  final Map<String, DateTime> _hiddenCacheTs = {};
+  static const Duration _cacheTtl = Duration(minutes: 5);
 
   Set<String> _lcSet(Map<String, dynamic> src, String key) {
     final raw = (src[key] ?? const []) as List;
@@ -85,35 +91,56 @@ class MatchService {
   /* ---------------------------------------------------------------------- */
   /* 1) EŞLEŞME LİSTESİ HESAPLA (YAZMADAN, SADECE HESAP)                     */
   /* ---------------------------------------------------------------------- */
-  Future<List<MatchResult>> findMatches(String myUid) async {
-    final meDoc = await _users.doc(myUid).get();
-    if (!meDoc.exists) return [];
-
-    // Short-term cache: avoid recomputing within TTL for the same user
+  Future<List<MatchResult>> findMatches(
+    String myUid, {
+    int limit = 200,
+    DocumentSnapshot<Map<String, dynamic>>? startAfter,
+  }) async {
+    // 0) short-term result cache (UI tekrar çağırırsa)
     final now = DateTime.now();
     final cached = _findCache[myUid];
     if (cached != null && now.difference(cached.ts) < _findCacheTtl) {
       return cached.results;
     }
 
+    // 1) OWN PROFILE (read once, then cache 5 dk)
+    Map<String, dynamic>? meMap = _myTasteCache[myUid];
+    final meTs = _myTasteCacheTs[myUid];
+    final meFresh = meTs != null && now.difference(meTs) < _cacheTtl;
+
+    if (meMap == null || !meFresh) {
+      // prefer lighter userTasteProfiles/{uid}, fallback to users/{uid}
+      final tasteDoc = await _db
+          .collection('userTasteProfiles')
+          .doc(myUid)
+          .get();
+      if (tasteDoc.exists) {
+        meMap = tasteDoc.data();
+      } else {
+        final meDoc = await _users.doc(myUid).get();
+        if (!meDoc.exists) return [];
+        meMap = meDoc.data();
+      }
+      _myTasteCache[myUid] = meMap ?? {};
+      _myTasteCacheTs[myUid] = now;
+    }
+
     final myFive = Set<String>.from(
-      (meDoc.data()?['fiveStarKeys'] ?? const []) as List,
+      (meMap?['fiveStarKeys'] ?? const []) as List,
     );
     final myFavs = Set<String>.from(
-      (meDoc.data()?['favoritesKeys'] ?? const []) as List,
+      (meMap?['favoritesKeys'] ?? const []) as List,
     );
     final myWatch = Set<String>.from(
-      (meDoc.data()?['watchlistKeys'] ?? const []) as List,
+      (meMap?['watchlistKeys'] ?? const []) as List,
     );
     final myDis = Set<String>.from(
-      (meDoc.data()?['dislikedKeys'] ?? const []) as List,
+      (meMap?['dislikedKeys'] ?? const []) as List,
     );
 
-    // NEW: profile vectors (lowercased)
-    final meMap = meDoc.data() ?? {};
-    final myGenres = _lcSet(meMap, 'favGenres');
-    final myDirectors = _lcSet(meMap, 'favDirectors');
-    final myActors = _lcSet(meMap, 'favActors');
+    final myGenres = _lcSet(meMap ?? const {}, 'favGenres');
+    final myDirectors = _lcSet(meMap ?? const {}, 'favDirectors');
+    final myActors = _lcSet(meMap ?? const {}, 'favActors');
 
     if (myFive.isEmpty &&
         myFavs.isEmpty &&
@@ -125,135 +152,162 @@ class MatchService {
       return [];
     }
 
-    // --- Exclude users that are already liked/passed/matched by me ---
-    final hiddenUids = <String>{};
-    try {
-      final likesQs = await _db
-          .collection('likes')
-          .where('uids', arrayContains: myUid)
-          .get();
-      for (final doc in likesQs.docs) {
-        final m = doc.data();
-        final a = m['a'] as String?;
-        final b = m['b'] as String?;
-        if (a == null || b == null) continue;
-        final meIsA = (myUid == a);
-        final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
-        final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
-        final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
-        final matched = myLiked && otherLiked;
-        if (myPass || matched || (myLiked && !matched)) {
-          hiddenUids.add(meIsA ? b : a);
+    // 2) HIDDEN (likes/passes/matched) — read once per 5 dk
+    Set<String> hiddenUids = _hiddenCache[myUid] ?? {};
+    final hidTs = _hiddenCacheTs[myUid];
+    final hidFresh = hidTs != null && now.difference(hidTs) < _cacheTtl;
+
+    if (!hidFresh) {
+      hiddenUids = <String>{};
+      try {
+        // keep it cheap; read only docs where I am in uids and within a reasonable cap
+        final likesQs = await _db
+            .collection('likes')
+            .where('uids', arrayContains: myUid)
+            .limit(400)
+            .get();
+
+        for (final doc in likesQs.docs) {
+          final m = doc.data();
+          final a = m['a'] as String?;
+          final b = m['b'] as String?;
+          if (a == null || b == null) continue;
+          final meIsA = (myUid == a);
+          final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
+          final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
+          final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
+          final matched = myLiked && otherLiked;
+          if (myPass || matched || (myLiked && !matched)) {
+            hiddenUids.add(meIsA ? b : a);
+          }
         }
+      } catch (_) {
+        // swallow
       }
-    } catch (_) {
-      // ignore filtering errors — better to show more than crash
+      _hiddenCache[myUid] = hiddenUids;
+      _hiddenCacheTs[myUid] = now;
     }
 
-    // Tüm kullanıcıları oku (geliştirme için uygun; üretimde pagination düşünebilirsin)
-    final all = await _users.get();
+    // 3) PAGE THROUGH userTasteProfiles to minimize reads
+    final profiles = _db.collection('userTasteProfiles');
 
-    final List<MatchResult> out = [];
-    for (final d in all.docs) {
-      final uid = d.id;
-      if (uid == myUid) continue;
-      if (hiddenUids.contains(uid)) continue; // already liked/passed/matched
+    // Target number of candidates to RETURN (hard cap to avoid huge CPU work)
+    const int targetCount = 40;
 
-      final data = d.data();
+    List<MatchResult> results = [];
+    DocumentSnapshot<Map<String, dynamic>>? cursor = startAfter;
+    bool more = true;
 
-      // ratings-based keys
-      final theirFive = Set<String>.from(
-        (data['fiveStarKeys'] ?? const []) as List,
-      );
-      final theirFavs = Set<String>.from(
-        (data['favoritesKeys'] ?? const []) as List,
-      );
-      final theirWatch = Set<String>.from(
-        (data['watchlistKeys'] ?? const []) as List,
-      );
-      final theirDis = Set<String>.from(
-        (data['dislikedKeys'] ?? const []) as List,
-      );
+    while (results.length < targetCount && more) {
+      Query<Map<String, dynamic>> q = profiles.limit(limit);
+      // If you have an index on updatedAt, uncomment next line to prefer fresher profiles.
+      // q = q.orderBy('updatedAt', descending: true);
 
-      // semantic vectors (lowercased)
-      final theirGenres = _lcSet(data, 'favGenres');
-      final theirDirectors = _lcSet(data, 'favDirectors');
-      final theirActors = _lcSet(data, 'favActors');
-
-      // intersections
-      final common5 = myFive.intersection(theirFive).toList()..sort();
-      final commonF = myFavs.intersection(theirFavs).toList()..sort();
-      final commonW = myWatch.intersection(theirWatch).toList()..sort();
-      final commonD = myDis.intersection(theirDis).toList()..sort();
-
-      final commonG = myGenres.intersection(theirGenres).toList()..sort();
-      final commonDir = myDirectors.intersection(theirDirectors).toList()
-        ..sort();
-      final commonAct = myActors.intersection(theirActors).toList()..sort();
-
-      if (common5.isEmpty &&
-          commonF.isEmpty &&
-          commonW.isEmpty &&
-          commonD.isEmpty &&
-          commonG.isEmpty &&
-          commonDir.isEmpty &&
-          commonAct.isEmpty) {
-        continue;
+      final page = cursor == null
+          ? await q.get()
+          : await q.startAfterDocument(cursor).get();
+      if (page.docs.isEmpty) {
+        more = false;
+        break;
       }
+      cursor = page.docs.last;
 
-      // Weighted score: 5★ (w=3), favorites (w=2), watchlist (w=1.6), genres (w=1.5), directors (w=1.8), actors (w=1.2)
-      // New denominator: double the intersection count
-      double part(double common, double total, double w) {
-        if (common <= 0) return 0.0;
-        final denom = common * 2; // ortak kümenin iki katı
-        return w * (common / denom);
+      for (final d in page.docs) {
+        final uid = d.id;
+        if (uid == myUid) continue;
+        if (hiddenUids.contains(uid)) continue;
+
+        final data = d.data();
+
+        // ratings-based sets
+        final theirFive = Set<String>.from(
+          (data['fiveStarKeys'] ?? const []) as List,
+        );
+        final theirFavs = Set<String>.from(
+          (data['favoritesKeys'] ?? const []) as List,
+        );
+        final theirWatch = Set<String>.from(
+          (data['watchlistKeys'] ?? const []) as List,
+        );
+        final theirDis = Set<String>.from(
+          (data['dislikedKeys'] ?? const []) as List,
+        );
+
+        // semantic vectors
+        final theirGenres = _lcSet(data, 'favGenres');
+        final theirDirectors = _lcSet(data, 'favDirectors');
+        final theirActors = _lcSet(data, 'favActors');
+
+        final common5 = myFive.intersection(theirFive);
+        final commonF = myFavs.intersection(theirFavs);
+        final commonW = myWatch.intersection(theirWatch);
+        final commonD = myDis.intersection(theirDis);
+        final commonG = myGenres.intersection(theirGenres);
+        final commonDir = myDirectors.intersection(theirDirectors);
+        final commonAct = myActors.intersection(theirActors);
+
+        if (common5.isEmpty &&
+            commonF.isEmpty &&
+            commonW.isEmpty &&
+            commonD.isEmpty &&
+            commonG.isEmpty &&
+            commonDir.isEmpty &&
+            commonAct.isEmpty) {
+          continue;
+        }
+
+        // score (lightweight)
+        double part(int common, double w) {
+          if (common <= 0) return 0.0;
+          final denom = common * 2.0;
+          return w * (common / denom);
+        }
+
+        const w5 = 3.0,
+            wFav = 4.0,
+            wWatch = 1.6,
+            wG = 1.5,
+            wDir = 0.0,
+            wAct = 0.0;
+        final maxScoreUnit = w5 + wFav + wWatch + wG + wDir + wAct;
+        final unitScore =
+            part(common5.length, w5) +
+            part(commonF.length, wFav) +
+            part(commonW.length, wWatch) +
+            part(commonG.length, wG) +
+            part(commonDir.length, wDir) +
+            part(commonAct.length, wAct);
+
+        final raw = (unitScore / maxScoreUnit) * 100.0;
+        const double gamma = 0.85;
+        const double lift = 33.0;
+        final boosted =
+            (math.pow(raw / 100.0, gamma) as num).toDouble() * 100.0;
+        final score = math.min(100.0, boosted + lift);
+
+        results.add(
+          MatchResult(
+            uid: uid,
+            score: score,
+            commonFiveStars: common5.toList(),
+            commonFavorites: commonF.toList(),
+            commonWatchlist: commonW.toList(),
+            commonDisliked: commonD.toList(),
+            commonGenres: commonG.toList(),
+            commonDirectors: commonDir.toList(),
+            commonActors: commonAct.toList(),
+            displayName: data['displayName'] as String?,
+            letterboxdUsername: data['letterboxdUsername'] as String?,
+            photoURL: data['photoURL'] as String?,
+          ),
+        );
+
+        if (results.length >= targetCount) break;
       }
-
-      // weights (favoriler boosted)
-      const w5 = 3.0,
-          wFav = 4.0,
-          wWatch = 1.6,
-          wG = 1.5,
-          wDir = 0.0,
-          wAct = 0.0;
-
-      final maxScoreUnit = w5 + wFav + wWatch + wG + wDir + wAct;
-      final unitScore =
-          part(common5.length.toDouble(), 0, w5) +
-          part(commonF.length.toDouble(), 0, wFav) +
-          part(commonW.length.toDouble(), 0, wWatch) +
-          part(commonG.length.toDouble(), 0, wG) +
-          part(commonDir.length.toDouble(), 0, wDir) +
-          part(commonAct.length.toDouble(), 0, wAct);
-
-      // --- Calibration for a slightly higher, friendlier score distribution ---
-      // raw in [0,100]
-      final raw = (unitScore / maxScoreUnit) * 100.0;
-      const double gamma = 0.85; // <1.0 → boosts mid/low scores gently
-      const double lift = 33.0; // constant lift, capped later
-      final boosted = math.pow(raw / 100.0, gamma) * 100.0;
-      final score = math.min(100.0, boosted + lift);
-
-      out.add(
-        MatchResult(
-          uid: uid,
-          score: score,
-          commonFiveStars: common5,
-          commonFavorites: commonF,
-          commonWatchlist: commonW,
-          commonDisliked: commonD,
-          commonGenres: commonG,
-          commonDirectors: commonDir,
-          commonActors: commonAct,
-          displayName: data['displayName'] as String?,
-          letterboxdUsername: data['letterboxdUsername'] as String?,
-          photoURL: data['photoURL'] as String?,
-        ),
-      );
     }
 
-    // Skor > ortak 5★ > ortak favori > ortak watchlist > ortak genre > ortak director > ortak actor sayısına göre sırala
-    out.sort((a, b) {
+    // stable sort
+    results.sort((a, b) {
       final s = b.score.compareTo(a.score);
       if (s != 0) return s;
       final f5 = b.commonFiveCount.compareTo(a.commonFiveCount);
@@ -269,9 +323,8 @@ class MatchService {
       return b.commonActorCount.compareTo(a.commonActorCount);
     });
 
-    // Store in short-term cache
-    _findCache[myUid] = _FindCache(out, DateTime.now());
-    return out;
+    _findCache[myUid] = _FindCache(results, DateTime.now());
+    return results;
   }
 
   /* ---------------------------------------------------------------------- */
@@ -301,7 +354,17 @@ class MatchService {
       (meDoc.data()?['dislikedKeys'] ?? const []) as List,
     );
 
-    final all = await _users.get();
+    final all = await _db.collection('userTasteProfiles').get();
+
+    WriteBatch? batch;
+    int batchCount = 0;
+    Future<void> commitIfNeeded() async {
+      if (batch != null && batchCount >= 400) {
+        await batch!.commit();
+        batch = null;
+        batchCount = 0;
+      }
+    }
 
     int touched = 0;
     for (final d in all.docs) {
@@ -358,7 +421,9 @@ class MatchService {
         meIsA ? data : (meDoc.data() ?? {}),
         meIsA ? uid : myUid,
       );
-      await _matches.doc(pairId).set({
+      batch ??= _db.batch();
+      final docRef = _matches.doc(pairId);
+      batch!.set(docRef, {
         'uids': meIsA ? [myUid, uid] : [uid, myUid],
         'aProfile': aProfile,
         'bProfile': bProfile,
@@ -375,8 +440,12 @@ class MatchService {
             ? 'auto:disliked'
             : (meetsC ? 'auto:five+watch' : 'auto:five+fav'),
       }, SetOptions(merge: true));
-
+      batchCount++;
+      await commitIfNeeded();
       touched++;
+    }
+    if (batch != null && batchCount > 0) {
+      await batch!.commit();
     }
     return touched;
   }
@@ -399,9 +468,18 @@ class MatchService {
 
     if (myFive.isEmpty) return 0;
 
-    final all = await _users.get();
-    int touched = 0;
+    final all = await _db.collection('userTasteProfiles').get();
+    WriteBatch? batch;
+    int batchCount = 0;
+    Future<void> commitIfNeeded() async {
+      if (batch != null && batchCount >= 400) {
+        await batch!.commit();
+        batch = null;
+        batchCount = 0;
+      }
+    }
 
+    int touched = 0;
     for (final d in all.docs) {
       final uid = d.id;
       if (uid == myUid) continue;
@@ -425,7 +503,9 @@ class MatchService {
         meIsA ? data : (meDoc.data() ?? {}),
         meIsA ? uid : myUid,
       );
-      await _matches.doc(pairId).set({
+      batch ??= _db.batch();
+      final docRef = _matches.doc(pairId);
+      batch!.set(docRef, {
         'uids': meIsA ? [myUid, uid] : [uid, myUid],
         'aProfile': aProfile,
         'bProfile': bProfile,
@@ -436,10 +516,13 @@ class MatchService {
         'updatedAt': FieldValue.serverTimestamp(),
         'source': 'auto:fiveOnly',
       }, SetOptions(merge: true));
-
+      batchCount++;
+      await commitIfNeeded();
       touched++;
     }
-
+    if (batch != null && batchCount > 0) {
+      await batch!.commit();
+    }
     return touched;
   }
 

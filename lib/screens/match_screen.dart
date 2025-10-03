@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fluttergirdi/screens/settings_page.dart';
 import 'dart:math' as math;
 import 'package:fluttergirdi/services/match_service.dart'
     as global_match; // uses services/match_service.dart
@@ -9,6 +10,12 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/likes_page.dart';
 import 'package:fluttergirdi/screens/passes_page.dart';
 import 'package:swipe_cards/swipe_cards.dart';
+
+// Simple in-memory cache to persist match list within app session
+class _MatchListSessionCache {
+  static List<global_match.MatchResult>? results;
+  static DateTime? ts;
+}
 
 /// Lists other users ordered by computed match score using `MatchService().findMatches(...)`.
 class MatchListScreen extends StatefulWidget {
@@ -23,6 +30,8 @@ class _MatchListScreenState extends State<MatchListScreen> {
   final List<SwipeItem> _swipeItems = [];
   late MatchEngine _matchEngine;
   bool _loading = true;
+  // Persist scroll/child states across tab switches and route pops within this session
+  static final PageStorageBucket _bucket = PageStorageBucket();
 
   @override
   void initState() {
@@ -35,6 +44,139 @@ class _MatchListScreenState extends State<MatchListScreen> {
     super.dispose();
   }
 
+  Future<void> _openIncomingLikes() async {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null) return;
+    final db = FirebaseFirestore.instance;
+
+    List<_IncomingLike> items = [];
+
+    try {
+      // Query by participant only; filter client-side to avoid composite indexes
+      final qa = await db.collection('likes').where('a', isEqualTo: me).get();
+      final qb = await db.collection('likes').where('b', isEqualTo: me).get();
+
+      void pushFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+        final m = d.data();
+        final String a = (m['a'] ?? '') as String;
+        final String b = (m['b'] ?? '') as String;
+        if (a.isEmpty || b.isEmpty) return;
+        final bool meIsA = a == me;
+        // include only if OTHER side liked me
+        final bool otherLiked = meIsA
+            ? (m['bLiked'] == true)
+            : (m['aLiked'] == true);
+        if (!otherLiked) return;
+        final otherUid = meIsA ? b : a;
+        final wasUnseen = meIsA ? (m['aSeen'] != true) : (m['bSeen'] != true);
+        final ts =
+            (m['updatedAt'] as Timestamp?)?.toDate() ??
+            (m['createdAt'] as Timestamp?)?.toDate() ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        items.add(
+          _IncomingLike(
+            docId: d.id,
+            otherUid: otherUid,
+            wasUnseen: wasUnseen,
+            when: ts,
+            seenField: meIsA ? 'aSeen' : 'bSeen',
+          ),
+        );
+      }
+
+      for (final d in qa.docs) pushFromDoc(d);
+      for (final d in qb.docs) pushFromDoc(d);
+
+      items.sort((a, b) => b.when.compareTo(a.when));
+
+      // Mark only unseen as seen (best-effort)
+      if (items.isNotEmpty) {
+        final batch = db.batch();
+        for (final it in items) {
+          if (!it.wasUnseen) continue;
+          batch.set(db.collection('likes').doc(it.docId), {
+            it.seenField: true,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+        try {
+          await batch.commit();
+        } catch (_) {}
+      }
+      try {
+        await LikeService.instance.markIncomingLikesSeen(me);
+      } catch (_) {}
+    } catch (e) {
+      debugPrint('incomingLikes error: $e');
+      items = [];
+    }
+
+    if (!mounted) return;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.75,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.favorite_outline,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Beni beğenenler',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      if (items.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${items.length}',
+                            style: theme.textTheme.labelMedium,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: items.isEmpty
+                      ? const Center(child: Text('Henüz beğeni yok'))
+                      : ListView.separated(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, i) =>
+                              _IncomingLikeTile(item: items[i]),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _loadMatches() async {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) {
@@ -45,33 +187,71 @@ class _MatchListScreenState extends State<MatchListScreen> {
       });
       return;
     }
+
+    // 1) If we have session cache, use it (no Firestore call)
+    if (_MatchListSessionCache.results != null &&
+        _MatchListSessionCache.results!.isNotEmpty) {
+      _all = _MatchListSessionCache.results!;
+      _swipeItems
+        ..clear()
+        ..addAll(
+          _all.map(
+            (m) => SwipeItem(
+              content: m,
+              likeAction: () async {
+                await LikeService.instance.likeUser(
+                  m.uid,
+                  commonFavoritesCount: m.commonFavCount,
+                  commonFiveStarsCount: m.commonFiveCount,
+                );
+                // switch to Likes tab
+                DefaultTabController.of(context).animateTo(2);
+              },
+              nopeAction: () async {
+                await LikeService.instance.passUser(m.uid);
+                // switch to Passes tab
+                DefaultTabController.of(context).animateTo(1);
+              },
+            ),
+          ),
+        );
+      setState(() {
+        _matchEngine = MatchEngine(swipeItems: _swipeItems);
+        _loading = false;
+      });
+      return;
+    }
+
+    // 2) Otherwise fetch once and cache for the session
     try {
       final results = await global_match.MatchService().findMatches(me.uid);
       if (!mounted) return;
 
       _all = results;
-      _swipeItems.clear();
+      _MatchListSessionCache.results = results;
+      _MatchListSessionCache.ts = DateTime.now();
 
-      for (final m in _all) {
-        _swipeItems.add(
-          SwipeItem(
-            content: m,
-            likeAction: () async {
-              await LikeService.instance.likeUser(
-                m.uid,
-                commonFavoritesCount: m.commonFavCount,
-                commonFiveStarsCount: m.commonFiveCount,
-              );
-              // Sekmeyi Beğenilenler'e al (0: Eşleşmeler, 1: Geçilenler, 2: Beğenilenler)
-              DefaultTabController.of(context).animateTo(2);
-            },
-            nopeAction: () async {
-              await LikeService.instance.passUser(m.uid);
-              DefaultTabController.of(context).animateTo(1);
-            },
+      _swipeItems
+        ..clear()
+        ..addAll(
+          _all.map(
+            (m) => SwipeItem(
+              content: m,
+              likeAction: () async {
+                await LikeService.instance.likeUser(
+                  m.uid,
+                  commonFavoritesCount: m.commonFavCount,
+                  commonFiveStarsCount: m.commonFiveCount,
+                );
+                DefaultTabController.of(context).animateTo(2);
+              },
+              nopeAction: () async {
+                await LikeService.instance.passUser(m.uid);
+                DefaultTabController.of(context).animateTo(1);
+              },
+            ),
           ),
         );
-      }
 
       setState(() {
         _matchEngine = MatchEngine(swipeItems: _swipeItems);
@@ -102,71 +282,100 @@ class _MatchListScreenState extends State<MatchListScreen> {
     return DefaultTabController(
       initialIndex: 1,
       length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Eşleşmeler'),
-          bottom: TabBar(
-            tabs: [
-              const Tab(text: 'Geçilenler'),
-              const Tab(text: 'Eşleşmeler'),
+      child: PageStorage(
+        bucket: _bucket,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Eşleşmeler'),
+            bottom: TabBar(
+              tabs: [
+                const Tab(text: 'Geçilenler'),
+                const Tab(text: 'Eşleşmeler'),
 
-              const Tab(text: 'Beğenilenler'),
+                const Tab(text: 'Beğenilenler'),
+              ],
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Beni beğenenler',
+                icon: const Icon(Icons.favorite_outline),
+                onPressed: _openIncomingLikes,
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) async {
+                  if (value == 'settings') {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsPage()),
+                    );
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'settings',
+                    child: ListTile(
+                      leading: Icon(Icons.settings_outlined),
+                      title: Text('Ayarlar'),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-        ),
-        body: TabBarView(
-          children: [
-            // --- Tab 2: Geçilenler ---
-            const PassesListBody(),
-            // --- Tab 1: mevcut eşleşme listesi ---
-            _loading
-                ? const Center(child: CircularProgressIndicator())
-                : (_swipeItems.isEmpty
-                      ? const Center(child: Text('Şu an eşleşme yok.'))
-                      : Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: SwipeCards(
-                            matchEngine: _matchEngine,
-                            // allow inner vertical scroll by disabling up-swipe capture
-                            upSwipeAllowed: false,
-                            fillSpace: true,
-                            onStackFinished: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Hepsi bu kadar 👋'),
-                                ),
-                              );
-                            },
-                            itemBuilder: (context, index) {
-                              final m =
-                                  _swipeItems[index].content
-                                      as global_match.MatchResult;
-                              return _MatchCard(
-                                key: ValueKey(m.uid),
-                                result: m,
-                                onOpen: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => MatchScreen(result: m),
-                                    ),
-                                  );
-                                },
-                                onLike: () {
-                                  // Right swipe (LIKE): service is executed via SwipeItem.likeAction
-                                  _matchEngine.currentItem?.like();
-                                },
-                                onPass: () {
-                                  // Left swipe (PASS): service is executed via SwipeItem.nopeAction
-                                  _matchEngine.currentItem?.nope();
-                                },
-                              );
-                            },
-                          ),
-                        )),
+          body: TabBarView(
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              // --- Tab 2: Geçilenler ---
+              const PassesListBody(),
+              // --- Tab 1: mevcut eşleşme listesi ---
+              _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : (_swipeItems.isEmpty
+                        ? const Center(child: Text('Şu an eşleşme yok.'))
+                        : Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: SwipeCards(
+                              matchEngine: _matchEngine,
+                              // allow inner vertical scroll by disabling up-swipe capture
+                              upSwipeAllowed: false,
+                              fillSpace: true,
+                              onStackFinished: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Hepsi bu kadar 👋'),
+                                  ),
+                                );
+                              },
+                              itemBuilder: (context, index) {
+                                final m =
+                                    _swipeItems[index].content
+                                        as global_match.MatchResult;
+                                return _MatchCard(
+                                  key: ValueKey(m.uid),
+                                  result: m,
+                                  onOpen: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => MatchScreen(result: m),
+                                      ),
+                                    );
+                                  },
+                                  onLike: () {
+                                    // Right swipe (LIKE): service is executed via SwipeItem.likeAction
+                                    _matchEngine.currentItem?.like();
+                                  },
+                                  onPass: () {
+                                    // Left swipe (PASS): service is executed via SwipeItem.nopeAction
+                                    _matchEngine.currentItem?.nope();
+                                  },
+                                );
+                              },
+                            ),
+                          )),
 
-            // --- Tab 3: Beğenilenler ---
-            const LikesListBody(),
-          ],
+              // --- Tab 3: Beğenilenler ---
+              const LikesListBody(),
+            ],
+          ),
         ),
       ),
     );
@@ -216,6 +425,7 @@ class _MatchCardState extends State<_MatchCard>
               : m.uid);
 
     return Card(
+      key: PageStorageKey('match_card_${m.uid}'),
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       clipBehavior: Clip.antiAlias,
@@ -238,6 +448,7 @@ class _MatchCardState extends State<_MatchCard>
                   // Scrollable content
                   Expanded(
                     child: SingleChildScrollView(
+                      key: PageStorageKey('match_card_scroll_${m.uid}'),
                       padding: EdgeInsets.zero,
                       physics: const BouncingScrollPhysics(),
                       child: Column(
@@ -452,6 +663,139 @@ class _MatchScreenState extends State<MatchScreen>
     _future = _resolveCommonFilms(widget.result);
   }
 
+  Future<void> _openIncomingLikes() async {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null) return;
+    final db = FirebaseFirestore.instance;
+
+    List<_IncomingLike> items = [];
+
+    try {
+      // Query by participant only; filter client-side to avoid composite indexes
+      final qa = await db.collection('likes').where('a', isEqualTo: me).get();
+      final qb = await db.collection('likes').where('b', isEqualTo: me).get();
+
+      void pushFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+        final m = d.data();
+        final String a = (m['a'] ?? '') as String;
+        final String b = (m['b'] ?? '') as String;
+        if (a.isEmpty || b.isEmpty) return;
+        final bool meIsA = a == me;
+        // include only if OTHER side liked me
+        final bool otherLiked = meIsA
+            ? (m['bLiked'] == true)
+            : (m['aLiked'] == true);
+        if (!otherLiked) return;
+        final otherUid = meIsA ? b : a;
+        final wasUnseen = meIsA ? (m['aSeen'] != true) : (m['bSeen'] != true);
+        final ts =
+            (m['updatedAt'] as Timestamp?)?.toDate() ??
+            (m['createdAt'] as Timestamp?)?.toDate() ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        items.add(
+          _IncomingLike(
+            docId: d.id,
+            otherUid: otherUid,
+            wasUnseen: wasUnseen,
+            when: ts,
+            seenField: meIsA ? 'aSeen' : 'bSeen',
+          ),
+        );
+      }
+
+      for (final d in qa.docs) pushFromDoc(d);
+      for (final d in qb.docs) pushFromDoc(d);
+
+      items.sort((a, b) => b.when.compareTo(a.when));
+
+      // Mark only unseen as seen (best-effort)
+      if (items.isNotEmpty) {
+        final batch = db.batch();
+        for (final it in items) {
+          if (!it.wasUnseen) continue;
+          batch.set(db.collection('likes').doc(it.docId), {
+            it.seenField: true,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+        try {
+          await batch.commit();
+        } catch (_) {}
+      }
+      try {
+        await LikeService.instance.markIncomingLikesSeen(me);
+      } catch (_) {}
+    } catch (e) {
+      debugPrint('incomingLikes error: $e');
+      items = [];
+    }
+
+    if (!mounted) return;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.75,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.favorite_outline,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Beni beğenenler',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      if (items.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${items.length}',
+                            style: theme.textTheme.labelMedium,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: items.isEmpty
+                      ? const Center(child: Text('Henüz beğeni yok'))
+                      : ListView.separated(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, i) =>
+                              _IncomingLikeTile(item: items[i]),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   bool get wantKeepAlive => true;
 
@@ -476,6 +820,11 @@ class _MatchScreenState extends State<MatchScreen>
           maxLines: 1,
         ),
         actions: [
+          IconButton(
+            tooltip: 'Beni beğenenler',
+            icon: const Icon(Icons.favorite_outline),
+            onPressed: _openIncomingLikes,
+          ),
           IconButton(
             tooltip: 'Geç',
             icon: const Icon(Icons.close_rounded),
@@ -632,6 +981,114 @@ class _MatchScreenState extends State<MatchScreen>
     final fives = await fiveF;
     final watch = await watchF;
     return _Resolved(favorites: favs, fiveStars: fives, watchlist: watch);
+  }
+}
+
+class _IncomingLike {
+  final String docId; // likes/{pairId} document id
+  final String otherUid; // karşı tarafın uid'i
+  final bool wasUnseen; // captured before we marked seen
+  final DateTime when;
+  final String seenField; // 'aSeen' or 'bSeen'
+  _IncomingLike({
+    required this.docId,
+    required this.otherUid,
+    required this.wasUnseen,
+    required this.when,
+    required this.seenField,
+  });
+}
+
+class _IncomingLikeTile extends StatelessWidget {
+  final _IncomingLike item;
+  const _IncomingLikeTile({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bg = item.wasUnseen
+        ? theme
+              .colorScheme
+              .primaryContainer // mavi ton (ilk kez görülen)
+        : theme
+              .colorScheme
+              .surfaceContainerHighest; // gri ton (daha önce görülen)
+
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PublicProfileScreen(uid: item.otherUid),
+          ),
+        );
+      },
+      child: Container(
+        color: bg,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            _IncomingAvatar(uid: item.otherUid),
+            const SizedBox(width: 12),
+            Expanded(child: _IncomingName(uid: item.otherUid)),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IncomingAvatar extends StatelessWidget {
+  final String uid;
+  const _IncomingAvatar({required this.uid});
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+      builder: (context, snap) {
+        String? url;
+        if (snap.hasData && snap.data!.exists) {
+          url = (snap.data!.data()!['photoURL'] ?? '') as String;
+        }
+        return CircleAvatar(
+          radius: 20,
+          backgroundImage: (url != null && url.isNotEmpty)
+              ? NetworkImage(url)
+              : null,
+          child: (url == null || url.isEmpty) ? const Icon(Icons.person) : null,
+        );
+      },
+    );
+  }
+}
+
+class _IncomingName extends StatelessWidget {
+  final String uid;
+  const _IncomingName({required this.uid});
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyMedium;
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+      builder: (context, snap) {
+        String title = uid;
+        if (snap.hasData && snap.data!.exists) {
+          final u = snap.data!.data()!;
+          final username = (u['username'] ?? '') as String;
+          final lb = (u['letterboxdUsername'] ?? '') as String;
+          if (username.isNotEmpty)
+            title = username;
+          else if (lb.isNotEmpty)
+            title = '@$lb';
+        }
+        return Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        );
+      },
+    );
   }
 }
 

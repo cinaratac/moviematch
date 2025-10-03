@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -18,6 +19,8 @@ class LikeService {
       _db.collection('matches');
   CollectionReference<Map<String, dynamic>> get _chatsCol =>
       _db.collection('chats');
+
+  bool _isTrue(dynamic v) => v == true;
 
   /// Current user's UID or throws if not signed in
   String get _uid =>
@@ -45,7 +48,8 @@ class LikeService {
           // First interaction for this pair
           a = (me.compareTo(otherUid) < 0) ? me : otherUid;
           b = (a == me) ? otherUid : me;
-          tx.set(docRef, {
+
+          final init = {
             'a': a,
             'b': b,
             'uids': [a, b],
@@ -55,7 +59,16 @@ class LikeService {
             'bPass': false,
             'createdAt': FieldValue.serverTimestamp(),
             'updatedAt': FieldValue.serverTimestamp(),
-          });
+          };
+
+          // Yalnızca karşı tarafın "seen" bayrağını sıfırla (yeni bildirim)
+          if (a == me) {
+            init['bSeen'] = false;
+          } else {
+            init['aSeen'] = false;
+          }
+
+          tx.set(docRef, init);
           return;
         }
 
@@ -70,13 +83,23 @@ class LikeService {
         final newBLiked = meIsA ? (data['bLiked'] == true) : true;
         final willBothLike = newALiked && newBLiked;
 
-        if (data[likeField] != true || data[passField] == true) {
-          tx.update(docRef, {
+        // opposite user's seen flag name (the receiver side)
+        final seenToReset = meIsA ? 'bSeen' : 'aSeen';
+
+        // Only when my like transitions to true (or pass→like) do we reset receiver's seen to false.
+        final shouldResetAndLike =
+            (data[likeField] != true) || (data[passField] == true);
+
+        if (shouldResetAndLike) {
+          final Map<String, dynamic> upd = {
             likeField: true,
             passField: false, // like overrides pass
             'uids': FieldValue.arrayUnion([a, b]),
             'updatedAt': FieldValue.serverTimestamp(),
-          });
+            // notify receiver: a fresh like
+            seenToReset: false,
+          };
+          tx.update(docRef, upd);
         }
 
         if (willBothLike) {
@@ -90,26 +113,17 @@ class LikeService {
             'createdAt': now,
             'updatedAt': now,
           }, SetOptions(merge: true));
-
-          // Ensure chat stub exists (optional)
-          final chatRef = _chatsCol.doc(matchId);
-          tx.set(chatRef, {
-            'participants': [a, b],
-            'createdAt': now,
-            'updatedAt': now,
-            'lastMessageAt': now,
-          }, SetOptions(merge: true));
         }
       });
     } catch (e) {
-      // Fallback merge write so like is not lost if transaction fails (e.g., permissions/index)
+      final meIsA = (me.compareTo(otherUid) < 0);
       await docRef.set({
-        'a': (me.compareTo(otherUid) < 0) ? me : otherUid,
-        'b': (me.compareTo(otherUid) < 0) ? otherUid : me,
+        'a': meIsA ? me : otherUid,
+        'b': meIsA ? otherUid : me,
         'uids': [me, otherUid],
         // mark my side like, clear my pass
-        (me.compareTo(otherUid) < 0) ? 'aLiked' : 'bLiked': true,
-        (me.compareTo(otherUid) < 0) ? 'aPass' : 'bPass': false,
+        meIsA ? 'aLiked' : 'bLiked': true,
+        meIsA ? 'aPass' : 'bPass': false,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     }
@@ -223,5 +237,112 @@ class LikeService {
         .where('uids', arrayContains: me)
         .orderBy('updatedAt', descending: true)
         .snapshots();
+  }
+
+  /// Toplam "görülmemiş" gelen beğeni sayısı (badge için).
+  /// A tarafıysam: bLiked==true && aSeen==false
+  /// B tarafıysam: aLiked==true && bSeen==false
+  Stream<int> incomingLikesUnreadCount([String? uidOverride]) {
+    final myUid = uidOverride ?? _uid;
+    final col = _likesCol;
+
+    // Do NOT filter by aSeen/bSeen here; some old docs may not have the field at all.
+    final asAAll = col
+        .where('a', isEqualTo: myUid)
+        .where('bLiked', isEqualTo: true)
+        .snapshots();
+
+    final asBAll = col
+        .where('b', isEqualTo: myUid)
+        .where('aLiked', isEqualTo: true)
+        .snapshots();
+
+    return Stream<int>.multi((emitter) {
+      int aCount = 0;
+      int bCount = 0;
+
+      int _countUnseenA(
+        Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+      ) {
+        int c = 0;
+        for (final d in docs) {
+          final m = d.data();
+          // For my A side, "unseen" means aSeen != true (i.e., false or missing)
+          if (!_isTrue(m['aSeen'])) c++;
+        }
+        return c;
+      }
+
+      int _countUnseenB(
+        Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+      ) {
+        int c = 0;
+        for (final d in docs) {
+          final m = d.data();
+          // For my B side, "unseen" means bSeen != true (i.e., false or missing)
+          if (!_isTrue(m['bSeen'])) c++;
+        }
+        return c;
+      }
+
+      final subA = asAAll.listen((qa) {
+        aCount = _countUnseenA(qa.docs);
+        emitter.add(aCount + bCount);
+      });
+
+      final subB = asBAll.listen((qb) {
+        bCount = _countUnseenB(qb.docs);
+        emitter.add(aCount + bCount);
+      });
+
+      emitter.onCancel = () {
+        subA.cancel();
+        subB.cancel();
+      };
+    });
+  }
+
+  /// Beğeniler ekranına girince kendi tarafımdaki seen bayraklarını true yapar.
+  /// Ayrıca aSeenAt / bSeenAt timestamp'lerini ve updatedAt'i günceller.
+  Future<void> markIncomingLikesSeen([String? uidOverride]) async {
+    final myUid = uidOverride ?? _uid;
+    final batch = _db.batch();
+    int writes = 0;
+
+    // As A: B liked me
+    final q1 = await _likesCol
+        .where('a', isEqualTo: myUid)
+        .where('bLiked', isEqualTo: true)
+        .get();
+    for (final d in q1.docs) {
+      final m = d.data();
+      if (_isTrue(m['aSeen'])) continue; // already seen
+      batch.set(d.reference, {
+        'aSeen': true,
+        'aSeenAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      writes++;
+    }
+
+    // As B: A liked me
+    final q2 = await _likesCol
+        .where('b', isEqualTo: myUid)
+        .where('aLiked', isEqualTo: true)
+        .get();
+    for (final d in q2.docs) {
+      final m = d.data();
+      if (_isTrue(m['bSeen'])) continue; // already seen
+      batch.set(d.reference, {
+        'bSeen': true,
+        'bSeenAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      writes++;
+    }
+
+    if (writes > 0) {
+      await batch.commit();
+    }
   }
 }

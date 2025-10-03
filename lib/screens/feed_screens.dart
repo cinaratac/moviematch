@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttergirdi/screens/settings_page.dart';
+import 'package:fluttergirdi/widgets/post_tile.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -14,75 +15,132 @@ class _FeedPageState extends State<FeedPage> {
   static const int _maxChars = 280;
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final ScrollController _listController = ScrollController();
+  final Map<String, String> _lbCache = {};
+  String _lbFor(String uid, String handle) {
+    // if post already carries an @lb handle, use it
+    if (handle.isNotEmpty && handle.startsWith('@')) return handle;
+    // serve from cache if present
+    final cached = _lbCache[uid];
+    if (cached != null && cached.isNotEmpty) return '@$cached';
+    // fire-and-forget fetch to hydrate cache (avoid per-item StreamBuilder)
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get()
+        .then((d) {
+          final lb = (d.data()?['letterboxdUsername'] ?? '').toString().trim();
+          if (lb.isNotEmpty && _lbCache[uid] != lb && mounted) {
+            setState(() => _lbCache[uid] = lb);
+          }
+        })
+        .catchError((_) {});
+    return '';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Feed')),
-      body: Column(
-        children: [
-          _Composer(
-            controller: _controller,
-            focusNode: _focusNode,
-            maxChars: _maxChars,
-            onSend: (text) async {
-              await _createPost(text);
-              _controller.clear();
-              _focusNode.requestFocus();
+      appBar: AppBar(
+        title: const Text('Feed'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) async {
+              if (value == 'settings') {
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+              }
             },
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('posts')
-                  .orderBy('createdAt', descending: true)
-                  .limit(200)
-                  .snapshots(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snap.hasError) {
-                  return const Center(child: Text('Gönderiler yüklenemedi'));
-                }
-                final docs = snap.data?.docs ?? const [];
-                if (docs.isEmpty) {
-                  return const Center(child: Text('Henüz gönderi yok'));
-                }
-                return ListView.separated(
-                  itemCount: docs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, i) {
-                    final d = docs[i];
-                    final m = d.data();
-                    final createdAt = (m['createdAt'] as Timestamp?);
-                    final timeLabel = createdAt == null
-                        ? ''
-                        : _timeAgo(createdAt.toDate());
-                    return _PostTile(
-                      postId: d.id,
-                      displayName: (m['displayName'] ?? '') as String,
-                      handle: (m['handle'] ?? '') as String,
-                      photoURL: (m['photoURL'] ?? '') as String,
-                      timeLabel: timeLabel,
-                      text: (m['text'] ?? '') as String,
-                      likeCount: (m['likeCount'] ?? 0) is int
-                          ? m['likeCount'] as int
-                          : ((m['likeCount'] ?? 0) as num).toInt(),
-                      replyCount: (m['replyCount'] ?? 0) is int
-                          ? m['replyCount'] as int
-                          : ((m['replyCount'] ?? 0) as num).toInt(),
-                      repostCount: (m['repostCount'] ?? 0) is int
-                          ? m['repostCount'] as int
-                          : ((m['repostCount'] ?? 0) as num).toInt(),
-                    );
-                  },
-                );
-              },
-            ),
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings_outlined),
+                  title: Text('Ayarlar'),
+                ),
+              ),
+            ],
           ),
         ],
+      ),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance
+            .collection('posts')
+            .orderBy('createdAt', descending: true)
+            .limit(200)
+            .snapshots(),
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError) {
+            return const Center(child: Text('Gönderiler yüklenemedi'));
+          }
+          final docs = snap.data?.docs ?? const [];
+          // Build a single scrolling list where index 0 is the composer
+          return ListView.separated(
+            controller: _listController,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: docs.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, i) {
+              if (i == 0) {
+                return Column(
+                  children: [
+                    _Composer(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      maxChars: _maxChars,
+                      onSend: (text) async {
+                        await _createPost(text);
+                        _controller.clear();
+                        _focusNode.requestFocus();
+                      },
+                    ),
+                    const Divider(height: 1),
+                  ],
+                );
+              }
+              final d = docs[i - 1];
+              final m = d.data();
+              final createdAt = (m['createdAt'] as Timestamp?);
+              final timeLabel = createdAt == null
+                  ? ''
+                  : _timeAgo(createdAt.toDate());
+              return PostTile(
+                postId: d.id,
+                authorId: (m['authorId'] ?? '') as String,
+                displayName: (m['displayName'] ?? '') as String,
+                handle: _lbFor(
+                  (m['authorId'] ?? '') as String,
+                  (m['handle'] ?? '') as String,
+                ),
+                photoURL: (m['photoURL'] ?? '') as String,
+                timeLabel: timeLabel,
+                text: (m['text'] ?? '') as String,
+                likeCount: (m['likeCount'] ?? 0) is int
+                    ? m['likeCount'] as int
+                    : ((m['likeCount'] ?? 0) as num).toInt(),
+                replyCount: (m['replyCount'] ?? 0) is int
+                    ? m['replyCount'] as int
+                    : ((m['replyCount'] ?? 0) as num).toInt(),
+                repostCount: (m['repostCount'] ?? 0) is int
+                    ? m['repostCount'] as int
+                    : ((m['repostCount'] ?? 0) as num).toInt(),
+                onToggleLike: _toggleLike,
+                onStartChat: _startChat,
+                onFollow: _follow,
+                onReport: _reportPost,
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -90,11 +148,22 @@ class _FeedPageState extends State<FeedPage> {
   Future<void> _createPost(String text) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+
+    // Fetch letterboxdUsername from users/{uid}
+    String lb = '';
+    try {
+      final u = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      lb = (u.data()?['letterboxdUsername'] ?? '').toString().trim();
+    } catch (_) {}
+
     final doc = FirebaseFirestore.instance.collection('posts').doc();
     await doc.set({
       'authorId': user.uid,
       'displayName': user.displayName ?? '',
-      'handle': '@${(user.email ?? '').split('@').first}',
+      'handle': lb.isNotEmpty ? '@$lb' : '',
       'photoURL': user.photoURL ?? '',
       'text': text.trim(),
       'createdAt': FieldValue.serverTimestamp(),
@@ -135,10 +204,56 @@ class _FeedPageState extends State<FeedPage> {
     await batch.commit();
   }
 
+  String _pairIdOf(String a, String b) =>
+      (a.compareTo(b) < 0) ? '${a}_$b' : '${b}_$a';
+
+  Future<void> _startChat(String otherUid) async {
+    final fs = FirebaseFirestore.instance;
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null || me == otherUid) return;
+    final chatId = _pairIdOf(me, otherUid);
+    final chatRef = fs.collection('chats').doc(chatId);
+    await chatRef.set({
+      'participants': [me, otherUid],
+      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Sohbet hazır')));
+    }
+  }
+
+  Future<void> _follow(String otherUid) async {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me == null || me == otherUid) return;
+    final fs = FirebaseFirestore.instance;
+    await fs
+        .collection('users')
+        .doc(me)
+        .collection('following')
+        .doc(otherUid)
+        .set({
+          'createdAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+  }
+
+  Future<void> _reportPost(String postId) async {
+    final me = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+    await FirebaseFirestore.instance.collection('reports').add({
+      'type': 'post',
+      'postId': postId,
+      'by': me,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   @override
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
+    _listController.dispose();
     super.dispose();
   }
 }
@@ -233,179 +348,6 @@ class _Composer extends StatelessWidget {
               ),
             ],
           ),
-        );
-      },
-    );
-  }
-}
-
-class _PostTile extends StatelessWidget {
-  final String postId;
-  final String displayName;
-  final String handle;
-  final String photoURL;
-  final String timeLabel;
-  final String text;
-  final int likeCount;
-  final int replyCount;
-  final int repostCount;
-  const _PostTile({
-    required this.postId,
-    required this.displayName,
-    required this.handle,
-    required this.photoURL,
-    required this.timeLabel,
-    required this.text,
-    required this.likeCount,
-    required this.replyCount,
-    required this.repostCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 20,
-            backgroundImage: photoURL.isNotEmpty
-                ? NetworkImage(photoURL)
-                : null,
-            child: photoURL.isEmpty ? const Icon(Icons.person) : null,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        displayName.isEmpty ? handle : displayName,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        '$handle · $timeLabel',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(text),
-                const SizedBox(height: 8),
-                _ActionBar(
-                  postId: postId,
-                  likeCount: likeCount,
-                  replyCount: replyCount,
-                  repostCount: repostCount,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionBar extends StatelessWidget {
-  final String postId;
-  final int likeCount;
-  final int replyCount;
-  final int repostCount;
-  const _ActionBar({
-    required this.postId,
-    required this.likeCount,
-    required this.replyCount,
-    required this.repostCount,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      return const SizedBox.shrink();
-    }
-    Widget btn(
-      IconData icon,
-      int count,
-      VoidCallback onTap, {
-      bool highlighted = false,
-    }) {
-      return InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: highlighted ? cs.primary : cs.onSurfaceVariant,
-              ),
-              const SizedBox(width: 6),
-              Text('$count'),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('posts')
-          .doc(postId)
-          .collection('likes')
-          .doc(uid)
-          .snapshots(),
-      builder: (context, snap) {
-        final liked = snap.data?.exists == true;
-        final shownLikeCount =
-            likeCount +
-            (liked && (snap.connectionState == ConnectionState.waiting)
-                ? 0
-                : 0);
-        // shownLikeCount: listen edilen ana post dokümanı yeniden geldiğinde zaten güncellenecek.
-
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            btn(Icons.mode_comment_outlined, replyCount, () {}),
-            btn(Icons.repeat_outlined, repostCount, () {}),
-            btn(
-              liked ? Icons.favorite : Icons.favorite_border,
-              shownLikeCount,
-              () async {
-                final state = context.findAncestorStateOfType<_FeedPageState>();
-                if (state != null) {
-                  await state._toggleLike(postId, !liked);
-                }
-              },
-              highlighted: liked,
-            ),
-            IconButton(
-              icon: const Icon(Icons.share_outlined, size: 20),
-              onPressed: () {},
-              tooltip: 'Paylaş',
-            ),
-          ],
         );
       },
     );

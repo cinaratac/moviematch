@@ -26,33 +26,99 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _svc = ChatService();
   final _ctrl = TextEditingController();
   StreamSubscription? _latestSub;
+  Timer? _markDebounce;
+
+  // Pagination state for messages
+  final ScrollController _scroll = ScrollController();
+  final int _pageSize = 30;
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> _docs = [];
+  bool _loadingOlder = false;
+  bool _hasMore = true;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _msgsSub;
 
   @override
   void initState() {
     super.initState();
     final myUid = FirebaseAuth.instance.currentUser!.uid;
+
     // Katılımcılar alanını garantiye al (kalıcılık için kritik)
     _svc.ensureChat(widget.chatId, myUid, widget.otherUid);
 
-    // Oda açıkken yeni mesaj geldikçe okundu işaretle
+    // Oda açıkken yeni mesaj geldikçe okundu işaretle (debounced)
     _latestSub = FirebaseFirestore.instance
         .collection('chats')
         .doc(widget.chatId)
-        .collection('messages')
-        .orderBy('createdAt', descending: true)
-        .limit(1)
         .snapshots()
         .listen((snap) {
-          if (snap.docs.isEmpty) return;
-          final data = snap.docs.first.data();
-          final author = (data['authorId'] ?? data['from'] ?? '') as String;
-          if (author != myUid) {
+          final d = snap.data();
+          if (d == null) return;
+          final lastAuthor =
+              (d['lastMessageAuthorId'] ?? d['lastAuthorId'] ?? '')
+                  as String? ??
+              '';
+          if (lastAuthor == myUid) return; // kendi mesajım değilse okundu bas
+          _markDebounce?.cancel();
+          _markDebounce = Timer(const Duration(milliseconds: 500), () {
             _svc.markAsRead(widget.chatId, myUid);
-          }
+          });
         });
 
     // İlk girişte de okundu bas
     _svc.markAsRead(widget.chatId, myUid);
+
+    // ---- Mesajları sayfalı yükleme: canlı en son N + yukarı kaydırınca daha eski ----
+    _msgsSub = ChatService.instance
+        .latestMessagesStream(widget.chatId, limitCount: _pageSize)
+        .listen((qs) {
+          final fresh = qs.docs;
+          final older = _docs
+              .where((d) => !fresh.any((f) => f.id == d.id))
+              .toList();
+          setState(() {
+            _docs
+              ..clear()
+              ..addAll(fresh)
+              ..addAll(older);
+          });
+        });
+
+    // reverse ListView kullandığımız için: "tepeye" yaklaşınca daha eski sayfayı getir
+    _scroll.addListener(() {
+      if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 200) {
+        _loadOlder();
+      }
+    });
+  }
+
+  Future<void> _loadOlder() async {
+    if (_loadingOlder || !_hasMore || _docs.isEmpty) return;
+    setState(() => _loadingOlder = true);
+    try {
+      final lastDoc = _docs.isNotEmpty ? _docs.last : null;
+      if (lastDoc == null) {
+        _hasMore = false;
+      } else {
+        final qs = await ChatService.instance.fetchOlderMessagesPage(
+          widget.chatId,
+          startAfterDoc: lastDoc,
+          pageSize: _pageSize,
+        );
+        if (qs.docs.isEmpty) {
+          _hasMore = false;
+        } else {
+          setState(() {
+            // yinelenenleri at
+            for (final d in qs.docs) {
+              if (!_docs.any((e) => e.id == d.id)) {
+                _docs.add(d);
+              }
+            }
+          });
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _loadingOlder = false);
+    }
   }
 
   @override
@@ -61,7 +127,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (myUid != null) {
       _svc.markAsRead(widget.chatId, myUid);
     }
+    _markDebounce?.cancel();
     _latestSub?.cancel();
+    _msgsSub?.cancel();
+    _scroll.dispose();
     _ctrl.dispose();
     super.dispose();
   }
@@ -97,93 +166,99 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         children: [
           // Mesajlar
           Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('chats')
-                  .doc(widget.chatId)
-                  .collection('messages')
-                  .orderBy('createdAt', descending: true)
-                  .limit(60)
-                  .snapshots(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final docs = snap.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return const Center(child: Text('Henüz mesaj yok.'));
-                }
-                return ListView.builder(
-                  reverse: true,
-                  cacheExtent: 800,
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  itemCount: docs.length,
-                  itemBuilder: (context, i) {
-                    final m = docs[i].data();
-                    final author = (m['authorId'] ?? m['from'] ?? '') as String;
-                    final mine = author == myUid;
-                    final text = (m['text'] ?? '') as String;
-                    final ts = (m['createdAt'] as Timestamp?);
-                    final dt = ts?.toDate();
+            child: Stack(
+              children: [
+                if (_docs.isEmpty)
+                  const Center(child: Text('Henüz mesaj yok.'))
+                else
+                  ListView.builder(
+                    controller: _scroll,
+                    reverse:
+                        true, // en yeni altta, yukarı kaydırınca eski yüklenir
+                    cacheExtent: 800,
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    itemCount: _docs.length,
+                    itemBuilder: (context, i) {
+                      final m = _docs[i].data();
+                      final myUid = FirebaseAuth.instance.currentUser!.uid;
+                      final author =
+                          (m['authorId'] ?? m['from'] ?? '') as String;
+                      final mine = author == myUid;
+                      final text =
+                          (m['text'] ?? m['message'] ?? m['content'] ?? '')
+                              as String;
+                      final ts = (m['createdAt'] as Timestamp?);
+                      final dt = ts?.toDate();
 
-                    return Align(
-                      alignment: mine
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 320),
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: mine
-                                ? Colors.blueAccent
-                                : Colors.grey.shade800,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(12),
-                              topRight: const Radius.circular(12),
-                              bottomLeft: Radius.circular(
-                                mine ? 12 : 4,
-                              ), // kuyruk
-                              bottomRight: Radius.circular(
-                                mine ? 4 : 12,
-                              ), // kuyruk
+                      return Align(
+                        alignment: mine
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 320),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: mine
+                                  ? Colors.blueAccent
+                                  : Colors.grey.shade800,
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(12),
+                                topRight: const Radius.circular(12),
+                                bottomLeft: Radius.circular(mine ? 12 : 4),
+                                bottomRight: Radius.circular(mine ? 4 : 12),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: mine
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  text,
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                                if (dt != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _formatTime(dt),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.8,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: mine
-                                ? CrossAxisAlignment.end
-                                : CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                text,
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                              if (dt != null) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  _formatTime(dt),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.white.withValues(alpha: 0.8),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
                         ),
+                      );
+                    },
+                  ),
+
+                if (_loadingOlder)
+                  const Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: EdgeInsets.all(8.0),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                    );
-                  },
-                );
-              },
+                    ),
+                  ),
+              ],
             ),
           ),
 

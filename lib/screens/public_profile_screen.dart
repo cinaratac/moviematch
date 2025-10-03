@@ -69,6 +69,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Future<List<LetterboxdFilm>>? _futureFavs;
   Future<List<LetterboxdFilm>>? _futureFiveStars;
   Future<List<LetterboxdFilm>>? _futureDisliked;
+  String? _lastLb;
   // Cache for watchlist catalog fetches to avoid repeated refetch on doc updates
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
       {};
@@ -139,7 +140,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profil'),
-        backgroundColor: Colors.black.withOpacity(0.20), // semi‑transparent
+        backgroundColor: Colors.black.withValues(
+          alpha: 0.20,
+        ), // semi‑transparent
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
@@ -167,15 +170,18 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     ? displayName
                     : (lb.isNotEmpty ? '@$lb' : '(İsimsiz)'));
 
-          // Favorileri tetikle
-          if (lb.isNotEmpty && _futureFavs == null) {
-            _futureFavs = LetterboxdService.fetchFavorites(lb);
-          }
-          if (lb.isNotEmpty && _futureFiveStars == null) {
-            _futureFiveStars = LetterboxdService.fetchFiveStar(lb);
-          }
-          if (lb.isNotEmpty && _futureDisliked == null) {
-            _futureDisliked = LetterboxdService.fetchDisliked(lb);
+          // Favori/5★/dislike verilerini sadece Letterboxd kullanıcı adı değiştiğinde yeniden hazırla
+          if (_lastLb != lb) {
+            _lastLb = lb;
+            if (lb.isNotEmpty) {
+              _futureFavs = LetterboxdService.fetchFavorites(lb);
+              _futureFiveStars = LetterboxdService.fetchFiveStar(lb);
+              _futureDisliked = LetterboxdService.fetchDisliked(lb);
+            } else {
+              _futureFavs = null;
+              _futureFiveStars = null;
+              _futureDisliked = null;
+            }
           }
 
           return Stack(
@@ -278,80 +284,69 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     const Text('Letterboxd bağlı değil'),
 
                   const SizedBox(height: 12),
-                  // — Kullanıcı tercihleri (yaş, türler, yönetmenler, oyuncular) —
-                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseFirestore.instance
-                        .collection('users')
-                        .doc(widget.uid)
-                        .snapshots(),
-                    builder: (context, usnap) {
-                      if (!usnap.hasData || !usnap.data!.exists) {
-                        return const SizedBox.shrink();
-                      }
-                      final u = usnap.data!.data()!;
-                      final age = u['age'];
-                      final genres = List<String>.from(
-                        u['favGenres'] ?? const [],
-                      );
-                      final directors = List<String>.from(
-                        u['favDirectors'] ?? const [],
-                      );
-                      final actors = List<String>.from(
-                        u['favActors'] ?? const [],
-                      );
+                  // — Kullanıcı tercihleri (yaş, türler, yönetmenler, oyuncular) — (tek stream'den render)
+                  () {
+                    final age = data['age'];
+                    final genres = List<String>.from(
+                      data['favGenres'] ?? const [],
+                    );
+                    final directors = List<String>.from(
+                      data['favDirectors'] ?? const [],
+                    );
+                    final actors = List<String>.from(
+                      data['favActors'] ?? const [],
+                    );
 
-                      if ((age == null || (age is int && age <= 0)) &&
-                          genres.isEmpty &&
-                          directors.isEmpty &&
-                          actors.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
+                    if ((age == null || (age is int && age <= 0)) &&
+                        genres.isEmpty &&
+                        directors.isEmpty &&
+                        actors.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
 
-                      Widget chipWrap(String title, List<String> items) {
-                        if (items.isEmpty) return const SizedBox.shrink();
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    Widget chipWrap(String title, List<String> items) {
+                      if (items.isEmpty) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: items
+                                  .map((e) => Chip(label: Text(e)))
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (age is int && age > 0) const SizedBox(height: 8),
+                        if (age is int && age > 0)
+                          Row(
                             children: [
-                              Text(
-                                title,
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: items
-                                    .map((e) => Chip(label: Text(e)))
-                                    .toList(),
-                              ),
+                              const Icon(Icons.cake, size: 18),
+                              const SizedBox(width: 6),
+                              Text('Yaş: $age'),
                             ],
                           ),
-                        );
-                      }
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (age is int && age > 0)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8.0),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.cake, size: 18),
-                                  const SizedBox(width: 6),
-                                  Text('Yaş: $age'),
-                                ],
-                              ),
-                            ),
-                          chipWrap('Sevdiği türler', genres),
-                          chipWrap('Sevdiği yönetmenler', directors),
-                          chipWrap('Sevdiği oyuncular', actors),
-                        ],
-                      );
-                    },
-                  ),
+                        chipWrap('Sevdiği türler', genres),
+                        chipWrap('Sevdiği yönetmenler', directors),
+                        chipWrap('Sevdiği oyuncular', actors),
+                        const SizedBox(height: 12),
+                      ],
+                    );
+                  }(),
                   if (lb.isNotEmpty)
                     Text(
                       'Favori Filmler',

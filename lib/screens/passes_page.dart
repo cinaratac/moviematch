@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart' show ProfilePage;
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 class PassesPage extends StatelessWidget {
   const PassesPage({super.key});
@@ -16,19 +17,40 @@ class PassesPage extends StatelessWidget {
 }
 
 /// Pair-doc şemasına göre (likes/{pairId}) geçilenleri gösterir.
-class PassesListBody extends StatelessWidget {
+class PassesListBody extends StatefulWidget {
   const PassesListBody({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final fs = FirebaseFirestore.instance;
+  State<PassesListBody> createState() => _PassesListBodyState();
+}
 
+class _PassesListBodyState extends State<PassesListBody>
+    with AutomaticKeepAliveClientMixin {
+  late final String _uid;
+  late final FirebaseFirestore _fs;
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  final PageStorageKey _listKey = const PageStorageKey('passes_list');
+
+  @override
+  void initState() {
+    super.initState();
+    _uid = FirebaseAuth.instance.currentUser!.uid;
+    _fs = FirebaseFirestore.instance;
+    // Create the stream once so it doesn't get recreated on tab switches
+    _stream = _fs
+        .collection('likes')
+        .where('uids', arrayContains: _uid)
+        .snapshots();
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: fs
-          .collection('likes')
-          .where('uids', arrayContains: uid)
-          .snapshots(),
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -46,7 +68,7 @@ class PassesListBody extends StatelessWidget {
           final a = data['a'] as String?;
           final b = data['b'] as String?;
           if (a == null || b == null) continue;
-          final meIsA = (uid == a);
+          final meIsA = (_uid == a);
           final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
           final myLike = data[meIsA ? 'aLiked' : 'bLiked'] == true;
           final otherLike = data[meIsA ? 'bLiked' : 'aLiked'] == true;
@@ -75,11 +97,12 @@ class PassesListBody extends StatelessWidget {
         });
 
         return ListView.builder(
+          key: _listKey,
           padding: const EdgeInsets.all(12),
           itemCount: items.length,
           itemBuilder: (context, i) {
             final data = items[i].data();
-            final otherUid = (uid == data['a'])
+            final otherUid = (_uid == data['a'])
                 ? data['b'] as String?
                 : data['a'] as String?;
             final when = (data['updatedAt'] as Timestamp?)?.toDate().toLocal();
@@ -113,7 +136,11 @@ class _PassDetailCard extends StatelessWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () => _openProfile(context, otherUid),
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid)),
+        );
+      },
       child: Card(
         margin: const EdgeInsets.symmetric(vertical: 8),
         elevation: 3,
@@ -197,11 +224,6 @@ class _PassDetailCard extends StatelessWidget {
                           _Pill(
                             icon: Icons.star_rate_rounded,
                             text: 'Ortak 5★: ${cd.commonFiveCount}',
-                          ),
-                        if (cd.commonFavCount != null)
-                          _Pill(
-                            icon: Icons.favorite_outline,
-                            text: 'Ortak fav: ${cd.commonFavCount}',
                           ),
                       ],
                     )

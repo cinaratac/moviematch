@@ -88,33 +88,44 @@ class _ProfilePageState extends State<ProfilePage> {
           if (!snap.exists) return;
           final data = snap.data() ?? const {};
           final lb = (data['letterboxdUsername'] ?? '').toString().trim();
+          final appU =
+              (data['username'] ?? data['handle'] ?? data['appUsername'] ?? '')
+                  .toString()
+                  .trim();
 
-          if (lb.isEmpty) return;
-          if (lb == (_lbUsername ?? '')) return; // no change
-
-          // persist to SharedPreferences for next app launch
-          try {
-            final sp = await SharedPreferences.getInstance();
-            await sp.setString('lb_username_$uid', lb);
-          } catch (_) {}
-
-          // update state & futures
-          if (mounted) {
-            setState(() {
-              _lbUsername = lb;
-              _futureFavs = LetterboxdService.fetchFavorites(lb);
-              _futureFiveStar = LetterboxdService.fetchFiveStar(lb);
-              _futureDisliked = LetterboxdService.fetchDisliked(lb);
-              _autoSynced = false; // force re-sync once for new username
-            });
+          // 1) Propagate app username immediately if changed
+          if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
+            if (mounted) {
+              setState(() => _appUsername = appU);
+            }
           }
 
-          // auto-sync once for this new username
-          if (!_autoSynced) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _syncLetterboxdToFirestore(lb);
-            });
-            _autoSynced = true;
+          // 2) Handle Letterboxd username changes (avoid early return so appU still updates)
+          if (lb.isNotEmpty && lb != (_lbUsername ?? '')) {
+            // persist to SharedPreferences for next app launch
+            try {
+              final sp = await SharedPreferences.getInstance();
+              await sp.setString('lb_username_$uid', lb);
+            } catch (_) {}
+
+            // update state & futures
+            if (mounted) {
+              setState(() {
+                _lbUsername = lb;
+                _futureFavs = LetterboxdService.fetchFavorites(lb);
+                _futureFiveStar = LetterboxdService.fetchFiveStar(lb);
+                _futureDisliked = LetterboxdService.fetchDisliked(lb);
+                _autoSynced = false; // force re-sync once for new username
+              });
+            }
+
+            // auto-sync once for this new username
+            if (!_autoSynced) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _syncLetterboxdToFirestore(lb);
+              });
+              _autoSynced = true;
+            }
           }
         });
   }
@@ -229,9 +240,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _shownName(User user) {
     final local = (_appUsername ?? '').trim();
-    if (local.isNotEmpty) {
+    if (local.isNotEmpty)
       return local; // Firestore'daki uygulama kullanıcı adı öncelikli
-    }
     final dn = (user.displayName ?? '').trim();
     if (dn.isNotEmpty) return dn; // sonra Firebase Auth displayName
     final email = user.email ?? '';
