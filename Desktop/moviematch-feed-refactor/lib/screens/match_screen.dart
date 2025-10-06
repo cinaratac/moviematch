@@ -653,11 +653,59 @@ class MatchScreen extends StatefulWidget {
 class _MatchScreenState extends State<MatchScreen>
     with AutomaticKeepAliveClientMixin {
   late final Future<_Resolved> _future; // cache once per screen
+  bool _likedMe = false;
 
   @override
   void initState() {
     super.initState();
     _future = _resolveCommonFilms(widget.result);
+    _checkIfLikedMe();
+  }
+
+  Future<void> _checkIfLikedMe() async {
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    final other = widget.result.uid;
+    if (me == null || other.isEmpty) return;
+    final db = FirebaseFirestore.instance;
+    try {
+      // Query for likes where either (a==me && b==other) or (b==me && a==other)
+      final qa = await db
+          .collection('likes')
+          .where('a', isEqualTo: me)
+          .where('b', isEqualTo: other)
+          .get();
+      final qb = await db
+          .collection('likes')
+          .where('b', isEqualTo: me)
+          .where('a', isEqualTo: other)
+          .get();
+      bool likedMe = false;
+      for (final d in qa.docs) {
+        final m = d.data();
+        // If I am a, check if bLiked (other liked me)
+        if (m['bLiked'] == true) {
+          likedMe = true;
+          break;
+        }
+      }
+      if (!likedMe) {
+        for (final d in qb.docs) {
+          final m = d.data();
+          // If I am b, check if aLiked (other liked me)
+          if (m['aLiked'] == true) {
+            likedMe = true;
+            break;
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _likedMe = likedMe;
+        });
+      }
+    } catch (e) {
+      // ignore errors
+    }
   }
 
   Future<void> _openIncomingLikes() async {
@@ -816,7 +864,9 @@ class _MatchScreenState extends State<MatchScreen>
         actions: [
           IconButton(
             tooltip: 'Beni beğenenler',
-            icon: const Icon(Icons.favorite_outline),
+            icon: Icon(
+              _likedMe ? Icons.favorite_rounded : Icons.favorite_outline,
+            ),
             onPressed: _openIncomingLikes,
           ),
           IconButton(

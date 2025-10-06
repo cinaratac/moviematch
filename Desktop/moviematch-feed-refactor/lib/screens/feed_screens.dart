@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
+import 'package:fluttergirdi/screens/search_profiles_screen.dart';
+import 'package:fluttergirdi/screens/profilescreen.dart'; // for UserShelfCache
 import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -24,6 +26,7 @@ class _FeedPageState extends State<FeedPage> {
   bool _hasMore = true;
   List<DocumentSnapshot<Map<String, dynamic>>> _posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
+  Map<String, String>? _selectedMovie; // { 'title': ..., 'poster': ... }
 
   @override
   void initState() {
@@ -132,12 +135,132 @@ class _FeedPageState extends State<FeedPage> {
     await _loadInitial();
   }
 
+  Future<void> _pickMovie() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final result = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        return SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.8,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Filmlerim',
+                  style: Theme.of(ctx).textTheme.titleLarge,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              Expanded(
+                child: Builder(
+                  builder: (context) {
+                    // Read only from in-memory cache filled by Profile screen
+                    final merged = <Map<String, String>>[
+                      ...UserShelfCache.fiveStar,
+                      ...UserShelfCache.favorites,
+                      ...UserShelfCache.watchlist,
+                      ...UserShelfCache.disliked,
+                    ];
+
+                    // Deduplicate by lower-cased title to avoid repeats across shelves
+                    final seen = <String>{};
+                    final items = <Map<String, String>>[];
+                    for (final m in merged) {
+                      final t = (m['title'] ?? '').trim();
+                      if (t.isEmpty) continue;
+                      final key = t.toLowerCase();
+                      if (seen.add(key))
+                        items.add({
+                          'title': t,
+                          'poster': (m['poster'] ?? '').toString(),
+                        });
+                    }
+
+                    if (items.isEmpty) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Film listesi boş. Profil ekranından senkronize et ve tekrar dene.',
+                          ),
+                        ),
+                      );
+                    }
+
+                    return ListView.separated(
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final title = items[i]['title'] ?? '';
+                        final poster = items[i]['poster'] ?? '';
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundImage: poster.isNotEmpty
+                                ? NetworkImage(poster)
+                                : null,
+                            child: poster.isEmpty
+                                ? const Icon(Icons.movie)
+                                : null,
+                          ),
+                          title: Text(title.isEmpty ? 'İsimsiz Film' : title),
+                          onTap: () {
+                            Navigator.of(context).pop(<String, String>{
+                              'title': title,
+                              'poster': poster,
+                            });
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (result != null) {
+      setState(() {
+        _selectedMovie = result;
+      });
+      // Metni otomatik doldur (başlık), kullanıcı isterse düzenler
+      final t = result['title'] ?? '';
+      if (t.isNotEmpty) {
+        final existing = _controller.text.trim();
+        _controller.text = existing.isEmpty ? '🎬 $t' : existing;
+        _controller.selection = TextSelection.fromPosition(
+          TextPosition(offset: _controller.text.length),
+        );
+        _focusNode.requestFocus();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Feed'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SearchProfilesScreen()),
+              );
+            },
+          ),
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'settings') {
@@ -176,6 +299,11 @@ class _FeedPageState extends State<FeedPage> {
                           controller: _controller,
                           focusNode: _focusNode,
                           maxChars: _maxChars,
+                          selectedMovie: _selectedMovie,
+                          onPickMovie: _pickMovie,
+                          onClearMovie: () {
+                            setState(() => _selectedMovie = null);
+                          },
                           onSend: (text) async {
                             await _createPost(text);
                             _controller.clear();
@@ -199,6 +327,15 @@ class _FeedPageState extends State<FeedPage> {
                   final timeLabel = createdAt == null
                       ? ''
                       : _timeAgo(createdAt.toDate());
+                  final movieTitle =
+                      ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '')
+                          .toString();
+                  final moviePoster =
+                      ((m['moviePoster'] ??
+                                  (m['movie']?['poster'] ??
+                                      m['movie']?['posterUrl'])) ??
+                              '')
+                          .toString();
                   return PostTile(
                     postId: d.id,
                     authorId: (m['authorId'] ?? '') as String,
@@ -206,6 +343,8 @@ class _FeedPageState extends State<FeedPage> {
                     handle: (m['handle'] ?? '') as String,
                     photoURL: (m['photoURL'] ?? '') as String,
                     timeLabel: timeLabel,
+                    movieTitle: movieTitle.isEmpty ? null : movieTitle,
+                    moviePoster: moviePoster.isEmpty ? null : moviePoster,
                     text: (m['text'] ?? '') as String,
                     likeCount: (m['likeCount'] ?? 0) is int
                         ? m['likeCount'] as int
@@ -238,7 +377,7 @@ class _FeedPageState extends State<FeedPage> {
     } catch (_) {}
 
     final docRef = FirebaseFirestore.instance.collection('posts').doc();
-    await docRef.set({
+    final data = {
       'authorId': user.uid,
       'displayName': user.displayName ?? '',
       'handle': lb.isNotEmpty ? '@$lb' : '',
@@ -249,7 +388,21 @@ class _FeedPageState extends State<FeedPage> {
       'replyCount': 0,
       'repostCount': 0,
       'visibility': 'public',
-    });
+    };
+    if (_selectedMovie != null) {
+      final title = _selectedMovie!['title'] ?? '';
+      final poster = _selectedMovie!['poster'] ?? '';
+      if (title.isNotEmpty) data['movieTitle'] = title;
+      if (poster.isNotEmpty) data['moviePoster'] = poster;
+    }
+    await docRef.set(data);
+
+    // Clear selected movie after posting
+    if (mounted) {
+      setState(() {
+        _selectedMovie = null;
+      });
+    }
 
     // Read only the new post (server) and prepend without reloading the whole list
     try {
@@ -337,11 +490,17 @@ class _Composer extends StatelessWidget {
   final FocusNode focusNode;
   final int maxChars;
   final void Function(String)? onSend;
+  final Map<String, String>? selectedMovie;
+  final VoidCallback onPickMovie;
+  final VoidCallback onClearMovie;
 
   const _Composer({
     required this.controller,
     required this.focusNode,
     required this.maxChars,
+    required this.selectedMovie,
+    required this.onPickMovie,
+    required this.onClearMovie,
     required this.onSend,
   });
 
@@ -378,6 +537,46 @@ class _Composer extends StatelessWidget {
                         border: InputBorder.none,
                       ),
                     ),
+                    if (selectedMovie != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: cs.outlineVariant),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.all(8),
+                        child: Row(
+                          children: [
+                            if ((selectedMovie!['poster'] ?? '').isNotEmpty)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  selectedMovie!['poster']!,
+                                  width: 44,
+                                  height: 66,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            else
+                              const Icon(Icons.movie, size: 40),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                selectedMovie!['title'] ?? 'Seçili film',
+                                style: theme.textTheme.titleSmall,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: onClearMovie,
+                              icon: const Icon(Icons.close),
+                              tooltip: 'Kaldır',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -387,14 +586,9 @@ class _Composer extends StatelessWidget {
                           tooltip: 'Medya',
                         ),
                         IconButton(
-                          onPressed: () {},
-                          icon: const Icon(Icons.poll_outlined),
-                          tooltip: 'Anket',
-                        ),
-                        IconButton(
-                          onPressed: () {},
-                          icon: const Icon(Icons.emoji_emotions_outlined),
-                          tooltip: 'Emoji',
+                          onPressed: onPickMovie,
+                          icon: const Icon(Icons.movie),
+                          tooltip: 'Film seç',
                         ),
                         const Spacer(),
                         if (remaining <= 40)

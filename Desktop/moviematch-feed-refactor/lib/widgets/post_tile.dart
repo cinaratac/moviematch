@@ -2,6 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../screens/public_profile_screen.dart';
+import '../services/follow_system_service.dart';
+import '../screens/chat_room_screen.dart';
+
+import 'dart:async';
 
 // simple in-memory future cache so multiple PostTile instances don't refetch the same user doc repeatedly
 final Map<String, Future<String?>> _lbHandleCache = {};
@@ -55,6 +59,8 @@ class PostTile extends StatelessWidget {
   final int likeCount;
   final int replyCount;
   final int repostCount;
+  final String? movieTitle;
+  final String? moviePoster;
 
   // Parent’tan gelen aksiyonlar (FeedPage optimize kalsın)
   final Future<void> Function(String postId, bool like) onToggleLike;
@@ -74,6 +80,8 @@ class PostTile extends StatelessWidget {
     required this.likeCount,
     required this.replyCount,
     required this.repostCount,
+    this.movieTitle,
+    this.moviePoster,
     required this.onToggleLike,
     required this.onStartChat,
     required this.onFollow,
@@ -84,6 +92,8 @@ class PostTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    final isOwner = me == authorId;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -143,25 +153,41 @@ class PostTile extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
 
-                      // fetch letterboxd handle once per author (cached future)
-                      FutureBuilder<String?>(
-                        future: _lbHandleFor(authorId),
-                        builder: (context, snap) {
-                          final lb = (snap.data ?? '').toString();
-                          final showLb = lb.isNotEmpty;
-                          return Flexible(
-                            child: Text(
-                              '${showLb ? '@$lb · ' : ''}$timeLabel',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                              ),
-                              overflow: TextOverflow.ellipsis,
+                      // Handle önceden geldiyse Firestore okuma yapma; boşsa tek sefer fetch et
+                      if (handle.isNotEmpty)
+                        Flexible(
+                          child: Text(
+                            '$handle · $timeLabel',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: cs.onSurfaceVariant,
                             ),
-                          );
-                        },
-                      ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        )
+                      else
+                        FutureBuilder<String?>(
+                          future: _lbHandleFor(authorId),
+                          builder: (context, snap) {
+                            final lb = (snap.data ?? '').toString();
+                            final showLb = lb.isNotEmpty;
+                            return Flexible(
+                              child: Text(
+                                '${showLb ? '@$lb · ' : ''}$timeLabel',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          },
+                        ),
 
                       const Spacer(),
+                      if (!isOwner)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: _FollowButton(authorId: authorId),
+                        ),
                       _PostMenu(
                         authorId: authorId,
                         postId: postId,
@@ -174,6 +200,18 @@ class PostTile extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(text),
                   const SizedBox(height: 8),
+
+                  // Movie attachment (optional)
+                  if ((moviePoster != null && moviePoster!.isNotEmpty) ||
+                      (movieTitle != null && movieTitle!.isNotEmpty))
+                    _MovieAttachment(
+                      posterUrl: moviePoster ?? '',
+                      title: movieTitle ?? '',
+                    ),
+                  if ((moviePoster != null && moviePoster!.isNotEmpty) ||
+                      (movieTitle != null && movieTitle!.isNotEmpty))
+                    const SizedBox(height: 8),
+
                   FutureBuilder<bool>(
                     future: _isLikedRemotely(postId),
                     builder: (context, snap) {
@@ -205,6 +243,185 @@ class PostTile extends StatelessWidget {
   }
 }
 
+class _MovieAttachment extends StatelessWidget {
+  final String posterUrl;
+  final String title;
+  const _MovieAttachment({required this.posterUrl, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (posterUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 120, // smaller thumbnail
+                height: 180, // keep 2:3 ratio
+                child: Image.network(
+                  posterUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      const Center(child: Icon(Icons.movie)),
+                ),
+              ),
+            ),
+          if (posterUrl.isNotEmpty) const SizedBox(height: 8),
+          if (title.isNotEmpty)
+            Text(
+              title,
+              style: Theme.of(context).textTheme.bodyMedium,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FollowButton extends StatefulWidget {
+  final String authorId;
+  const _FollowButton({required this.authorId});
+
+  @override
+  State<_FollowButton> createState() => _FollowButtonState();
+}
+
+class _FollowButtonState extends State<_FollowButton> {
+  bool _busy = false;
+  bool _isFollowing = false;
+  StreamSubscription<FollowEvent>? _sub;
+
+  String? get _me => FirebaseAuth.instance.currentUser?.uid;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+    // Event bus ile sayfa yenilemeden güncelle
+    _sub = FollowSystemService.I.events.listen((e) {
+      if (_me == null) return;
+      if (e.actorUid != _me) return; // sadece benim aksiyonlarım bizi etkiler
+      if (e.targetUid != widget.authorId) return;
+      if (!mounted) return;
+      setState(() => _isFollowing = e.followed);
+    });
+  }
+
+  Future<void> _bootstrap() async {
+    final me = _me;
+    if (me == null || me == widget.authorId) return;
+    try {
+      final exists =
+          (await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(me)
+                  .collection('following')
+                  .doc(widget.authorId)
+                  .get(const GetOptions(source: Source.serverAndCache)))
+              .exists;
+      if (!mounted) return;
+      setState(() => _isFollowing = exists);
+    } catch (_) {}
+  }
+
+  Future<void> _doFollow() async {
+    setState(() => _busy = true);
+    try {
+      await FollowSystemService.I.followUser(widget.authorId);
+      if (mounted) setState(() => _isFollowing = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Takip edilemedi: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _doUnfollow() async {
+    setState(() => _busy = true);
+    try {
+      await FollowSystemService.I.unfollowUser(widget.authorId);
+      if (mounted) setState(() => _isFollowing = false);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Takipten çıkılamadı: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // Kendi profilimse buton gösterme
+    if (_me == widget.authorId) return const SizedBox.shrink();
+
+    if (_isFollowing) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(width: 6),
+          TextButton(
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: const Size(0, 0),
+            ),
+            onPressed: _busy ? null : _doUnfollow,
+            child: _busy
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Takipten çık'),
+          ),
+        ],
+      );
+    }
+
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        side: BorderSide(color: cs.outlineVariant),
+        minimumSize: const Size(0, 0),
+      ),
+      onPressed: _busy ? null : _doFollow,
+      child: _busy
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Text('Takip et'),
+    );
+  }
+}
+
 class _PostMenu extends StatelessWidget {
   final String authorId;
   final String postId;
@@ -230,14 +447,41 @@ class _PostMenu extends StatelessWidget {
       onSelected: (v) async {
         switch (v) {
           case 'follow':
-            await onFollow(authorId);
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(const SnackBar(content: Text('Takip edildi')));
+            try {
+              final me = FirebaseAuth.instance.currentUser?.uid;
+              if (me == null || me == authorId) break;
+              final folDoc = await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(me)
+                  .collection('following')
+                  .doc(authorId)
+                  .get(const GetOptions(source: Source.serverAndCache));
+              final isFollowing = folDoc.exists;
+              if (isFollowing) {
+                await FollowSystemService.I.unfollowUser(authorId);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Takipten çıkıldı')),
+                  );
+                }
+              } else {
+                await FollowSystemService.I.followUser(authorId);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('Takip edildi')));
+                }
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('İşlem başarısız: $e')));
+              }
+            }
             break;
           case 'dm':
-            await onStartChat(authorId);
+            await _startDm(context);
             break;
           case 'report':
             await onReport(postId);
@@ -260,13 +504,68 @@ class _PostMenu extends StatelessWidget {
       },
       itemBuilder: (context) => [
         if (!owner)
-          const PopupMenuItem(value: 'follow', child: Text('Takip et')),
-        if (!owner)
           const PopupMenuItem(value: 'dm', child: Text('Mesaj gönder')),
         const PopupMenuItem(value: 'report', child: Text('Şikayet et')),
         if (owner) const PopupMenuItem(value: 'delete', child: Text('Sil')),
       ],
     );
+  }
+
+  Future<void> _startDm(BuildContext context) async {
+    try {
+      final me = FirebaseAuth.instance.currentUser?.uid;
+      if (me == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Önce giriş yapmalısınız.')),
+          );
+        }
+        return;
+      }
+
+      final fs = FirebaseFirestore.instance;
+
+      // 1) Var olan DM odasını bul (array-contains ile önce "me" yi bulup, client-side diğerini filtrele)
+      final qs = await fs
+          .collection('chats')
+          .where('participants', arrayContains: me)
+          .limit(20)
+          .get(const GetOptions(source: Source.serverAndCache));
+
+      String? chatId;
+      for (final d in qs.docs) {
+        final data = d.data();
+        final parts =
+            (data['participants'] as List?)?.cast<String>() ?? const <String>[];
+        final type = (data['type'] ?? '') as String;
+        if (parts.contains(authorId) && (type == 'dm' || parts.length == 2)) {
+          chatId = d.id;
+          break;
+        }
+      }
+
+      // 2) Yoksa oluştur
+      chatId ??= (await fs.collection('chats').add({
+        'type': 'dm',
+        'participants': [me, authorId],
+        'createdAt': FieldValue.serverTimestamp(),
+      })).id;
+
+      // 3) Sohbete git — doğrudan ChatRoomScreen'e yönlendir
+      if (context.mounted && chatId != null) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ChatRoomScreen(chatId: chatId!, otherUid: authorId),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Mesaj başlatılamadı: $e')));
+      }
+    }
   }
 }
 
@@ -315,9 +614,12 @@ class _ActionBarState extends State<_ActionBar> {
     super.didUpdateWidget(oldWidget);
     // Only accept remote liked/likeCount updates if user hasn't interacted locally.
     if (!_userMutatedLike) {
-      if (oldWidget.isLiked != widget.isLiked) _liked = widget.isLiked;
-      if (oldWidget.likeCount != widget.likeCount)
+      if (oldWidget.isLiked != widget.isLiked) {
+        _liked = widget.isLiked;
+      }
+      if (oldWidget.likeCount != widget.likeCount) {
         _likeCount = widget.likeCount;
+      }
     }
     // Reply count can still sync from parent
     if (oldWidget.replyCount != widget.replyCount) {
@@ -452,9 +754,6 @@ class _ReplySheetState extends State<_ReplySheet> {
   bool _loadingMore = false;
   bool _hasMore = true;
 
-  // Local liked-state for replies to avoid FutureBuilder staleness
-  final Map<String, bool> _replyLiked = <String, bool>{};
-
   DateTime? _lastSendAt;
   static const Duration _minSendInterval = Duration(seconds: 5);
 
@@ -482,7 +781,9 @@ class _ReplySheetState extends State<_ReplySheet> {
       if (!mounted) return;
       setState(() {
         _replies.addAll(qs.docs.map((d) => {'__id': d.id, ...d.data()}));
-        if (qs.docs.isNotEmpty) _lastDoc = qs.docs.last;
+        if (qs.docs.isNotEmpty) {
+          _lastDoc = qs.docs.last;
+        }
         _hasMore = qs.docs.length == 20;
         _initialLoading = false;
       });
@@ -509,96 +810,15 @@ class _ReplySheetState extends State<_ReplySheet> {
       if (!mounted) return;
       setState(() {
         _replies.addAll(qs.docs.map((d) => {'__id': d.id, ...d.data()}));
-        if (qs.docs.isNotEmpty) _lastDoc = qs.docs.last;
+        if (qs.docs.isNotEmpty) {
+          _lastDoc = qs.docs.last;
+        }
         _hasMore = qs.docs.length == 20;
         _loadingMore = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _loadingMore = false);
-    }
-  }
-
-  Future<void> _ensureReplyLikedLoaded(String replyId) async {
-    if (_replyLiked.containsKey(replyId)) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) {
-      _replyLiked[replyId] = false;
-      return;
-    }
-    try {
-      final liked = await FirebaseFirestore.instance
-          .collection('posts')
-          .doc(widget.postId)
-          .collection('replies')
-          .doc(replyId)
-          .collection('likes')
-          .doc(uid)
-          .get()
-          .then((d) => d.exists);
-      if (!mounted) return;
-      setState(() {
-        _replyLiked[replyId] = liked;
-      });
-    } catch (_) {
-      // default false on error
-      _replyLiked[replyId] = false;
-    }
-  }
-
-  Future<void> _toggleReplyLike({
-    required String replyId,
-    required bool like,
-    required int index,
-  }) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    final fs = FirebaseFirestore.instance;
-    final postRef = fs.collection('posts').doc(widget.postId);
-    final replyRef = postRef.collection('replies').doc(replyId);
-    final likeRef = replyRef.collection('likes').doc(uid);
-
-    try {
-      // Atomic + idempotent via transaction + FieldValue.increment
-      final result = await fs.runTransaction<Map<String, dynamic>>((tx) async {
-        final likeSnap = await tx.get(likeRef);
-        final hasLike = likeSnap.exists;
-
-        if (like && !hasLike) {
-          tx.set(likeRef, {'createdAt': FieldValue.serverTimestamp()});
-          tx.update(replyRef, {'likeCount': FieldValue.increment(1)});
-          return {'liked': true, 'delta': 1};
-        }
-        if (!like && hasLike) {
-          tx.delete(likeRef);
-          tx.update(replyRef, {'likeCount': FieldValue.increment(-1)});
-          return {'liked': false, 'delta': -1};
-        }
-        // No-op: already desired state
-        return {'liked': hasLike, 'delta': 0};
-      });
-
-      // Sync local caches/UI based on delta
-      final newLiked = (result['liked'] as bool?) ?? false;
-      final delta = (result['delta'] as int?) ?? 0;
-      _replyLiked[replyId] = newLiked;
-
-      if (!mounted) return;
-      setState(() {
-        final m = _replies[index];
-        final current = (m['likeCount'] is int)
-            ? m['likeCount'] as int
-            : ((m['likeCount'] ?? 0) as num).toInt();
-        m['likeCount'] = (current + delta).clamp(0, 1 << 31);
-      });
-    } catch (e) {
-      // Helpful debug log for rule/path issues
-      // ignore: avoid_print
-      print('[reply-like] write failed for ${widget.postId}/$replyId : $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Yorum için beğeni yazılamadı.')),
-      );
     }
   }
 
@@ -747,7 +967,6 @@ class _ReplySheetState extends State<_ReplySheet> {
                                 }
                                 final m = _replies[i];
                                 final photo = (m['photoURL'] ?? '').toString();
-                                final replyId = (m['__id'] ?? '') as String;
 
                                 return ListTile(
                                   leading: CircleAvatar(
@@ -762,63 +981,6 @@ class _ReplySheetState extends State<_ReplySheet> {
                                     (m['displayName'] ?? '').toString(),
                                   ),
                                   subtitle: Text((m['text'] ?? '').toString()),
-                                  trailing: replyId.isEmpty
-                                      ? null
-                                      : Builder(
-                                          builder: (context) {
-                                            final liked = _replyLiked[replyId];
-                                            if (liked == null) {
-                                              // kick off a one-time load without blocking UI
-                                              // ignore: discarded_futures
-                                              _ensureReplyLikedLoaded(replyId);
-                                            }
-                                            final effectiveLiked =
-                                                liked ?? false;
-                                            final currentLikeCount =
-                                                (m['likeCount'] is int)
-                                                ? m['likeCount'] as int
-                                                : ((m['likeCount'] ?? 0) as num)
-                                                      .toInt();
-                                            return InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              onTap: () => _toggleReplyLike(
-                                                replyId: replyId,
-                                                like: !effectiveLiked,
-                                                index: i,
-                                              ),
-                                              child: Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 6,
-                                                    ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      effectiveLiked
-                                                          ? Icons.favorite
-                                                          : Icons
-                                                                .favorite_border,
-                                                      size: 18,
-                                                      color: effectiveLiked
-                                                          ? Theme.of(context)
-                                                                .colorScheme
-                                                                .primary
-                                                          : Theme.of(context)
-                                                                .colorScheme
-                                                                .onSurfaceVariant,
-                                                    ),
-                                                    const SizedBox(width: 6),
-                                                    Text('$currentLikeCount'),
-                                                  ],
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
                                 );
                               },
                             ),

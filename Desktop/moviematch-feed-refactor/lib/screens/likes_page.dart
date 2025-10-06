@@ -158,7 +158,6 @@ class _LikesDetailCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fs = FirebaseFirestore.instance;
     final theme = Theme.of(context);
 
     return InkWell(
@@ -320,7 +319,6 @@ Future<_CardData> _loadCardData(
   Map<String, dynamic> my,
 ) async {
   final fs = FirebaseFirestore.instance;
-  final me = FirebaseAuth.instance.currentUser!.uid;
 
   // --- helpers ---
   List<String> ls(dynamic x) {
