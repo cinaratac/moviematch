@@ -103,10 +103,11 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
       );
       return;
     }
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
+    final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+    var doc = await ref.get(const GetOptions(source: Source.cache));
+    if (!doc.exists) {
+      doc = await ref.get(const GetOptions(source: Source.server));
+    }
     final exists =
         doc.exists &&
         (doc.data()?['letterboxdUsername'] ?? '').toString().isNotEmpty;
@@ -174,11 +175,14 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'letterboxdUsername': raw,
         'letterboxdUsername_lc': raw.toLowerCase(),
-        'age': ageVal, // null yazılırsa merge ile sorun olmaz
+        'age': ageVal,
         'favGenres': _selectedGenres.toList(),
         'favDirectors': _favDirectors,
         'favActors': _favActors,
         'updatedAt': FieldValue.serverTimestamp(),
+        // sync metadata
+        'lastSyncedAt': FieldValue.serverTimestamp(),
+        'syncReason': 'userRequested',
       }, SetOptions(merge: true));
 
       // 2) TasteProfile oluştur (eşleşme sistemi için zorunlu)

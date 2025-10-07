@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -39,7 +40,24 @@ class _RegisterPageState extends State<RegisterPage> {
         await user?.updateDisplayName(uname);
       } catch (_) {}
 
-      // 3) Onboarding: Letterboxd kullanıcı adı zorunlu adımı
+      // 3) Firestore: users/{uid} içine uygulama içi kullanıcı adını yaz
+      try {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid != null) {
+          await FirebaseFirestore.instance.collection('users').doc(uid).set({
+            'displayName': uname,
+            'displayName_lc': uname.toLowerCase(),
+            'email': email,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'createdAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } catch (e) {
+        // Firestore yazımı başarısız olsa bile kayıt akışını durdurma; logla
+        debugPrint('users/{uid} set error: $e');
+      }
+
+      // 4) Onboarding: Letterboxd kullanıcı adı zorunlu adımı
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const OnboardingLetterboxd()),

@@ -4,6 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart' show ProfilePage;
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
+class _UserLite {
+  final String title;
+  final String photoURL;
+  final int? age;
+  const _UserLite({required this.title, required this.photoURL, this.age});
+}
+
+class _PassRow {
+  final String otherUid;
+  final DateTime? when;
+  const _PassRow({required this.otherUid, this.when});
+}
+
 class PassesPage extends StatelessWidget {
   const PassesPage({super.key});
 
@@ -28,7 +41,9 @@ class _PassesListBodyState extends State<PassesListBody>
     with AutomaticKeepAliveClientMixin {
   late final String _uid;
   late final FirebaseFirestore _fs;
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  late final Future<List<_PassRow>> _itemsFuture;
+  late final Future<Map<String, dynamic>> _myTasteFuture;
+  final Map<String, _UserLite> _userCache = <String, _UserLite>{};
   final PageStorageKey _listKey = const PageStorageKey('passes_list');
 
   @override
@@ -36,11 +51,8 @@ class _PassesListBodyState extends State<PassesListBody>
     super.initState();
     _uid = FirebaseAuth.instance.currentUser!.uid;
     _fs = FirebaseFirestore.instance;
-    // Create the stream once so it doesn't get recreated on tab switches
-    _stream = _fs
-        .collection('likes')
-        .where('uids', arrayContains: _uid)
-        .snapshots();
+    _itemsFuture = _loadPassRows();
+    _myTasteFuture = _loadMyTasteOnce();
   }
 
   @override
@@ -49,76 +61,158 @@ class _PassesListBodyState extends State<PassesListBody>
   @override
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _stream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+    return FutureBuilder<List<_PassRow>>(
+      future: _itemsFuture,
+      builder: (context, listSnap) {
+        if (listSnap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasError) {
+        if (listSnap.hasError) {
           return const Center(child: Text('Hata oluştu'));
         }
-
-        final docs = snapshot.data?.docs ?? const [];
-
-        // Benim açımdan PASS olan ve MATCH olmayan çiftleri seç
-        final items = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-        for (final d in docs) {
-          final data = d.data();
-          final a = data['a'] as String?;
-          final b = data['b'] as String?;
-          if (a == null || b == null) continue;
-          final meIsA = (_uid == a);
-          final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
-          final myLike = data[meIsA ? 'aLiked' : 'bLiked'] == true;
-          final otherLike = data[meIsA ? 'bLiked' : 'aLiked'] == true;
-          final matched = myLike && otherLike;
-
-          if (myPass && !matched) {
-            items.add(d);
-          }
-        }
-
+        final items = listSnap.data ?? const <_PassRow>[];
         if (items.isEmpty) {
           return const Center(child: Text('Henüz geçilen yok'));
         }
-
-        // updatedAt'e göre yeni → eski sırala
-        items.sort((a, b) {
-          final ta = a.data()['updatedAt'];
-          final tb = b.data()['updatedAt'];
-          final da = (ta is Timestamp)
-              ? ta.toDate()
-              : DateTime.fromMillisecondsSinceEpoch(0);
-          final db = (tb is Timestamp)
-              ? tb.toDate()
-              : DateTime.fromMillisecondsSinceEpoch(0);
-          return db.compareTo(da);
-        });
-
-        return ListView.builder(
-          key: _listKey,
-          padding: const EdgeInsets.all(12),
-          itemCount: items.length,
-          itemBuilder: (context, i) {
-            final data = items[i].data();
-            final otherUid = (_uid == data['a'])
-                ? data['b'] as String?
-                : data['a'] as String?;
-            final when = (data['updatedAt'] as Timestamp?)?.toDate().toLocal();
-            if (otherUid == null) return const SizedBox.shrink();
-            return _PassDetailCard(otherUid: otherUid, when: when);
+        return FutureBuilder<Map<String, dynamic>>(
+          future: _myTasteFuture,
+          builder: (context, tasteSnap) {
+            final myTaste = tasteSnap.data ?? const <String, dynamic>{};
+            return ListView.builder(
+              key: _listKey,
+              padding: const EdgeInsets.all(12),
+              itemCount: items.length,
+              itemBuilder: (context, i) {
+                final row = items[i];
+                final lite = _userCache[row.otherUid];
+                return _PassDetailCard(
+                  otherUid: row.otherUid,
+                  when: row.when,
+                  title: lite?.title,
+                  photoURL: lite?.photoURL,
+                  precomputedAge: lite?.age,
+                  myTaste: myTaste,
+                );
+              },
+            );
           },
         );
       },
     );
+  }
+
+  Future<Map<String, dynamic>> _loadMyTasteOnce() async {
+    final docRef = _fs.collection('userTasteProfiles').doc(_uid);
+    try {
+      final cache = await docRef.get(const GetOptions(source: Source.cache));
+      if (cache.exists && cache.data() != null) return cache.data()!;
+    } catch (_) {}
+    try {
+      final server = await docRef.get(const GetOptions(source: Source.server));
+      if (server.exists && server.data() != null) return server.data()!;
+    } catch (_) {}
+    return const <String, dynamic>{};
+  }
+
+  Future<List<_PassRow>> _loadPassRows() async {
+    final qs = await _fs
+        .collection('likes')
+        .where('uids', arrayContains: _uid)
+        .get(const GetOptions(source: Source.server));
+
+    final items = <_PassRow>[];
+    final needUserIds = <String>{};
+
+    for (final d in qs.docs) {
+      final data = d.data();
+      final a = data['a'] as String?;
+      final b = data['b'] as String?;
+      if (a == null || b == null) continue;
+      final meIsA = (_uid == a);
+      final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
+      final myLike = data[meIsA ? 'aLiked' : 'bLiked'] == true;
+      final otherLike = data[meIsA ? 'bLiked' : 'aLiked'] == true;
+      final matched = myLike && otherLike;
+
+      if (myPass && !matched) {
+        final otherUid = meIsA ? b : a;
+        final when = (data['updatedAt'] as Timestamp?)?.toDate().toLocal();
+        items.add(_PassRow(otherUid: otherUid, when: when));
+        if (!_userCache.containsKey(otherUid)) needUserIds.add(otherUid);
+      }
+    }
+
+    // Sort by updatedAt desc
+    items.sort((x, y) {
+      final dx = x.when ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dy = y.when ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return dy.compareTo(dx);
+    });
+
+    // Batch fetch users (chunked whereIn)
+    if (needUserIds.isNotEmpty) {
+      final ids = needUserIds.toList();
+      const chunk = 10;
+      for (var i = 0; i < ids.length; i += chunk) {
+        final part = ids.sublist(
+          i,
+          i + chunk > ids.length ? ids.length : i + chunk,
+        );
+        final qsUsers = await _fs
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: part)
+            .get(const GetOptions(source: Source.server));
+        for (final d in qsUsers.docs) {
+          final m = d.data();
+          final username = (m['username'] ?? '') as String;
+          final displayName = (m['displayName'] ?? '') as String;
+          final lb = (m['letterboxdUsername'] ?? '') as String;
+          final photoURL = (m['photoURL'] ?? '') as String;
+          String title = username.isNotEmpty
+              ? username
+              : (displayName.isNotEmpty
+                    ? displayName
+                    : (lb.isNotEmpty ? '@$lb' : d.id));
+          int? age;
+          final bd = m['birthdate'];
+          if (bd is Timestamp) {
+            final dtt = bd.toDate();
+            final now = DateTime.now();
+            age = now.year - dtt.year;
+            if (DateTime(now.year, dtt.month, dtt.day).isAfter(now)) {
+              age -= 1;
+            }
+          } else if (m['age'] is int) {
+            age = m['age'] as int;
+          }
+          _userCache[d.id] = _UserLite(
+            title: title,
+            photoURL: photoURL,
+            age: age,
+          );
+        }
+      }
+    }
+
+    return items;
   }
 }
 
 class _PassDetailCard extends StatelessWidget {
   final String otherUid;
   final DateTime? when;
-  const _PassDetailCard({required this.otherUid, this.when});
+  final String? title;
+  final String? photoURL;
+  final int? precomputedAge;
+  final Map<String, dynamic> myTaste;
+  const _PassDetailCard({
+    required this.otherUid,
+    this.when,
+    this.title,
+    this.photoURL,
+    this.precomputedAge,
+    required this.myTaste,
+  });
 
   void _openProfile(BuildContext context, String uid) {
     Navigator.of(context).push(
@@ -148,7 +242,11 @@ class _PassDetailCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: FutureBuilder<_CardData>(
-            future: _loadCardData(otherUid),
+            future: _loadCardData(
+              otherUid,
+              myTaste,
+              precomputedAge: precomputedAge,
+            ),
             builder: (context, snap) {
               final cd = snap.data;
               return Column(
@@ -157,52 +255,33 @@ class _PassDetailCard extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                        future: fs.collection('users').doc(otherUid).get(),
-                        builder: (context, uSnap) {
-                          String title = otherUid;
-                          String? photoURL;
-                          if (uSnap.hasData && uSnap.data!.exists) {
-                            final u = uSnap.data!.data()!;
-                            final username = (u['username'] ?? '') as String;
-                            final displayName =
-                                (u['displayName'] ?? '') as String;
-                            final lb =
-                                (u['letterboxdUsername'] ?? '') as String;
-                            photoURL = (u['photoURL'] ?? '') as String;
-                            title = username.isNotEmpty
-                                ? username
-                                : (displayName.isNotEmpty
-                                      ? displayName
-                                      : (lb.isNotEmpty ? '@$lb' : otherUid));
-                          }
-                          return Row(
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 40,
+                            backgroundImage:
+                                (photoURL != null && photoURL!.isNotEmpty)
+                                ? NetworkImage(photoURL!)
+                                : null,
+                            child: (photoURL == null || photoURL!.isEmpty)
+                                ? const Icon(Icons.person, size: 40)
+                                : null,
+                          ),
+                          const SizedBox(width: 16),
+                          Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              CircleAvatar(
-                                radius: 40,
-                                backgroundImage:
-                                    (photoURL != null && photoURL.isNotEmpty)
-                                    ? NetworkImage(photoURL)
-                                    : null,
-                                child: (photoURL == null || photoURL.isEmpty)
-                                    ? const Icon(Icons.person, size: 40)
-                                    : null,
-                              ),
-                              const SizedBox(width: 16),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    title,
-                                    style: theme.textTheme.titleMedium,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
+                              Text(
+                                (title == null || title!.isEmpty)
+                                    ? otherUid
+                                    : title!,
+                                style: theme.textTheme.titleMedium,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
-                          );
-                        },
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -317,9 +396,12 @@ class _CardData {
   });
 }
 
-Future<_CardData> _loadCardData(String otherUid) async {
+Future<_CardData> _loadCardData(
+  String otherUid,
+  Map<String, dynamic> my, {
+  int? precomputedAge,
+}) async {
   final fs = FirebaseFirestore.instance;
-  final me = FirebaseAuth.instance.currentUser!.uid;
 
   // helpers
   List<String> ls(dynamic x) {
@@ -466,10 +548,8 @@ Future<_CardData> _loadCardData(String otherUid) async {
     return posters;
   }
 
-  // taste profiles
-  final myTaste = await fs.collection('userTasteProfiles').doc(me).get();
+  // taste profiles (my is passed in)
   final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
-  final my = myTaste.data() ?? const <String, dynamic>{};
   final his = hisTaste.data() ?? const <String, dynamic>{};
 
   final hisGenres = pickList(his, ['genres', 'favoriteGenres']);
@@ -596,23 +676,7 @@ Future<_CardData> _loadCardData(String otherUid) async {
     if (p.isNotEmpty) fivePosters = p;
   }
 
-  int? age;
-  try {
-    final userDoc = await fs.collection('users').doc(otherUid).get();
-    final u = userDoc.data();
-    if (u != null) {
-      final bd = u['birthdate'];
-      if (bd is Timestamp) {
-        final d = bd.toDate();
-        final now = DateTime.now();
-        int a = now.year - d.year;
-        if (DateTime(now.year, d.month, d.day).isAfter(now)) a -= 1;
-        age = a;
-      } else if (u['age'] is int) {
-        age = u['age'] as int;
-      }
-    }
-  } catch (_) {}
+  final int? age = precomputedAge;
 
   return _CardData(
     age: age,

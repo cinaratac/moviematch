@@ -95,11 +95,6 @@ class _HomeShellState extends State<HomeShell> {
                 selectedIcon: _MessagesIcon(selected: true),
                 label: 'Messages',
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.search_outlined),
-                selectedIcon: Icon(Icons.search),
-                label: 'Search',
-              ),
             ],
           ),
         ),

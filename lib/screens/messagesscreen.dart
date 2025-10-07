@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
-import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
 
@@ -15,29 +14,7 @@ class MessagesPage extends StatelessWidget {
     final fs = FirebaseFirestore.instance;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sohbetler'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'settings') {
-                Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'settings',
-                child: ListTile(
-                  leading: Icon(Icons.settings_outlined),
-                  title: Text('Ayarlar'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Sohbetler')),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: fs
             .collection('chats')
@@ -119,35 +96,83 @@ class MessagesPage extends StatelessWidget {
                           : null,
                     ),
                     title: Text(title, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      last,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    subtitle:
+                        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: fs
+                              .collection('chats')
+                              .doc(d.id)
+                              .collection('messages')
+                              .orderBy('createdAt', descending: true)
+                              .limit(1)
+                              .snapshots(),
+                          builder: (context, mSnap) {
+                            String preview = last;
+                            if (mSnap.hasData && mSnap.data!.docs.isNotEmpty) {
+                              final m = mSnap.data!.docs.first.data();
+                              preview =
+                                  (m['text'] ??
+                                          m['message'] ??
+                                          m['content'] ??
+                                          preview)
+                                      .toString();
+                            }
+                            return Text(
+                              preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Text(
-                            _formatTime(
-                              (lastAt ??
-                                  (data['updatedAt'] as Timestamp?)?.toDate() ??
-                                  DateTime.fromMillisecondsSinceEpoch(0)),
-                            ),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
+                        // Last message sent time (live)
+                        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: FirebaseFirestore.instance
+                              .collection('chats')
+                              .doc(d.id)
+                              .collection('messages')
+                              .orderBy('createdAt', descending: true)
+                              .limit(1)
+                              .snapshots(),
+                          builder: (context, ms) {
+                            DateTime? lastDt;
+                            if (ms.hasData && ms.data!.docs.isNotEmpty) {
+                              final doc = ms.data!.docs.first;
+                              final m = doc.data();
+                              final raw = m['createdAt'];
+                              if (raw is Timestamp) {
+                                lastDt = raw.toDate().toLocal();
+                              } else if (doc.metadata.hasPendingWrites) {
+                                lastDt = DateTime.now();
+                              }
+                            }
+
+                            DateTime? showAt =
+                                lastDt ??
+                                lastAt ??
+                                (data['updatedAt'] as Timestamp?)?.toDate();
+                            final t = (showAt != null)
+                                ? _formatTime(showAt)
+                                : '';
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(
+                                t,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            );
+                          },
                         ),
 
-                        // Unread badge (from top-level unreadCounts)
-                        Builder(
-                          builder: (_) {
-                            final uc =
-                                (data['unreadCounts']
-                                    as Map<String, dynamic>?) ??
-                                const {};
-                            final raw = uc[uid];
-                            final count = (raw is num) ? raw.toInt() : 0;
+                        // Unread badge
+                        StreamBuilder<int>(
+                          stream: ChatService.instance.unreadCountForChat(
+                            d.id,
+                            uid,
+                          ),
+                          builder: (context, cSnap) {
+                            final count = cSnap.data ?? 0;
                             if (count <= 0) return const SizedBox.shrink();
                             return Container(
                               padding: const EdgeInsets.symmetric(

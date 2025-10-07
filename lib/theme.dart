@@ -2,7 +2,19 @@ import 'package:flutter/material.dart';
 
 class AppTheme {
   // Ana renk (seed color)
-  static const Color seedColor = Color(0xFF7C4DFF);
+  static const Color seedColor = Color(0xFFF2B233); // mustard
+
+  // Palette extracted from reference image
+  static const Color plum = Color.fromARGB(
+    255,
+    29,
+    22,
+    22,
+  ); // very dark purple (leftmost)
+  static const Color lavender = Color(0xFFA892C7); // light purple
+  static const Color mustard = seedColor; // golden mustard
+  static const Color orange = Color(0xFFF19A1A); // warm orange
+  static const Color coral = Color(0xFFE74B58); // coral red
 
   // Ekstra renkler
   static const Color accent = Color(0xFFFF6F61);
@@ -17,13 +29,24 @@ class AppTheme {
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
     fontFamily: fontFamily,
-    colorScheme: ColorScheme.fromSeed(seedColor: seedColor),
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: mustard,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: mustard,
+          secondary: orange,
+          tertiary: coral,
+          surface: Colors.white,
+          onSurface: const Color(0xFF1E1320),
+        ),
     textTheme: const TextTheme(
       headlineLarge: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
       headlineMedium: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
       bodyLarge: TextStyle(fontSize: 16),
       bodyMedium: TextStyle(fontSize: 14, color: Color(0x89000000)),
     ),
+    scaffoldBackgroundColor: Colors.white,
     appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -37,16 +60,25 @@ class AppTheme {
     useMaterial3: true,
     brightness: Brightness.dark,
     fontFamily: fontFamily,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: seedColor,
-      brightness: Brightness.dark,
-    ),
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: mustard,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: mustard,
+          secondary: orange,
+          tertiary: coral,
+          surface: plum,
+          background: plum,
+          onSurface: Colors.white,
+        ),
     textTheme: const TextTheme(
       headlineLarge: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
       headlineMedium: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
       bodyLarge: TextStyle(fontSize: 16, color: Colors.white),
       bodyMedium: TextStyle(fontSize: 14, color: Colors.white70),
     ),
+    scaffoldBackgroundColor: plum,
     appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(

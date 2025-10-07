@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/services/follow_system_service.dart';
+import 'dart:async';
 import 'dart:ui' as ui;
 
 const Map<String, String> _lbImageHeaders = {
@@ -22,6 +24,12 @@ class PublicProfileScreen extends StatefulWidget {
 }
 
 class _PublicProfileScreenState extends State<PublicProfileScreen> {
+  bool? _isFollowing; // null=unknown, true/false=known
+  bool _followBusy = false;
+  int? _followersCount;
+  int? _followingCount;
+  StreamSubscription<FollowEvent>? _followSub;
+
   /// Blurred full-screen backdrop from the first favorite poster
   Widget _blurBackdrop() {
     if (_futureFavs == null) return const SizedBox.shrink();
@@ -73,6 +81,89 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   // Cache for watchlist catalog fetches to avoid repeated refetch on doc updates
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
       {};
+
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>? _futureActivities;
+
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+  _fetchActivities() async {
+    final fs = FirebaseFirestore.instance;
+    final base = fs
+        .collection('posts')
+        .where('authorId', isEqualTo: widget.uid);
+
+    Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> sortAndLimitFrom(
+      QuerySnapshot<Map<String, dynamic>> qs,
+    ) async {
+      final docs = qs.docs.toList();
+      docs.sort((a, b) {
+        final ta = (a.data()['createdAt'] as Timestamp?);
+        final tb = (b.data()['createdAt'] as Timestamp?);
+        final ma = ta?.millisecondsSinceEpoch ?? 0;
+        final mb = tb?.millisecondsSinceEpoch ?? 0;
+        return mb.compareTo(ma); // desc
+      });
+      return docs.take(50).toList();
+    }
+
+    // 1) Try server with orderBy (fast path)
+    try {
+      final qs = await base
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get(const GetOptions(source: Source.server));
+      return qs.docs;
+    } on FirebaseException catch (e) {
+      // 2) If composite index is missing or any precondition error, retry without orderBy and sort client-side
+      final isIndexIssue =
+          e.code == 'failed-precondition' ||
+          (e.message?.toLowerCase().contains('index') ?? false);
+
+      if (isIndexIssue) {
+        try {
+          final qs = await base
+              .limit(200) // fetch a bit more to sort/filter locally
+              .get(const GetOptions(source: Source.server));
+          return await sortAndLimitFrom(qs);
+        } catch (_) {
+          // fall through to cache attempts
+        }
+      }
+
+      // 3) Network/offline or other errors: attempt cache with orderBy
+      try {
+        final qs = await base
+            .orderBy('createdAt', descending: true)
+            .limit(50)
+            .get(const GetOptions(source: Source.cache));
+        return qs.docs;
+      } catch (_) {
+        // 4) Final fallback: cache without orderBy then sort locally
+        final qs = await base
+            .limit(200)
+            .get(const GetOptions(source: Source.cache));
+        return await sortAndLimitFrom(qs);
+      }
+    } catch (_) {
+      // Non-FirebaseException: try a minimal cache fallback
+      final qs = await base
+          .limit(200)
+          .get(const GetOptions(source: Source.cache));
+      return await sortAndLimitFrom(qs);
+    }
+  }
+
+  String _timeAgo(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    if (diff.inDays < 7) return '${diff.inDays}g';
+    final months = diff.inDays ~/ 30;
+    if (months < 12) return '${months}a';
+    final years = diff.inDays ~/ 365;
+    return '${years}y';
+  }
 
   Future<List<Map<String, dynamic>?>> _fetchCatalogForKeys(
     List<String> keys,
@@ -132,6 +223,108 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _futureActivities = _fetchActivities();
+    _loadFollowing(); // single doc read to know if I'm following this user initially
+    _bootstrapFollowCounts(); // use service aggregate counts once
+
+    // Listen local follow/unfollow events to update UI instantly without extra reads
+    _followSub = FollowSystemService.I.events.listen((e) {
+      if (e.targetUid == widget.uid) {
+        if (!mounted) return;
+        setState(() {
+          // Update follower count of the viewed profile
+          if (_followersCount != null) {
+            _followersCount = (_followersCount ?? 0) + (e.followed ? 1 : -1);
+            if (_followersCount! < 0) _followersCount = 0;
+          }
+          // If the actor is me, reflect following state immediately
+          if (FirebaseAuth.instance.currentUser?.uid == e.actorUid) {
+            _isFollowing = e.followed;
+          }
+        });
+      }
+    });
+  }
+
+  Future<void> _loadFollowing() async {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null || myUid == widget.uid) {
+      setState(() => _isFollowing = null);
+      return;
+    }
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(myUid)
+          .collection('following')
+          .doc(widget.uid)
+          .get(const GetOptions(source: Source.server));
+      if (!mounted) return;
+      setState(() => _isFollowing = snap.exists);
+    } catch (_) {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(myUid)
+            .collection('following')
+            .doc(widget.uid)
+            .get(const GetOptions(source: Source.cache));
+        if (!mounted) return;
+        setState(() => _isFollowing = snap.exists);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _isFollowing = null);
+      }
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null || myUid == widget.uid) return;
+    if (_followBusy) return;
+    setState(() => _followBusy = true);
+    try {
+      if (_isFollowing == true) {
+        await FollowSystemService.I.unfollowUser(widget.uid);
+        // _isFollowing and counters will be updated by the event bus.
+      } else {
+        await FollowSystemService.I.followUser(widget.uid);
+        // _isFollowing and counters will be updated by the event bus.
+      }
+    } catch (_) {
+      // no-op; optionally show a snackbar
+    } finally {
+      if (mounted) setState(() => _followBusy = false);
+    }
+  }
+
+  Future<void> _bootstrapFollowCounts() async {
+    try {
+      final followers = await FollowSystemService.I.fetchFollowerCountOnce(
+        widget.uid,
+      );
+      final following = await FollowSystemService.I.fetchFollowingCountOnce(
+        widget.uid,
+      );
+      if (!mounted) return;
+      setState(() {
+        _followersCount = followers;
+        _followingCount = following;
+      });
+    } catch (_) {
+      // leave as nulls; UI handles gracefully
+    }
+  }
+
+  @override
+  void dispose() {
+    _followSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -233,6 +426,74 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      // FOLLOWERS
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                            width: 0.6,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.groups, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Takipçi',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              (_followersCount ?? 0).toString(),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // FOLLOWING
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                            width: 0.6,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person_add_alt, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Takip',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              (_followingCount ?? 0).toString(),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
                   if (lb.isNotEmpty)
                     Wrap(
@@ -255,7 +516,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               icon: const Icon(Icons.open_in_new),
                               label: const Text('Profili aç'),
                             ),
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 3),
                             TextButton.icon(
                               onPressed: () async {
                                 final myUid =
@@ -276,6 +537,24 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               icon: const Icon(Icons.message),
                               label: const Text('Mesaj gönder'),
                             ),
+                            // --- FOLLOW BUTTON (only if not me) ---
+                            if (FirebaseAuth.instance.currentUser?.uid !=
+                                    null &&
+                                FirebaseAuth.instance.currentUser!.uid !=
+                                    widget.uid) ...[
+                              const SizedBox(width: 3),
+                              TextButton.icon(
+                                onPressed: _followBusy ? null : _toggleFollow,
+                                icon: _isFollowing == true
+                                    ? const Icon(Icons.check)
+                                    : const Icon(Icons.person_add_alt_1),
+                                label: Text(
+                                  _isFollowing == true
+                                      ? 'Takiptesin'
+                                      : 'Takip et',
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ],
@@ -739,11 +1018,226 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       );
                     },
                   ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Text(
+                        'Aktiviteler',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        tooltip: 'Yenile',
+                        onPressed: () {
+                          setState(() {
+                            _futureActivities = _fetchActivities();
+                          });
+                          _bootstrapFollowCounts();
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  FutureBuilder<
+                    List<QueryDocumentSnapshot<Map<String, dynamic>>>
+                  >(
+                    future: _futureActivities,
+                    builder: (context, asnap) {
+                      if (asnap.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (asnap.hasError) {
+                        return Text(
+                          'Aktiviteler yüklenemedi: ${asnap.error}',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.redAccent),
+                        );
+                      }
+                      final docs = asnap.data ?? const [];
+                      if (docs.isEmpty) {
+                        return const Text('Henüz aktivite yok.');
+                      }
+                      return ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: docs.length,
+                        padding: EdgeInsets.zero,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (_, i) {
+                          final m = docs[i].data();
+                          final dt = (m['createdAt'] as Timestamp?)?.toDate();
+                          final time = dt == null ? '' : _timeAgo(dt);
+
+                          final poster =
+                              (m['moviePoster'] ?? m['moviePosterUrl'] ?? '')
+                                  as String;
+                          final title = (m['movieTitle'] ?? '') as String;
+
+                          return _ActivityItem(
+                            displayName: (m['displayName'] ?? '') as String,
+                            text: (m['text'] ?? '') as String,
+                            timeLabel: time,
+                            likeCount: (m['likeCount'] ?? 0) is int
+                                ? m['likeCount'] as int
+                                : ((m['likeCount'] ?? 0) as num).toInt(),
+                            replyCount: (m['replyCount'] ?? 0) is int
+                                ? m['replyCount'] as int
+                                : ((m['replyCount'] ?? 0) as num).toInt(),
+                            repostCount: (m['repostCount'] ?? 0) is int
+                                ? m['repostCount'] as int
+                                : ((m['repostCount'] ?? 0) as num).toInt(),
+                            posterUrl: poster,
+                            movieTitle: title,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 40),
                 ],
               ),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _ActivityItem extends StatelessWidget {
+  final String displayName;
+  final String text;
+  final String timeLabel;
+  final int likeCount;
+  final int replyCount;
+  final int repostCount;
+  final String posterUrl; // boş olabilir
+  final String movieTitle; // boş olabilir
+
+  const _ActivityItem({
+    required this.displayName,
+    required this.text,
+    required this.timeLabel,
+    required this.likeCount,
+    required this.replyCount,
+    required this.repostCount,
+    required this.posterUrl,
+    required this.movieTitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    Row stats() {
+      Text stat(IconData icon, int n) => Text.rich(
+        TextSpan(
+          children: [
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Icon(icon, size: 14, color: cs.onSurfaceVariant),
+            ),
+            const WidgetSpan(child: SizedBox(width: 6)),
+            TextSpan(text: '$n', style: theme.textTheme.bodySmall),
+          ],
+        ),
+      );
+      return Row(
+        children: [
+          stat(Icons.favorite_border, likeCount),
+          const SizedBox(width: 16),
+          stat(Icons.mode_comment_outlined, replyCount),
+          const SizedBox(width: 16),
+          stat(Icons.repeat_outlined, repostCount),
+        ],
+      );
+    }
+
+    final hasPoster = posterUrl.isNotEmpty;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface.withOpacity(0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant, width: 0.6),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasPoster)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                posterUrl,
+                width: 56,
+                height: 84,
+                fit: BoxFit.cover,
+                headers: _lbImageHeaders,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 56,
+                  height: 84,
+                  color: Colors.black26,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.image_not_supported, size: 20),
+                ),
+              ),
+            ),
+          if (hasPoster) const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Üstte kalın olan her zaman kullanıcının adı
+                Text(
+                  displayName.isNotEmpty ? displayName : 'Kullanıcı',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                // Gönderi metni (tek kez)
+                if (text.isNotEmpty)
+                  Text(text, style: theme.textTheme.bodyMedium),
+                if (movieTitle.isNotEmpty && !hasPoster)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.local_movies, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            movieTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    stats(),
+                    const Spacer(),
+                    if (timeLabel.isNotEmpty)
+                      Text(
+                        'Paylaştı  $timeLabel',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

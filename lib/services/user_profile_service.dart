@@ -242,7 +242,10 @@ class UserProfileService {
   /// - Touches updatedAt
   Future<void> ensureSearchableUserFields({required String uid}) async {
     final ref = _usersRef(uid);
-    final snap = await ref.get();
+    var snap = await ref.get(const GetOptions(source: Source.cache));
+    if (!snap.exists) {
+      snap = await ref.get(const GetOptions(source: Source.server));
+    }
     final data = snap.data() ?? <String, dynamic>{};
 
     final username = data['username'];
@@ -347,9 +350,17 @@ class UserProfileService {
   Future<void> saveTasteProfile({
     required String uid,
     required TasteProfile profile,
+    String? syncReason,
+    bool setLastSyncedAt = false,
   }) async {
     // Prepare main profile map
     final map = profile.toMap()..['updatedAt'] = FieldValue.serverTimestamp();
+    if (setLastSyncedAt) {
+      map['lastSyncedAt'] = FieldValue.serverTimestamp();
+    }
+    if (syncReason != null) {
+      map['syncReason'] = syncReason;
+    }
 
     // Prepare mirrors for users/{uid}
     final loved = _normKeys(profile.loved);
@@ -373,6 +384,12 @@ class UserProfileService {
       'dislikedKeys': disliked,
       'updatedAt': FieldValue.serverTimestamp(),
     };
+    if (setLastSyncedAt) {
+      mirrorPayload['lastSyncedAt'] = FieldValue.serverTimestamp();
+    }
+    if (syncReason != null) {
+      mirrorPayload['syncReason'] = syncReason;
+    }
 
     batch.set(userRef, mirrorPayload, SetOptions(merge: true));
 
@@ -417,7 +434,10 @@ class UserProfileService {
 
   /// Load once. Returns `TasteProfile.empty` if none exists.
   Future<TasteProfile> loadTasteProfile(String uid) async {
-    final snap = await _tasteRef(uid).get();
+    var snap = await _tasteRef(uid).get(const GetOptions(source: Source.cache));
+    if (!snap.exists) {
+      snap = await _tasteRef(uid).get(const GetOptions(source: Source.server));
+    }
     final data = snap.data();
     if (data == null) return TasteProfile.empty;
     try {

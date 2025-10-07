@@ -29,6 +29,15 @@ class _LikesListBodyState extends State<LikesListBody>
   late final String _uid;
   late final FirebaseFirestore _fs;
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+  late final Future<Map<String, dynamic>> _myTasteFuture;
+  // Memoize per-user card data to avoid refetching on scroll
+  final Map<String, Future<_CardData>> _cardCache = {};
+  Future<_CardData> _getCardData(
+    String otherUid,
+    Map<String, dynamic> myTaste,
+  ) {
+    return _cardCache[otherUid] ??= _loadCardData(otherUid, myTaste);
+  }
 
   @override
   void initState() {
@@ -39,7 +48,22 @@ class _LikesListBodyState extends State<LikesListBody>
     _stream = _fs
         .collection('likes')
         .where('uids', arrayContains: _uid)
+        .limit(200)
         .snapshots();
+    _myTasteFuture = () async {
+      final docRef = _fs.collection('userTasteProfiles').doc(_uid);
+      try {
+        final cache = await docRef.get(const GetOptions(source: Source.cache));
+        if (cache.exists && (cache.data() != null)) return cache.data()!;
+      } catch (_) {}
+      try {
+        final server = await docRef.get(
+          const GetOptions(source: Source.server),
+        );
+        if (server.exists && (server.data() != null)) return server.data()!;
+      } catch (_) {}
+      return const <String, dynamic>{};
+    }();
   }
 
   @override
@@ -96,20 +120,31 @@ class _LikesListBodyState extends State<LikesListBody>
           return db.compareTo(da);
         });
 
-        return ListView.builder(
-          key: const PageStorageKey('likes_list'),
-          padding: const EdgeInsets.all(12),
-          itemCount: items.length,
-          itemBuilder: (context, i) {
-            final data = items[i].data();
-            final otherUid = (_uid == data['a'])
-                ? data['b'] as String?
-                : data['a'] as String?;
-            final whenTs =
-                (data['updatedAt'] ?? data['createdAt']) as Timestamp?;
-            final when = whenTs?.toDate().toLocal();
-            if (otherUid == null) return const SizedBox.shrink();
-            return _LikesDetailCard(otherUid: otherUid, when: when);
+        return FutureBuilder<Map<String, dynamic>>(
+          future: _myTasteFuture,
+          builder: (context, tasteSnap) {
+            final myTaste = tasteSnap.data ?? const <String, dynamic>{};
+            return ListView.builder(
+              key: const PageStorageKey('likes_list'),
+              padding: const EdgeInsets.all(12),
+              itemCount: items.length,
+              itemBuilder: (context, i) {
+                final data = items[i].data();
+                final otherUid = (_uid == data['a'])
+                    ? data['b'] as String?
+                    : data['a'] as String?;
+                final whenTs =
+                    (data['updatedAt'] ?? data['createdAt']) as Timestamp?;
+                final when = whenTs?.toDate().toLocal();
+                if (otherUid == null) return const SizedBox.shrink();
+                return _LikesDetailCard(
+                  otherUid: otherUid,
+                  when: when,
+                  // pass cached future so we don't refetch while scrolling
+                  cardDataFuture: _getCardData(otherUid, myTaste),
+                );
+              },
+            );
           },
         );
       },
@@ -123,11 +158,15 @@ class _LikesListBodyState extends State<LikesListBody>
 class _LikesDetailCard extends StatelessWidget {
   final String otherUid;
   final DateTime? when;
-  const _LikesDetailCard({required this.otherUid, this.when});
+  final Future<_CardData> cardDataFuture;
+  const _LikesDetailCard({
+    required this.otherUid,
+    this.when,
+    required this.cardDataFuture,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final fs = FirebaseFirestore.instance;
     final theme = Theme.of(context);
 
     return InkWell(
@@ -144,61 +183,37 @@ class _LikesDetailCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: FutureBuilder<_CardData>(
-            future: _loadCardData(otherUid),
+            future: cardDataFuture,
             builder: (context, snap) {
               final cd = snap.data;
+              final title = cd?.title ?? otherUid;
+              final photoURL = cd?.photoURL;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                        future: fs.collection('users').doc(otherUid).get(),
-                        builder: (context, uSnap) {
-                          String title = otherUid;
-                          String? photoURL;
-                          if (uSnap.hasData && uSnap.data!.exists) {
-                            final u = uSnap.data!.data()!;
-                            final username = (u['username'] ?? '') as String;
-                            final displayName =
-                                (u['displayName'] ?? '') as String;
-                            final lb =
-                                (u['letterboxdUsername'] ?? '') as String;
-                            photoURL = (u['photoURL'] ?? '') as String;
-                            title = username.isNotEmpty
-                                ? username
-                                : (displayName.isNotEmpty
-                                      ? displayName
-                                      : (lb.isNotEmpty ? '@$lb' : otherUid));
-                          }
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              CircleAvatar(
-                                radius: 40,
-                                backgroundImage:
-                                    (photoURL != null && photoURL.isNotEmpty)
-                                    ? NetworkImage(photoURL)
-                                    : null,
-                                child: (photoURL == null || photoURL.isEmpty)
-                                    ? const Icon(Icons.person, size: 40)
-                                    : null,
-                              ),
-                              const SizedBox(width: 16),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    title,
-                                    style: theme.textTheme.titleMedium,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ],
-                          );
-                        },
+                      CircleAvatar(
+                        radius: 40,
+                        backgroundImage:
+                            (photoURL != null && photoURL.isNotEmpty)
+                            ? NetworkImage(photoURL)
+                            : null,
+                        child: (photoURL == null || photoURL.isEmpty)
+                            ? const Icon(Icons.person, size: 40)
+                            : null,
+                      ),
+                      const SizedBox(width: 16),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: theme.textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -279,6 +294,8 @@ class _LikesDetailCard extends StatelessWidget {
 }
 
 class _CardData {
+  final String? title;
+  final String? photoURL;
   final int? age;
   final List<String> genres;
   final List<String> directors;
@@ -291,6 +308,8 @@ class _CardData {
   final int? commonWatchCount;
 
   _CardData({
+    this.title,
+    this.photoURL,
     this.age,
     this.genres = const [],
     this.directors = const [],
@@ -304,9 +323,11 @@ class _CardData {
   });
 }
 
-Future<_CardData> _loadCardData(String otherUid) async {
+Future<_CardData> _loadCardData(
+  String otherUid,
+  Map<String, dynamic> my,
+) async {
   final fs = FirebaseFirestore.instance;
-  final me = FirebaseAuth.instance.currentUser!.uid;
 
   // --- helpers ---
   List<String> ls(dynamic x) {
@@ -431,9 +452,7 @@ Future<_CardData> _loadCardData(String otherUid) async {
   }
 
   // --- taste profiles ---
-  final myTaste = await fs.collection('userTasteProfiles').doc(me).get();
   final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
-  final my = myTaste.data() ?? const <String, dynamic>{};
   final his = hisTaste.data() ?? const <String, dynamic>{};
 
   // Basic lists (profil metadata)
@@ -549,12 +568,24 @@ Future<_CardData> _loadCardData(String otherUid) async {
     watchPosters = inter(myWatchPostersRaw, hisWatchPostersRaw);
   }
 
-  // Age (optional)
+  // Age, title, photoURL
+  String? title;
+  String? photoURL;
   int? age;
   try {
     final userDoc = await fs.collection('users').doc(otherUid).get();
     final u = userDoc.data();
     if (u != null) {
+      photoURL = (u['photoURL'] ?? '') as String?;
+      final username = (u['username'] ?? '') as String?;
+      final displayName = (u['displayName'] ?? '') as String?;
+      final lb = (u['letterboxdUsername'] ?? '') as String?;
+      title = (username != null && username.isNotEmpty)
+          ? username
+          : ((displayName != null && displayName.isNotEmpty)
+                ? displayName
+                : ((lb != null && lb.isNotEmpty) ? '@$lb' : otherUid));
+
       final bd = u['birthdate'];
       if (bd is Timestamp) {
         final d = bd.toDate();
@@ -569,6 +600,8 @@ Future<_CardData> _loadCardData(String otherUid) async {
   } catch (_) {}
 
   return _CardData(
+    title: title,
+    photoURL: photoURL,
     age: age,
     genres: hisGenres,
     directors: hisDirectors,
