@@ -1,9 +1,65 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:fluttergirdi/screens/profilescreen.dart';
+
+// ---- Local (device) profile films model & storage (no Firebase) ----
+class LocalFilm {
+  final String key; // optional external key or slug
+  final String title;
+  final int? year;
+  final String? posterUrl;
+
+  LocalFilm({
+    required this.key,
+    required this.title,
+    this.year,
+    this.posterUrl,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'title': title,
+    'year': year,
+    'posterUrl': posterUrl,
+  };
+
+  static LocalFilm fromJson(Map<String, dynamic> j) => LocalFilm(
+    key: (j['key'] ?? '') as String,
+    title: (j['title'] ?? '') as String,
+    year: (j['year'] is int)
+        ? j['year'] as int
+        : (j['year'] is String ? int.tryParse(j['year']) : null),
+    posterUrl: (j['posterUrl'] ?? '') as String?,
+  );
+}
+
+const _kLocalFilmsKey = 'profile_local_films';
+
+Future<List<LocalFilm>> _loadLocalFilms() async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_kLocalFilmsKey);
+  if (raw == null || raw.isEmpty) return [];
+  try {
+    final list = (jsonDecode(raw) as List).cast<Map>();
+    return list
+        .map((e) => LocalFilm.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  } catch (_) {
+    return [];
+  }
+}
+
+Future<void> _saveLocalFilms(List<LocalFilm> films) async {
+  final prefs = await SharedPreferences.getInstance();
+  final s = jsonEncode(films.map((e) => e.toJson()).toList());
+  await prefs.setString(_kLocalFilmsKey, s);
+}
 
 class ChatRoomScreen extends StatefulWidget {
   final String chatId;
@@ -79,6 +135,231 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text('Gönderilemedi: $e')));
     }
+  }
+
+  Future<void> _openFilmPicker() async {
+    final result = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        return SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.8,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Filmlerim',
+                  style: Theme.of(ctx).textTheme.titleLarge,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Paylaşmak istediğin film profilinde olmalı',
+                        style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              Expanded(
+                child: Builder(
+                  builder: (context) {
+                    // Read only from in-memory cache filled by Profile screen
+                    final merged = <Map<String, String>>[
+                      ...UserShelfCache.fiveStar,
+                      ...UserShelfCache.favorites,
+                      ...UserShelfCache.watchlist,
+                      ...UserShelfCache.disliked,
+                    ];
+
+                    // Deduplicate by lower-cased title to avoid repeats across shelves
+                    final seen = <String>{};
+                    final items = <Map<String, String>>[];
+                    for (final m in merged) {
+                      final t = (m['title'] ?? '').trim();
+                      if (t.isEmpty) continue;
+                      final key = t.toLowerCase();
+                      if (seen.add(key)) {
+                        items.add({
+                          'title': t,
+                          'poster': (m['poster'] ?? '').toString(),
+                        });
+                      }
+                    }
+
+                    if (items.isEmpty) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            'Film listesi boş. Profil ekranından senkronize et ve tekrar dene.',
+                          ),
+                        ),
+                      );
+                    }
+
+                    return ListView.separated(
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final title = items[i]['title'] ?? '';
+                        final poster = items[i]['poster'] ?? '';
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundImage: poster.isNotEmpty
+                                ? NetworkImage(poster)
+                                : null,
+                            child: poster.isEmpty
+                                ? const Icon(Icons.movie)
+                                : null,
+                          ),
+                          title: Text(title.isEmpty ? 'İsimsiz Film' : title),
+                          onTap: () {
+                            Navigator.of(context).pop(<String, String>{
+                              'title': title,
+                              'poster': poster,
+                            });
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (result == null) return; // user cancelled
+
+    final myUid = FirebaseAuth.instance.currentUser!.uid;
+    final title = (result['title'] ?? '').trim();
+    final poster = (result['poster'] ?? '').trim();
+    final txt = title.isEmpty
+        ? '🎬 Bir film önerisi'
+        : '🎬 Film önerisi: ' + title;
+    try {
+      final fs = FirebaseFirestore.instance;
+      final msgRef = await fs
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .add({
+            'authorId': myUid,
+            'text': txt,
+            'type': 'movie',
+            'movie': {'title': title, 'poster': poster},
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+      await fs.collection('chats').doc(widget.chatId).set({
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastMessageId': msgRef.id,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Gönderilemedi: $e')));
+    }
+  }
+
+  Future<void> _addLocalFilmDialog() async {
+    final tCtrl = TextEditingController();
+    final yCtrl = TextEditingController();
+    final pCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Film ekle'),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: tCtrl,
+                    decoration: const InputDecoration(labelText: 'Başlık'),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Gerekli' : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: yCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Yıl (opsiyonel)',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: pCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Poster URL (opsiyonel)',
+                    ),
+                    keyboardType: TextInputType.url,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Vazgeç'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) return;
+                final title = tCtrl.text.trim();
+                final year = int.tryParse(yCtrl.text.trim());
+                final poster = pCtrl.text.trim().isEmpty
+                    ? null
+                    : pCtrl.text.trim();
+                final films = await _loadLocalFilms();
+                films.add(
+                  LocalFilm(
+                    key: title.toLowerCase(),
+                    title: title,
+                    year: year,
+                    posterUrl: poster,
+                  ),
+                );
+                await _saveLocalFilms(films);
+                if (context.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Kaydet'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -162,9 +443,46 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                 ? CrossAxisAlignment.end
                                 : CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                text,
-                                style: const TextStyle(color: Colors.white),
+                              if (text.isNotEmpty)
+                                Text(
+                                  text,
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              // Show movie poster if available
+                              Builder(
+                                builder: (_) {
+                                  String posterUrl = '';
+                                  final movie = m['movie'];
+                                  if (movie is Map) {
+                                    final mm = Map<String, dynamic>.from(movie);
+                                    posterUrl =
+                                        (mm['poster'] ?? '') as String? ?? '';
+                                  }
+                                  if (posterUrl.isEmpty)
+                                    return const SizedBox.shrink();
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        posterUrl,
+                                        width: 220,
+                                        height: 330,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Container(
+                                          width: 220,
+                                          height: 120,
+                                          alignment: Alignment.center,
+                                          color: Colors.black26,
+                                          child: const Icon(
+                                            Icons.broken_image,
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                               if (dt != null) ...[
                                 const SizedBox(height: 4),
@@ -196,6 +514,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
               child: Row(
                 children: [
+                  IconButton(
+                    tooltip: 'Film paylaş',
+                    onPressed: _openFilmPicker,
+                    icon: const Icon(Icons.local_movies_outlined),
+                  ),
                   Expanded(
                     child: TextField(
                       controller: _ctrl,

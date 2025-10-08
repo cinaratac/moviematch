@@ -1,14 +1,36 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Load saved theme preference before launching the app
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('themeMode'); // 'light' | 'dark' | 'system'
+    if (saved != null) {
+      switch (saved) {
+        case 'light':
+          ThemeBridge.themeMode.value = ThemeMode.light;
+          break;
+        case 'dark':
+          ThemeBridge.themeMode.value = ThemeMode.dark;
+          break;
+        default:
+          ThemeBridge.themeMode.value = ThemeMode.system;
+      }
+    }
+  } catch (_) {
+    // ignore errors and use system default
+  }
+
   runApp(const MyApp());
 }
 

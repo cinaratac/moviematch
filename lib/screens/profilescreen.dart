@@ -125,6 +125,8 @@ class _ProfilePageState extends State<ProfilePage> {
   int? _following;
   StreamSubscription<FollowEvent>? _followSub;
 
+  bool _initialSyncTriggered = false; // same-session guard for first-time sync
+
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -190,6 +192,94 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     } catch (_) {
       // ignore cache fill errors silently
+    }
+  }
+
+  // If Firestore user doc misses letterboxdUsername, upsert from local prefs/state
+  Future<void> _forceWriteLbUsernameIfMissing() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final lb = (_lbUsername ?? '').trim();
+    if (uid == null || lb.isEmpty) return;
+    try {
+      final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+      Map<String, dynamic>? data;
+      try {
+        final c = await ref.get(const GetOptions(source: Source.cache));
+        if (c.exists) data = c.data();
+      } catch (_) {}
+      data ??= (await ref.get(const GetOptions(source: Source.server))).data();
+      final current = (data?['letterboxdUsername'] ?? '').toString().trim();
+      if (current.isEmpty) {
+        await ref.set({
+          'letterboxdUsername': lb,
+          'letterboxdUsername_lc': lb.toLowerCase(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _ensureInitialSyncIfNeeded() async {
+    if (_initialSyncTriggered) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final lb = (_lbUsername ?? '').trim();
+    if (uid == null || lb.isEmpty) return;
+
+    try {
+      final db = FirebaseFirestore.instance;
+      // Check users/{uid} minimal fields
+      Map<String, dynamic>? userData;
+      try {
+        final c = await db
+            .collection('users')
+            .doc(uid)
+            .get(const GetOptions(source: Source.cache));
+        if (c.exists) userData = c.data();
+      } catch (_) {}
+      if (userData == null) {
+        try {
+          final s = await db
+              .collection('users')
+              .doc(uid)
+              .get(const GetOptions(source: Source.server));
+          if (s.exists) userData = s.data();
+        } catch (_) {}
+      }
+
+      final favKeys = List<String>.from(
+        (userData?['favoritesKeys'] ?? const []),
+      );
+      final fiveKeys = List<String>.from(
+        (userData?['fiveStarKeys'] ?? const []),
+      );
+
+      // Check taste profile doc exists
+      Map<String, dynamic>? tasteData;
+      try {
+        final t = await db
+            .collection('userTasteProfiles')
+            .doc(uid)
+            .get(const GetOptions(source: Source.cache));
+        if (t.exists) tasteData = t.data();
+      } catch (_) {}
+      if (tasteData == null) {
+        try {
+          final t2 = await db
+              .collection('userTasteProfiles')
+              .doc(uid)
+              .get(const GetOptions(source: Source.server));
+          if (t2.exists) tasteData = t2.data();
+        } catch (_) {}
+      }
+
+      final missing =
+          favKeys.isEmpty || fiveKeys.isEmpty || (tasteData == null);
+      if (missing) {
+        _initialSyncTriggered = true; // set before to avoid re-entry
+        await _syncLetterboxdToFirestore(lb);
+      }
+    } catch (_) {
+      // ignore — best effort
     }
   }
 
@@ -341,7 +431,13 @@ class _ProfilePageState extends State<ProfilePage> {
     // ignore: discarded_futures
     _primeShelfCache();
 
-    // Removed auto-sync trigger on every open
+    // Ensure users/{uid}.letterboxdUsername is set from prefs if missing
+    // ignore: discarded_futures
+    _forceWriteLbUsernameIfMissing();
+
+    // Kick a first-time sync if Firestore hasn't got LB mirrors yet
+    // ignore: discarded_futures
+    _ensureInitialSyncIfNeeded();
   }
 
   void _bindLbFromFirestore() {
@@ -390,8 +486,9 @@ class _ProfilePageState extends State<ProfilePage> {
             // ignore: discarded_futures
             _primeShelfCache();
 
-            // Auto-sync ONLY when LB username changes (write minimization)
+            // Auto-sync when LB username changes (write minimization)
             if (_lastSyncedLbUsername != lb) {
+              _initialSyncTriggered = true; // avoid double triggering
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 _syncLetterboxdToFirestore(lb);
               });
@@ -499,80 +596,110 @@ class _ProfilePageState extends State<ProfilePage> {
     }, SetOptions(merge: true));
   }
 
-  /// Full sync: favorites -> users/{uid}.favoritesKeys, fiveStars/lowRatings -> userTasteProfiles/{uid}
   Future<void> _syncLetterboxdToFirestore(String lbUsername) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || lbUsername.isEmpty) return;
 
-    // 1) Favorites: fills users/{uid}.favoritesKeys and catalog
-    await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername);
-    // 1.1) WATCHLIST: users/{uid}.watchlistKeys + catalog_films upsert
+    final db = FirebaseFirestore.instance;
+    final userRef = db.collection('users').doc(uid);
+
+    // A) Upsert LB username first so other listeners react quickly
+    try {
+      await userRef.set({
+        'letterboxdUsername': lbUsername,
+        'letterboxdUsername_lc': lbUsername.toLowerCase(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('users upsert letterboxdUsername error: $e');
+    }
+
+    // B) Pull data from Letterboxd (network)
+    List<LetterboxdFilm> favs = const [];
+    List<LetterboxdFilm> five = const [];
+    List<LetterboxdFilm> low = const [];
+    try {
+      favs = await LetterboxdService.fetchFavorites(lbUsername);
+    } catch (e) {
+      debugPrint('fetchFavorites error: $e');
+    }
+    try {
+      five = await LetterboxdService.fetchFiveStar(lbUsername);
+    } catch (e) {
+      debugPrint('fetchFiveStar error: $e');
+    }
+    try {
+      low = await LetterboxdService.fetchDisliked(lbUsername);
+    } catch (e) {
+      debugPrint('fetchDisliked error: $e');
+    }
+
+    // C) Best-effort existing helpers (watchlist etc.) — don’t fail the whole sync
+    try {
+      await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername);
+    } catch (e) {
+      debugPrint('syncFavoritesToFirestore error: $e');
+    }
     try {
       await LetterboxdService.syncWatchlistToFirestore(lbUsername: lbUsername);
     } catch (e) {
       debugPrint('syncWatchlistToFirestore error: $e');
     }
-
-    // 2) Five stars & low ratings; also upsert catalogs so posters resolve
-    final five = await LetterboxdService.fetchFiveStar(lbUsername);
-    final low = await LetterboxdService.fetchDisliked(lbUsername);
-    await _upsertCatalogFromList(five);
-    await _upsertCatalogFromList(low);
-
-    // Mirror 5★ into users/{uid}.fiveStarKeys only if changed
     try {
-      final db = FirebaseFirestore.instance;
-      final userRef = db.collection('users').doc(uid);
-      final currentSnap = await userRef.get(
-        const GetOptions(source: Source.cache),
-      );
-      Map<String, dynamic>? cur = currentSnap.data();
-      if (cur == null) {
-        try {
-          final s2 = await userRef.get(const GetOptions(source: Source.server));
-          cur = s2.data();
-        } catch (_) {}
-      }
-      final newFive = five
+      await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername);
+    } catch (e) {
+      debugPrint('syncDislikedToFirestore error: $e');
+    }
+
+    // D) Upsert into catalog so posters resolve across the app
+    try {
+      await _upsertCatalogFromList(favs);
+    } catch (_) {}
+    try {
+      await _upsertCatalogFromList(five);
+    } catch (_) {}
+    try {
+      await _upsertCatalogFromList(low);
+    } catch (_) {}
+
+    // E) Mirror arrays directly into users/{uid}
+    try {
+      final newFavKeys = favs
           .map((e) => e.key)
           .where((k) => k.isNotEmpty)
           .toList();
-      final oldFive = List<String>.from((cur?['fiveStarKeys'] ?? const []));
-      bool changed = newFive.length != oldFive.length;
-      if (!changed) {
-        for (var i = 0; i < newFive.length; i++) {
-          if (newFive[i] != oldFive[i]) {
-            changed = true;
-            break;
-          }
-        }
-      }
-      if (changed) {
-        await userRef.set({
-          'fiveStarKeys': newFive,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      }
-    } catch (_) {
-      // ignore optional mirror errors
+      final newFiveKeys = five
+          .map((e) => e.key)
+          .where((k) => k.isNotEmpty)
+          .toList();
+      final newLowKeys = low
+          .map((e) => e.key)
+          .where((k) => k.isNotEmpty)
+          .toList();
+
+      await userRef.set({
+        if (newFavKeys.isNotEmpty) 'favoritesKeys': newFavKeys,
+        if (newFiveKeys.isNotEmpty) 'fiveStarKeys': newFiveKeys,
+        if (newLowKeys.isNotEmpty) 'dislikedKeys': newLowKeys,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('users mirror arrays error: $e');
     }
 
-    // 3) Mirror disliked into users/{uid}.dislikedKeys as well (and catalog already upserted above)
+    // F) Write taste profile for 5★ and low ratings
     try {
-      await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername);
-    } catch (_) {
-      // optional: ignore if not available
+      await _writeTasteProfile(
+        uid: uid,
+        lbUsername: lbUsername,
+        fiveStars: five,
+        lowRatings: low,
+      );
+    } catch (e) {
+      debugPrint('writeTasteProfile error: $e');
     }
 
-    // 4) Write taste profile for 5★ and low ratings
-    await _writeTasteProfile(
-      uid: uid,
-      lbUsername: lbUsername,
-      fiveStars: five,
-      lowRatings: low,
-    );
-
-    // 5) Sync bitti: sadece ortak 5★ olanlar için otomatik eşleşme oluştur
+    // G) Trigger auto matches (only common 5★ for now)
     try {
       await MatchService().autoCreateMatchesFiveOnly(uid, minCommonFive: 1);
     } catch (e) {

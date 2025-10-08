@@ -418,15 +418,23 @@ class UserProfileService {
     if (update.isEmpty) return;
     await _tasteRef(uid).set(update, SetOptions(merge: true));
 
-    // If loved or username changed, mirror minimal data for matching
-    await _mirrorFavoritesKeysToUsers(
-      uid: uid,
-      lovedKeys: loved ?? const <String>[],
-      letterboxdUsername: letterboxdUsername,
-    );
+    // If loved changed, mirror favorites & five-star keys; otherwise don't touch existing arrays
     if (loved != null) {
+      await _mirrorFavoritesKeysToUsers(
+        uid: uid,
+        lovedKeys: loved,
+        letterboxdUsername: letterboxdUsername, // may also update username
+      );
       await _mirrorFiveStarKeysToUsers(uid: uid, fiveStarKeys: loved);
+    } else if (letterboxdUsername != null) {
+      // Only username changed: upsert username on users/{uid} without touching arrays
+      await _usersRef(uid).set({
+        'letterboxdUsername': letterboxdUsername,
+        'letterboxdUsername_lc': _lc(letterboxdUsername),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     }
+
     if (disliked != null) {
       await _mirrorDislikedKeysToUsers(uid: uid, dislikedKeys: disliked);
     }

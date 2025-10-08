@@ -19,30 +19,32 @@ class MessagesPage extends StatelessWidget {
         stream: fs
             .collection('chats')
             .where('participants', arrayContains: uid)
-            .snapshots(),
+            .snapshots(includeMetadataChanges: true),
         builder: (context, s) {
           if (s.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           if (s.hasError) {
-            return Center(child: Text('Sohbetler yüklenemedi'));
+            return const _EmptyMessagesInteractive();
           }
 
-          // Local sort by lastMessageAt desc to avoid composite index
+          // Local sort by most recent activity (updatedAt fallback to lastMessageAt)
           final docs = [
             ...(s.data?.docs ??
                 <QueryDocumentSnapshot<Map<String, dynamic>>>[]),
           ];
+          DateTime _pickDate(Map<String, dynamic> m) {
+            final rawU = m['updatedAt'];
+            final rawL = m['lastMessageAt'];
+            if (rawU is Timestamp) return rawU.toDate();
+            if (rawL is Timestamp) return rawL.toDate();
+            return DateTime.fromMillisecondsSinceEpoch(0);
+          }
+
           docs.sort((a, b) {
-            final ta = a.data()['lastMessageAt'];
-            final tb = b.data()['lastMessageAt'];
-            final da = (ta is Timestamp)
-                ? ta.toDate()
-                : DateTime.fromMillisecondsSinceEpoch(0);
-            final db = (tb is Timestamp)
-                ? tb.toDate()
-                : DateTime.fromMillisecondsSinceEpoch(0);
-            return db.compareTo(da); // newest first strictly by lastMessageAt
+            final da = _pickDate(a.data());
+            final db = _pickDate(b.data());
+            return db.compareTo(da); // newest first
           });
 
           if (docs.isEmpty) {

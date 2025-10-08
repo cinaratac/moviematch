@@ -29,6 +29,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   int? _followersCount;
   int? _followingCount;
   StreamSubscription<FollowEvent>? _followSub;
+  bool _isBlocked = false; // I blocked them
+  bool _hasBlockedMe = false; // They blocked me
 
   /// Blurred full-screen backdrop from the first favorite poster
   Widget _blurBackdrop() {
@@ -231,6 +233,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     _futureActivities = _fetchActivities();
     _loadFollowing(); // single doc read to know if I'm following this user initially
     _bootstrapFollowCounts(); // use service aggregate counts once
+    _loadBlockStatus();
 
     // Listen local follow/unfollow events to update UI instantly without extra reads
     _followSub = FollowSystemService.I.events.listen((e) {
@@ -321,6 +324,125 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     }
   }
 
+  Future<void> _loadBlockStatus() async {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null) return;
+    final other = widget.uid;
+    try {
+      final fs = FirebaseFirestore.instance;
+      final meBlocked = await fs
+          .collection('users')
+          .doc(myUid)
+          .collection('blocked')
+          .doc(other)
+          .get(const GetOptions(source: Source.server));
+      final heBlocked = await fs
+          .collection('users')
+          .doc(other)
+          .collection('blocked')
+          .doc(myUid)
+          .get(const GetOptions(source: Source.server));
+      if (!mounted) return;
+      setState(() {
+        _isBlocked = meBlocked.exists;
+        _hasBlockedMe = heBlocked.exists;
+      });
+    } catch (_) {
+      // Fallback to cache
+      try {
+        final fs = FirebaseFirestore.instance;
+        final meBlocked = await fs
+            .collection('users')
+            .doc(myUid)
+            .collection('blocked')
+            .doc(other)
+            .get(const GetOptions(source: Source.cache));
+        final heBlocked = await fs
+            .collection('users')
+            .doc(other)
+            .collection('blocked')
+            .doc(myUid)
+            .get(const GetOptions(source: Source.cache));
+        if (!mounted) return;
+        setState(() {
+          _isBlocked = meBlocked.exists;
+          _hasBlockedMe = heBlocked.exists;
+        });
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _blockUser() async {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null) return;
+    final other = widget.uid;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Kullanıcıyı engelle'),
+        content: const Text(
+          'Bu kişiyi engellemek istediğine emin misin? Engellediğinde seni göremez ve sana mesaj atamaz.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Engelle'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final fs = FirebaseFirestore.instance;
+      final batch = fs.batch();
+      final meBlockedRef = fs
+          .collection('users')
+          .doc(myUid)
+          .collection('blocked')
+          .doc(other);
+      final heBlockedByRef = fs
+          .collection('users')
+          .doc(other)
+          .collection('blockedBy')
+          .doc(myUid);
+      batch.set(meBlockedRef, {
+        'uid': other,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      batch.set(heBlockedByRef, {
+        'uid': myUid,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      // Optional: top-level block pair for quick checks
+      final pairId = myUid.compareTo(other) < 0
+          ? '${myUid}_$other'
+          : '${other}_$myUid';
+      batch.set(fs.collection('blocks').doc(pairId), {
+        'a': myUid,
+        'b': other,
+        'aBlockedB': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      await batch.commit();
+      if (!mounted) return;
+      setState(() => _isBlocked = true);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Kullanıcı engellendi.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Engelleme başarısız: $e')));
+    }
+  }
+
   @override
   void dispose() {
     _followSub?.cancel();
@@ -339,6 +461,55 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              if (value == 'report') {
+                // basit bildirim kaydı
+                final myUid = FirebaseAuth.instance.currentUser?.uid;
+                if (myUid != null) {
+                  try {
+                    await FirebaseFirestore.instance.collection('reports').add({
+                      'reporterUid': myUid,
+                      'targetUid': widget.uid,
+                      'createdAt': FieldValue.serverTimestamp(),
+                      'kind': 'user',
+                      'reason': 'manual',
+                    });
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Bildirimin alındı.')),
+                    );
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Bildirim gönderilemedi: $e')),
+                    );
+                  }
+                }
+              } else if (value == 'block') {
+                await _blockUser();
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'report',
+                child: ListTile(
+                  leading: Icon(Icons.flag_outlined),
+                  title: Text('Kişiyi bildir'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'block',
+                child: ListTile(
+                  leading: Icon(Icons.block),
+                  title: Text('Engelle'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       extendBodyBehindAppBar: true,
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -427,6 +598,31 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  if (_isBlocked || _hasBlockedMe)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.error.withOpacity(0.4),
+                        ),
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.block, size: 16),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Bu kullanıcıyla etkileşim engellendi.',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Row(
                     children: [
                       // FOLLOWERS
@@ -517,26 +713,38 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               label: const Text('Profili aç'),
                             ),
                             const SizedBox(width: 3),
-                            TextButton.icon(
-                              onPressed: () async {
-                                final myUid =
-                                    FirebaseAuth.instance.currentUser!.uid;
-                                final chatId = await ChatService.instance
-                                    .getOrCreateChat(myUid, widget.uid);
-                                if (!context.mounted) return;
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => ChatRoomScreen(
-                                      chatId: chatId,
-                                      otherUid: widget.uid,
+                            if (!_isBlocked && !_hasBlockedMe)
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final myUid =
+                                      FirebaseAuth.instance.currentUser!.uid;
+                                  // tekrar kontrol: biri diğerini engelledi mi?
+                                  await _loadBlockStatus();
+                                  if (!mounted) return;
+                                  if (_isBlocked || _hasBlockedMe) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Mesajlaşma engellendi.'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  final chatId = await ChatService.instance
+                                      .getOrCreateChat(myUid, widget.uid);
+                                  if (!context.mounted) return;
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ChatRoomScreen(
+                                        chatId: chatId,
+                                        otherUid: widget.uid,
+                                      ),
                                     ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.message),
-                              label: const Text('Mesaj gönder'),
-                            ),
+                                  );
+                                },
+                                icon: const Icon(Icons.message),
+                                label: const Text('Mesaj gönder'),
+                              ),
                             // --- FOLLOW BUTTON (only if not me) ---
                             if (FirebaseAuth.instance.currentUser?.uid !=
                                     null &&

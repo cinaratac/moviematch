@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:fluttergirdi/theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -180,7 +181,13 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (_) {}
 
     if (!mounted) return;
-    String selected = current; // 👈 bottom sheet'in yerel state'i
+    // Bottom sheet'in yerel state'i; Firestore yoksa mevcut çalışma modunu kullan
+    String selected = current;
+    if (selected == 'system') {
+      final m = ThemeBridge.themeMode.value;
+      if (m == ThemeMode.light) selected = 'light';
+      if (m == ThemeMode.dark) selected = 'dark';
+    }
 
     final String? result = await showModalBottomSheet<String>(
       context: context,
@@ -280,6 +287,10 @@ class _SettingsPageState extends State<SettingsPage> {
           break;
       }
       ThemeBridge.themeMode.value = tm;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('themeMode', mode); // 'light' | 'dark' | 'system'
+      } catch (_) {}
 
       _toast('Tema kaydedildi');
     } catch (e) {
