@@ -159,6 +159,29 @@ class _FeedPageState extends State<FeedPage> {
                 ),
               ),
               const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Paylaşmak istediğin film profilinde olmalı',
+                        style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
               const Divider(height: 1),
               Expanded(
                 child: Builder(
@@ -256,6 +279,7 @@ class _FeedPageState extends State<FeedPage> {
         elevation: 0,
         scrolledUnderElevation: 0,
         leadingWidth: 160,
+        toolbarHeight: 40,
         leading: Padding(
           padding: const EdgeInsets.only(left: 12),
           child: Align(

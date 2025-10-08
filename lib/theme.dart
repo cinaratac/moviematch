@@ -2,15 +2,11 @@ import 'package:flutter/material.dart';
 
 class AppTheme {
   // Ana renk (seed color)
-  static const Color seedColor = Color(0xFFF2B233); // mustard
+  static const Color seedColor = Color.fromARGB(117, 41, 202, 44); // mustard
 
   // Palette extracted from reference image
-  static const Color plum = Color.fromARGB(
-    255,
-    29,
-    22,
-    22,
-  ); // very dark purple (leftmost)
+  static const Color plumDark = Color.fromARGB(255, 0, 0, 0);
+  static const Color plumLight = Colors.white;
   static const Color lavender = Color(0xFFA892C7); // light purple
   static const Color mustard = seedColor; // golden mustard
   static const Color orange = Color(0xFFF19A1A); // warm orange
@@ -37,7 +33,7 @@ class AppTheme {
           primary: mustard,
           secondary: orange,
           tertiary: coral,
-          surface: Colors.white,
+          surface: plumLight,
           onSurface: const Color(0xFF1E1320),
         ),
     textTheme: const TextTheme(
@@ -68,8 +64,8 @@ class AppTheme {
           primary: mustard,
           secondary: orange,
           tertiary: coral,
-          surface: plum,
-          background: plum,
+          surface: plumDark,
+          background: plumDark,
           onSurface: Colors.white,
         ),
     textTheme: const TextTheme(
@@ -78,12 +74,20 @@ class AppTheme {
       bodyLarge: TextStyle(fontSize: 16, color: Colors.white),
       bodyMedium: TextStyle(fontSize: 14, color: Colors.white70),
     ),
-    scaffoldBackgroundColor: plum,
+    scaffoldBackgroundColor: plumDark,
     appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     ),
+  );
+}
+
+/// Lightweight theme mode bridge without changing any colors.
+/// Main uses ThemeBridge.themeMode to rebuild MaterialApp.
+class ThemeBridge {
+  static final ValueNotifier<ThemeMode> themeMode = ValueNotifier<ThemeMode>(
+    ThemeMode.system,
   );
 }

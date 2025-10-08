@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:fluttergirdi/theme.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -156,6 +157,133 @@ class _SettingsPageState extends State<SettingsPage> {
       _toast('Doğrulama e‑postası gönderildi.');
     } catch (e) {
       _toast('Hata: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickTheme() async {
+    final user = _user;
+    if (user == null) return;
+
+    // read current choice from Firestore (best-effort)
+    String current = 'system';
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = snap.data();
+      if (data != null && data['themeMode'] is String) {
+        current = (data['themeMode'] as String);
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
+    String selected = current; // 👈 bottom sheet'in yerel state'i
+
+    final String? result = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const ListTile(
+                    title: Text('Tema'),
+                    subtitle: Text('Uygulama görünümünü seçin'),
+                  ),
+                  RadioListTile<String>(
+                    value: 'light',
+                    groupValue: selected,
+                    title: const Text('Aydınlık'),
+                    secondary: const Icon(Icons.light_mode_outlined),
+                    onChanged: (v) => setModalState(() => selected = v!),
+                  ),
+                  RadioListTile<String>(
+                    value: 'dark',
+                    groupValue: selected,
+                    title: const Text('Karanlık'),
+                    secondary: const Icon(Icons.dark_mode_outlined),
+                    onChanged: (v) => setModalState(() => selected = v!),
+                  ),
+                  RadioListTile<String>(
+                    value: 'system',
+                    groupValue: selected,
+                    title: const Text('Sistem varsayılanı'),
+                    secondary: const Icon(Icons.settings_suggest_outlined),
+                    onChanged: (v) => setModalState(() => selected = v!),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Vazgeç'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () => Navigator.pop(context, selected),
+                            child: const Text('Uygula'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null) {
+      await _applyThemeMode(result);
+    }
+  }
+
+  Future<void> _applyThemeMode(String mode) async {
+    final user = _user;
+    if (user == null) return;
+    if (!mounted) return;
+    setState(() => _busy = true);
+    try {
+      // persist preference for future sessions
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'themeMode': mode, // 'light' | 'dark' | 'system'
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      ThemeMode? tm;
+      switch (mode) {
+        case 'light':
+          tm = ThemeMode.light;
+          break;
+        case 'dark':
+          tm = ThemeMode.dark;
+          break;
+        default:
+          tm = ThemeMode.system;
+          break;
+      }
+      ThemeBridge.themeMode.value = tm;
+
+      _toast('Tema kaydedildi');
+    } catch (e) {
+      _toast('Tema kaydedilemedi: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -379,6 +507,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   )
                 : const Text('Hesabınız e‑posta ile bağlı görünmüyor'),
             onTap: _busy ? null : _verifyEmail,
+          ),
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.color_lens_outlined),
+            title: const Text('Tema'),
+            subtitle: const Text('Aydınlık / Karanlık / Sistem'),
+            onTap: _busy ? null : _pickTheme,
           ),
           const Divider(height: 0),
 

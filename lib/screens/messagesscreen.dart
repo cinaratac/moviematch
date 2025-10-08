@@ -14,7 +14,7 @@ class MessagesPage extends StatelessWidget {
     final fs = FirebaseFirestore.instance;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Sohbetler')),
+      appBar: AppBar(toolbarHeight: 40, title: const Text('Sohbetler')),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: fs
             .collection('chats')
@@ -46,7 +46,7 @@ class MessagesPage extends StatelessWidget {
           });
 
           if (docs.isEmpty) {
-            return const Center(child: Text('Henüz mesaj yok'));
+            return const _EmptyMessagesInteractive();
           }
 
           return ListView.separated(
@@ -245,4 +245,129 @@ String _formatTime(DateTime dt) {
     return '$hh:$mm';
   }
   return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}';
+}
+
+class _ForestFace extends StatelessWidget {
+  final double offsetX;
+  final double offsetY;
+  const _ForestFace({this.offsetX = 0, this.offsetY = 0});
+
+  @override
+  Widget build(BuildContext context) {
+    const base = Color(0xFF1B5E20); // forest green
+    return SizedBox(
+      width: 140,
+      height: 140,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          _ring(140, base.withOpacity(0.90)),
+          _ring(112, base.withOpacity(0.75)),
+          _ring(88, base.withOpacity(0.55)),
+          _ring(64, base.withOpacity(0.35)),
+          _ring(44, base.withOpacity(0.20)),
+          Positioned(left: 38, top: 54, child: _eye(offsetX, offsetY)),
+          Positioned(right: 38, top: 54, child: _eye(offsetX, offsetY)),
+        ],
+      ),
+    );
+  }
+
+  static Widget _ring(double size, Color color) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    );
+  }
+
+  static Widget _eye(double offsetX, double offsetY) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        alignment: Alignment(offsetX / 10, offsetY / 10),
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(
+            color: Colors.black87,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyMessagesInteractive extends StatefulWidget {
+  const _EmptyMessagesInteractive();
+  @override
+  State<_EmptyMessagesInteractive> createState() =>
+      _EmptyMessagesInteractiveState();
+}
+
+class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
+  double _offsetX = 0;
+  double _offsetY = -10; // default: look slightly upward
+
+  void _updateOffsets(Offset p, Size size) {
+    // Normalize position to [-1,1] range around the center of the available area
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    double nx = ((p.dx - cx) / (cx.abs())).clamp(-1.0, 1.0);
+    double ny = ((p.dy - cy) / (cy.abs())).clamp(-1.0, 1.0);
+
+    const max = 10.0; // max eye travel in our _ForestFace alignment mapping
+    setState(() {
+      _offsetX = nx * max;
+      _offsetY = ny * max;
+    });
+  }
+
+  void _resetUp() {
+    setState(() {
+      _offsetX = 0;
+      _offsetY = -10; // back to looking up in empty state
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onPanDown: (details) => _updateOffsets(details.localPosition, size),
+          onPanUpdate: (details) => _updateOffsets(details.localPosition, size),
+          onPanEnd: (_) => _resetUp(),
+          onTapDown: (details) => _updateOffsets(details.localPosition, size),
+          onTapUp: (_) => _resetUp(),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _ForestFace(offsetX: _offsetX, offsetY: _offsetY),
+                const SizedBox(height: 12),
+                const Text(
+                  'Yalnızsın galiba',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color.fromARGB(255, 124, 131, 116),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

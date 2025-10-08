@@ -286,6 +286,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
         bucket: _bucket,
         child: Scaffold(
           appBar: AppBar(
+            toolbarHeight: 40,
             title: const Text('Eşleşmeler'),
             bottom: TabBar(
               tabs: [
@@ -330,7 +331,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
               _loading
                   ? const Center(child: CircularProgressIndicator())
                   : (_swipeItems.isEmpty
-                        ? const Center(child: Text('Şu an eşleşme yok.'))
+                        ? const _EmptyMatches()
                         : Padding(
                             padding: const EdgeInsets.all(16),
                             child: SwipeCards(
@@ -554,19 +555,21 @@ class _MatchCardState extends State<_MatchCard>
                                   cd.fivePosters.isNotEmpty ||
                                   cd.watchPosters.isNotEmpty)) ...[
                             if (cd.fivePosters.isNotEmpty) ...[
-                              const _SectionLabel(text: 'Ortak 5★ Filmler'),
+                              const _SectionLabel(text: 'İkinizde Sevdiniz'),
                               const SizedBox(height: 8),
                               _PosterStrip(urls: cd.fivePosters),
                               const SizedBox(height: 12),
                             ],
                             if (cd.favPosters.isNotEmpty) ...[
-                              const _SectionLabel(text: 'Ortak Favoriler'),
+                              const _SectionLabel(text: 'İKİNİZİNDE FAVORİSİ!'),
                               const SizedBox(height: 8),
                               _PosterStrip(urls: cd.favPosters),
                               const SizedBox(height: 12),
                             ],
                             if (cd.watchPosters.isNotEmpty) ...[
-                              const _SectionLabel(text: 'Ortak Watchlist'),
+                              const _SectionLabel(
+                                text: 'Beraber İzlemek İstedikleriniz',
+                              ),
                               const SizedBox(height: 8),
                               _PosterStrip(urls: cd.watchPosters),
                               const SizedBox(height: 12),
@@ -808,6 +811,7 @@ class _MatchScreenState extends State<MatchScreen>
     final commonActors = widget.result.commonActors;
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight: 40,
         title: Text(
           (widget.result.displayName != null &&
                   widget.result.displayName!.isNotEmpty)
@@ -1435,6 +1439,88 @@ class _SkeletonPosters extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyMatches extends StatelessWidget {
+  const _EmptyMatches();
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const _ForestFace(offsetX: 0, offsetY: -8),
+          const SizedBox(height: 12),
+          Text(
+            'Daha çok film izlemelisin',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: const Color.fromARGB(255, 124, 131, 116),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ForestFace extends StatelessWidget {
+  final double offsetX;
+  final double offsetY;
+  const _ForestFace({this.offsetX = 0, this.offsetY = 0});
+
+  @override
+  Widget build(BuildContext context) {
+    const base = Color(0xFF1B5E20); // forest green
+    return SizedBox(
+      width: 140,
+      height: 140,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          _ring(140, base.withOpacity(0.90)),
+          _ring(112, base.withOpacity(0.75)),
+          _ring(88, base.withOpacity(0.55)),
+          _ring(64, base.withOpacity(0.35)),
+          _ring(44, base.withOpacity(0.20)),
+          Positioned(left: 38, top: 54, child: _eye(offsetX, offsetY)),
+          Positioned(right: 38, top: 54, child: _eye(offsetX, offsetY)),
+        ],
+      ),
+    );
+  }
+
+  static Widget _ring(double size, Color color) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    );
+  }
+
+  static Widget _eye(double offsetX, double offsetY) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        alignment: Alignment(offsetX / 10, offsetY / 10),
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(
+            color: Colors.black87,
+            shape: BoxShape.circle,
           ),
         ),
       ),
