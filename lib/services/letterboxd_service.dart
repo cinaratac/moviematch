@@ -6,6 +6,7 @@ import 'package:html/dom.dart' as dom;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttergirdi/services/catalog_service.dart';
 
 // --- HTTP client & helpers ---------------------------------------------------
 const _kDefaultUa =
@@ -47,6 +48,58 @@ class _Http {
     }
     return res; // may be non-200
   }
+}
+
+// --- Minimal TMDB helpers (decoupled from any UI/service widget) ----------
+const String _kTmdbBearer = String.fromEnvironment(
+  'TMDB_BEARER',
+  defaultValue: '',
+);
+
+Future<List<Map<String, dynamic>>> _tmdbSearchMovies(
+  String query, {
+  int? year,
+}) async {
+  if (_kTmdbBearer.isEmpty) return [];
+  final uri = Uri.https('api.themoviedb.org', '/3/search/movie', {
+    'query': query,
+    if (year != null) 'year': '$year',
+    'include_adult': 'false',
+    'language': 'en-US',
+    'page': '1',
+  });
+  final res = await _Http.get(
+    uri,
+    headers: {
+      'Authorization': 'Bearer $_kTmdbBearer',
+      'Accept': 'application/json',
+    },
+  );
+  if (res == null || res.statusCode != 200) return [];
+  final data = jsonDecode(res.body);
+  final results = (data['results'] as List?) ?? const [];
+  return results.cast<Map<String, dynamic>>();
+}
+
+Map<String, dynamic>? _firstTmdbHitCloseToYear(
+  List<Map<String, dynamic>> results, {
+  int? year,
+}) {
+  if (results.isEmpty) return null;
+  if (year == null) return results.first;
+  Map<String, dynamic>? best;
+  int bestDelta = 1 << 30;
+  for (final m in results) {
+    final rd = (m['release_date'] ?? '') as String;
+    final y = rd.length >= 4 ? int.tryParse(rd.substring(0, 4)) : null;
+    if (y == null) continue;
+    final delta = (y - year).abs();
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = m;
+    }
+  }
+  return best ?? results.first;
 }
 
 class LetterboxdFilm {
@@ -821,7 +874,7 @@ class LetterboxdService {
     return result;
   }
 
-  /// Writes a canonical catalog doc for each film so we can resolve keys to title/poster later
+  /// Writes a canonical catalog doc for each film so we can resolve keys to title/poster later.
   static Future<void> _upsertCatalog(List<LetterboxdFilm> films) async {
     final db = FirebaseFirestore.instance;
     final batch = db.batch();
@@ -836,8 +889,42 @@ class LetterboxdService {
         'posterUrl': f.posterUrl,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+      // --- TMDb integration: try to match and upsert canonical entry
+      try {
+        await _tryMatchWithTmdb(f);
+      } catch (_) {
+        // ignore errors, don't break catalog upsert
+      }
     }
     await batch.commit();
+  }
+
+  /// Attempts to match a LetterboxdFilm with TMDb and upsert canonical entry.
+  /// Returns the canonical key string (e.g., "tmdb:12345") if matched, else null.
+  static Future<String?> _tryMatchWithTmdb(LetterboxdFilm f) async {
+    try {
+      // Try to parse year from title like "Movie Title (1999)"
+      final yearMatch = RegExp(r'\((\d{4})\)$').firstMatch(f.title);
+      final int? year = yearMatch != null
+          ? int.tryParse(yearMatch.group(1)!)
+          : null;
+
+      final results = await _tmdbSearchMovies(
+        f.title.replaceAll(RegExp(r'\s*\(\d{4}\)$'), ''),
+        year: year,
+      );
+      if (results.isNotEmpty) {
+        final hit =
+            _firstTmdbHitCloseToYear(results, year: year) ?? results.first;
+        final catalog = CatalogService();
+        await catalog.upsertFromTmdb(hit);
+        await catalog.upsertFromLetterboxd(f.toMap(), tmdbId: hit['id']);
+        return "tmdb:${hit['id']}";
+      }
+    } catch (_) {
+      // Ignore TMDb errors
+    }
+    return null;
   }
 
   /// Fetches user's favorites from Letterboxd and persists them under users/{uid}
@@ -1062,37 +1149,31 @@ class LetterboxdService {
     final films = await fetchWatchlist(lbUsername);
 
     // 2) Upsert catalog in chunks
-    const int batchSize =
-        50; // reuse catalog helper signature (List<LetterboxdFilm>)
+    const int batchSize = 50;
     for (int i = 0; i < films.length; i += batchSize) {
       final end = (i + batchSize < films.length) ? i + batchSize : films.length;
       await _upsertCatalog(films.sublist(i, end));
     }
 
-    // 3) Persist on user profile
+    // 3) Persist on user profile (ONLY keys, no heavy list)
     final db = FirebaseFirestore.instance;
     final doc = db.collection('users').doc(me);
 
     final keys = LetterboxdFilm.keysOf(films);
-    final lite = films
-        .take(liteLimit)
-        .map(
-          (f) => {
-            'title': f.title,
-            'url': f.url,
-            'posterUrl': f.posterUrl,
-            'key': f.key,
-          },
-        )
-        .toList();
 
     await doc.set({
       'lbUsername': lbUsername,
       'watchlistKeys': keys,
-      'watchlist': lite,
       'watchlistUpdatedAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+
+    // Clean up legacy heavy field if present
+    try {
+      await doc.update({'watchlist': FieldValue.delete()});
+    } catch (_) {
+      // field may not exist; ignore
+    }
   }
 
   /// Utility: chunks a list into parts of size [n]

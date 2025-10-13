@@ -40,7 +40,7 @@ class _HomeShellState extends State<HomeShell> {
       child: Container(
         decoration: BoxDecoration(
           color: cs.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
               color: cs.shadow.withValues(alpha: 0.14),
@@ -51,7 +51,7 @@ class _HomeShellState extends State<HomeShell> {
         ),
         child: NavigationBarTheme(
           data: NavigationBarThemeData(
-            height: 64,
+            height: 52,
             backgroundColor: Colors.transparent,
             indicatorColor: cs.primary.withValues(alpha: 0.14),
             indicatorShape: const StadiumBorder(),
@@ -59,13 +59,14 @@ class _HomeShellState extends State<HomeShell> {
             iconTheme: WidgetStateProperty.resolveWith((states) {
               final selected = states.contains(WidgetState.selected);
               return IconThemeData(
-                size: 22,
+                size: 20,
                 color: selected ? cs.primary : cs.onSurfaceVariant,
               );
             }),
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
               final selected = states.contains(WidgetState.selected);
               return TextStyle(
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: selected ? cs.primary : cs.onSurfaceVariant,
               );

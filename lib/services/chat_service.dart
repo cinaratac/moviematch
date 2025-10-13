@@ -1,9 +1,10 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // No heavy work here; ensure Firebase is initialized in your app's main()
+  // Keep lightweight. Push handling is done via NotificationService in foreground.
 }
 
 class ChatService {
@@ -129,44 +130,15 @@ class ChatService {
   /// N messages and filter client-side. Tune the `limit()` as needed.
   Stream<int> unreadCountForChat(String chatId, String myUid) {
     final chatRef = _fs.collection('chats').doc(chatId);
-
-    // 1) Observe chat to extract other participant
-    return chatRef.snapshots().asyncExpand((chatSnap) {
-      final partsAny = (chatSnap.data()?['participants'] as List?) ?? const [];
-      final parts = partsAny.map((e) => e.toString()).toList();
-      final otherUid = parts.firstWhere((x) => x != myUid, orElse: () => '');
-      if (otherUid.isEmpty) {
-        return Stream<int>.value(0);
+    return chatRef.snapshots().map((chatSnap) {
+      final data = chatSnap.data();
+      if (data == null) return 0;
+      final counts = data['unreadCounts'];
+      if (counts is Map) {
+        final v = counts[myUid];
+        if (v is num) return v.toInt();
       }
-
-      // 2) Observe my read marker
-      final myReadRef = chatRef.collection('reads').doc(myUid);
-      return myReadRef.snapshots().asyncExpand((readSnap) {
-        final lastReadAt = (readSnap.data()?['lastReadAt'] as Timestamp?)
-            ?.toDate();
-
-        // 3) Observe recent messages and count client-side
-        return chatRef
-            .collection('messages')
-            .orderBy('createdAt', descending: true)
-            .limit(200)
-            .snapshots()
-            .map((qs) {
-              int count = 0;
-              for (final doc in qs.docs) {
-                final data = doc.data();
-                final authorId =
-                    (data['authorId'] ?? data['from'] ?? '') as String;
-                if (authorId != otherUid) continue;
-                final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-                if (createdAt == null) continue;
-                if (lastReadAt == null || createdAt.isAfter(lastReadAt)) {
-                  count++;
-                }
-              }
-              return count;
-            });
-      });
+      return 0;
     });
   }
 
@@ -219,5 +191,15 @@ class ChatService {
       }
       return total;
     });
+  }
+
+  /// Start local notifications (delegates to NotificationService)
+  Future<void> startChatNotifications() async {
+    await NotificationService.I.start();
+  }
+
+  /// Stop local notifications (delegates to NotificationService)
+  Future<void> stopChatNotifications() async {
+    await NotificationService.I.dispose();
   }
 }

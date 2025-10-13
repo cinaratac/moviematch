@@ -10,6 +10,8 @@ import 'dart:ui' as ui;
 import 'package:fluttergirdi/screens/edit_profile_page.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
+import 'package:fluttergirdi/screens/search_movie.dart';
+import 'package:fluttergirdi/models/shelf_target.dart';
 
 // --- In-memory shelf cache to avoid duplicate Firestore reads across screens ---
 class UserShelfCache {
@@ -96,6 +98,67 @@ class _CountPill extends StatelessWidget {
   }
 }
 
+/// Compact profile header section (avatar, name, follower/following)
+Widget _profileHeaderSection({
+  required BuildContext context,
+  required User user,
+  required int? followers,
+  required int? following,
+  required String? lbUsername,
+  required String Function(User) shownName,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        CircleAvatar(
+          radius: 36,
+          backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
+              ? NetworkImage(user.photoURL!)
+              : null,
+          child: (user.photoURL == null || user.photoURL!.isEmpty)
+              ? Text(
+                  shownName(user).isNotEmpty
+                      ? shownName(user)[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(fontSize: 24),
+                )
+              : null,
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                shownName(user),
+                style: Theme.of(context).textTheme.titleLarge,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              (followers == null || following == null)
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _CountPill(label: 'Takipçi', value: followers),
+                        _CountPill(label: 'Takip', value: following),
+                      ],
+                    ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -126,6 +189,8 @@ class _ProfilePageState extends State<ProfilePage> {
   StreamSubscription<FollowEvent>? _followSub;
 
   bool _initialSyncTriggered = false; // same-session guard for first-time sync
+
+  // TabBar now scrolls within content; no separate hidden state needed.
 
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -979,6 +1044,638 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // --- Generic shelf section fed by users/{uid} array fields ---
+  Widget _shelfSectionFromUserField(
+    String fieldName, {
+    int maxItems = 30,
+    String emptyText = 'Film bulunamadı.',
+  }) {
+    final keys = List<dynamic>.from(
+      (_lastUserData?[fieldName] ?? const []),
+    ).map((e) => e.toString()).toList();
+
+    if (keys.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(emptyText),
+      );
+    }
+
+    final limited = keys.take(maxItems).toList();
+    final hash = '$fieldName:' + limited.join('|');
+
+    final future = _watchlistFutureCache[hash] ??= Future.wait(
+      limited.map((k) async {
+        final col = FirebaseFirestore.instance
+            .collection('catalog_films')
+            .doc(k);
+        // cache‑first -> server fallback
+        try {
+          final c = await col.get(const GetOptions(source: Source.cache));
+          if (c.exists) return c.data();
+        } catch (_) {}
+        try {
+          final s = await col.get(const GetOptions(source: Source.server));
+          if (s.exists) return s.data();
+        } catch (_) {}
+        return null;
+      }),
+    );
+
+    return FutureBuilder<List<Map<String, dynamic>?>>(
+      future: future,
+      builder: (context, filmSnap) {
+        if (filmSnap.connectionState == ConnectionState.waiting &&
+            !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (!filmSnap.hasData) return const SizedBox.shrink();
+        final films = filmSnap.data!
+            .where((m) => m != null)
+            .map((m) => m!)
+            .toList();
+
+        if (films.isEmpty) return const SizedBox.shrink();
+
+        return SizedBox(
+          height: 180,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: films.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              final film = films[i];
+              final poster =
+                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
+                      as String;
+              final title = (film['title'] ?? '') as String;
+              return AspectRatio(
+                aspectRatio: 2 / 3,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      poster.isNotEmpty
+                          ? Image.network(
+                              poster,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                              headers: LetterboxdService.imageHeaders,
+                              errorBuilder: (_, __, ___) =>
+                                  Container(color: Colors.grey.shade800),
+                            )
+                          : Container(color: Colors.grey.shade800),
+                      if (title.isNotEmpty)
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 4,
+                            ),
+                            color: Colors.black54,
+                            child: Text(
+                              _noYear(title),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.white,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // --- BEGIN: Profile & Activities Tabs ---
+  // Widget _buildProfileTab(User user) {
+  //   // Deprecated/unused: see _buildProfileContentAfterHeader().
+  //   // If you want to use it, uncomment and use in TabBarView.
+  // }
+  /// Builds the Five Star shelf with an "add film" button at the start.
+  Widget _buildFiveStarWithAddButton() {
+    return FutureBuilder<List<LetterboxdFilm>>(
+      future: _futureFiveStar,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text('5★ film bulunamadı.'),
+          );
+        }
+        final items = snapshot.data ?? [];
+        // Show add button + the rest of the films (if any)
+        return SizedBox(
+          height: 180,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: items.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              if (i == 0) {
+                // Add film button
+                return AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _AddFilmTile(
+                    onFilmAdded: () {
+                      // Optionally refresh the five-star list after adding
+                      setState(() {
+                        _futureFiveStar = LetterboxdService.fetchFiveStar(
+                          _lbUsername ?? "",
+                        );
+                      });
+                    },
+                  ),
+                );
+              }
+              // Film tiles
+              return AspectRatio(
+                aspectRatio: 2 / 3,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: _posterTile(items[i - 1]),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildShelfFutureList(
+    Future<List<LetterboxdFilm>>? fut, {
+    bool fiveStar = false,
+  }) {
+    return FutureBuilder<List<LetterboxdFilm>>(
+      future: fut,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 180,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(fiveStar ? '5★ film bulunamadı.' : 'Liste alınamadı.'),
+          );
+        }
+        final items = snapshot.data ?? [];
+        if (items.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(fiveStar ? '5★ film bulunamadı.' : 'Film bulunamadı.'),
+          );
+        }
+        return SizedBox(
+          height: 180,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, i) => AspectRatio(
+              aspectRatio: 2 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: _posterTile(items[i]),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActivitiesTab() {
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _loadActivities();
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          Row(
+            children: [
+              Text(
+                'Aktiviteler',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Yenile',
+                icon: const Icon(Icons.refresh),
+                onPressed: _loadingActivities ? null : _loadActivities,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_loadingActivities)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_activities.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text('Henüz aktivite yok.'),
+            )
+          else
+            ListView.separated(
+              itemCount: _activities.length,
+              physics: const NeverScrollableScrollPhysics(),
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              separatorBuilder: (_, __) =>
+                  const Divider(height: 0.5, thickness: 0.5),
+              itemBuilder: (context, i) {
+                final a = _activities[i];
+                final when = a.createdAt;
+                String timeLabel = '';
+                if (when != null) {
+                  final diff = DateTime.now().difference(when);
+                  if (diff.inMinutes < 60) {
+                    timeLabel = '${diff.inMinutes}m';
+                  } else if (diff.inHours < 24) {
+                    timeLabel = '${diff.inHours}h';
+                  } else {
+                    timeLabel = '${diff.inDays}g';
+                  }
+                }
+                return Container(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white10,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color.fromARGB(3, 255, 255, 255),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if ((a.posterUrl).isNotEmpty) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            a.posterUrl,
+                            width: 44,
+                            height: 66,
+                            fit: BoxFit.cover,
+                            headers: LetterboxdService.imageHeaders,
+                            errorBuilder: (_, __, ___) => Container(
+                              width: 44,
+                              height: 66,
+                              color: Colors.grey.shade800,
+                              child: const Icon(Icons.movie),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    _shownName(
+                                      FirebaseAuth.instance.currentUser!,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  a.type == 'repost'
+                                      ? 'Alıntıladı'
+                                      : 'Paylaştı',
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                                if (timeLabel.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    timeLabel,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.labelSmall,
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (a.text.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Text(
+                                  a.text,
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6.0),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.favorite_border, size: 16),
+                                  const SizedBox(width: 4),
+                                  Text('${a.likeCount}'),
+                                  const SizedBox(width: 12),
+                                  const Icon(
+                                    Icons.mode_comment_outlined,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text('${a.replyCount}'),
+                                  const SizedBox(width: 12),
+                                  const Icon(Icons.repeat, size: 16),
+                                  const SizedBox(width: 4),
+                                  Text('${a.repostCount}'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  // --- Profile content after header ---
+  Widget _buildProfileContentAfterHeader() {
+    return RefreshIndicator(
+      onRefresh: () async {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) await user.reload();
+        if (_lbUsername != null && _lbUsername!.isNotEmpty) {
+          setState(() {
+            _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
+            _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
+            _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
+          });
+        }
+        await _bootstrapCounts();
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          if (_lbUsername == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Row(
+                children: const [
+                  Icon(Icons.alternate_email),
+                  SizedBox(width: 8),
+                  Text('Letterboxd bağlı değil'),
+                ],
+              ),
+            )
+          else
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Chip(label: Text('Letterboxd: @$_lbUsername')),
+            ),
+          const SizedBox(height: 12),
+          Builder(
+            builder: (context) {
+              final data = _lastUserData ?? const <String, dynamic>{};
+              final age = data['age'];
+              final genres = List<String>.from(data['favGenres'] ?? const []);
+              final directors = List<String>.from(
+                data['favDirectors'] ?? const [],
+              );
+              final actors = List<String>.from(data['favActors'] ?? const []);
+
+              if ((age == null || (age is int && age <= 0)) &&
+                  genres.isEmpty &&
+                  directors.isEmpty &&
+                  actors.isEmpty) {
+                return const SizedBox.shrink();
+              }
+
+              Widget chipWrap(String title, List<String> items) {
+                if (items.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: items
+                            .map((e) => Chip(label: Text(e)))
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (age is int && age > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.cake, size: 18),
+                          const SizedBox(width: 6),
+                          Text('Yaş: $age'),
+                        ],
+                      ),
+                    ),
+                  chipWrap('Sevdiğin türler', genres),
+                  chipWrap('Sevdiğin yönetmenler', directors),
+                  chipWrap('Sevdiğin oyuncular', actors),
+                ],
+              );
+            },
+          ),
+          if (_lbUsername != null) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Text(
+                  'Favori Filmler',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 28,
+                  child: IconButton(
+                    tooltip: 'Film Ekle',
+                    icon: const Icon(
+                      Icons.add,
+                      size: 20,
+                      color: Colors.white70,
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              SearchMoviePage(target: ShelfTarget.favorites),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+            _shelfSectionFromUserField(
+              'favoritesKeys',
+              emptyText: 'Favori film bulunamadı.',
+              maxItems: 30,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Text(
+                  'Sevdiği Filmler',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(width: 8),
+                // "Film Ekle" button
+                SizedBox(
+                  height: 28,
+                  child: IconButton(
+                    tooltip: 'Film Ekle',
+                    icon: const Icon(
+                      Icons.add,
+                      size: 20,
+                      color: Colors.white70,
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              SearchMoviePage(target: ShelfTarget.fiveStar),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+            _shelfSectionFromUserField(
+              'fiveStarKeys',
+              emptyText: '5★ film bulunamadı.',
+              maxItems: 30,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Text(
+                  'Sevmediği Filmler',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 28,
+                  child: IconButton(
+                    tooltip: 'Film Ekle',
+                    icon: const Icon(
+                      Icons.add,
+                      size: 20,
+                      color: Colors.white70,
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              SearchMoviePage(target: ShelfTarget.disliked),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+            _shelfSectionFromUserField(
+              'dislikedKeys',
+              emptyText: 'Sevmediği film bulunamadı.',
+              maxItems: 30,
+            ),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Text('Watchlist', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 28,
+                child: IconButton(
+                  tooltip: 'Film Ekle',
+                  icon: const Icon(Icons.add, size: 20, color: Colors.white70),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SearchMoviePage(target: ShelfTarget.watchlist),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          _watchlistSectionFromKeys(
+            List<dynamic>.from(
+              (_lastUserData?['watchlistKeys'] ?? const []),
+            ).map((e) => e.toString()).toList(),
+            maxItems: 30,
+          ),
+        ],
+      ),
+    );
+  }
+  // --- END: Profile & Activities Tabs ---
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -994,632 +1691,256 @@ class _ProfilePageState extends State<ProfilePage> {
           return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
         }
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Profil'),
-            backgroundColor: Colors.black.withValues(
-              alpha: 0.20,
-            ), // semi‑transparent
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            surfaceTintColor: Colors.transparent,
-            actions: [
-              IconButton(
-                tooltip: 'Düzenle',
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          EditProfilePage(initialUserData: _lastUserData),
-                    ),
-                  );
-                },
-              ),
-              IconButton(
-                tooltip: 'Yenile',
-                icon: const Icon(Icons.refresh),
-                onPressed: _refreshFavorites,
-              ),
-              PopupMenuButton<String>(
-                onSelected: (value) async {
-                  if (value == 'settings') {
+        return DefaultTabController(
+          length: 2,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('Profil'),
+              backgroundColor: Colors.black.withValues(alpha: 0.20),
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: Colors.transparent,
+              actions: [
+                IconButton(
+                  tooltip: 'Düzenle',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SettingsPage()),
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            EditProfilePage(initialUserData: _lastUserData),
+                      ),
                     );
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: 'settings',
-                    child: ListTile(
-                      leading: Icon(Icons.settings_outlined),
-                      title: Text('Ayarlar'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          extendBodyBehindAppBar: true,
-          body: Stack(
-            children: [
-              _blurBackdrop(),
-              RefreshIndicator(
-                onRefresh: () async {
-                  await user.reload();
-                  if (_lbUsername != null && _lbUsername!.isNotEmpty) {
-                    setState(() {
-                      _futureFavs = LetterboxdService.fetchFavorites(
-                        _lbUsername!,
+                  },
+                ),
+                IconButton(
+                  tooltip: 'Yenile',
+                  icon: const Icon(Icons.refresh),
+                  onPressed: () async {
+                    await _refreshFavorites();
+                    await _loadActivities();
+                    await _bootstrapCounts();
+                  },
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (value) async {
+                    if (value == 'settings') {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SettingsPage()),
                       );
-                      _futureFiveStar = LetterboxdService.fetchFiveStar(
-                        _lbUsername!,
-                      );
-                      _futureDisliked = LetterboxdService.fetchDisliked(
-                        _lbUsername!,
-                      );
-                    });
-                  }
-                  await _loadActivities();
-                  await _bootstrapCounts();
-                },
-                child: ListView(
-                  padding: EdgeInsets.fromLTRB(
-                    16,
-                    MediaQuery.of(context).padding.top + kToolbarHeight + 12,
-                    16,
-                    16,
-                  ),
-                  children: [
-                    // Header
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        CircleAvatar(
-                          radius: 36,
-                          backgroundImage:
-                              user.photoURL != null && user.photoURL!.isNotEmpty
-                              ? NetworkImage(user.photoURL!)
-                              : null,
-                          child:
-                              (user.photoURL == null || user.photoURL!.isEmpty)
-                              ? Text(
-                                  _shownName(user).isNotEmpty
-                                      ? _shownName(user)[0].toUpperCase()
-                                      : '?',
-                                  style: const TextStyle(fontSize: 24),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _shownName(user),
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleLarge,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 6),
-                                  (_followers == null || _following == null)
-                                      ? const SizedBox(
-                                          height: 20,
-                                          width: 20,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : Wrap(
-                                          spacing: 8,
-                                          runSpacing: 8,
-                                          children: [
-                                            _CountPill(
-                                              label: 'Takipçi',
-                                              value: _followers!,
-                                            ),
-                                            _CountPill(
-                                              label: 'Takip',
-                                              value: _following!,
-                                            ),
-                                          ],
-                                        ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'settings',
+                      child: ListTile(
+                        leading: Icon(Icons.settings_outlined),
+                        title: Text('Ayarlar'),
+                      ),
                     ),
-
-                    const SizedBox(height: 5),
-                    if (_lbUsername == null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: Row(
-                          children: const [
-                            Icon(Icons.alternate_email),
-                            SizedBox(width: 8),
-                            Text('Letterboxd bağlı değil'),
-                          ],
-                        ),
-                      )
-                    else
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Chip(label: Text('Letterboxd: @$_lbUsername')),
-                      ),
-
-                    // Kullanıcı profili tercihleri (yaş, türler, yönetmenler, oyuncular) — tek okunur, _lastUserData üzerinden
-                    const SizedBox(height: 12),
-                    Builder(
-                      builder: (context) {
-                        final data = _lastUserData ?? const <String, dynamic>{};
-                        final age = data['age'];
-                        final genres = List<String>.from(
-                          data['favGenres'] ?? const [],
-                        );
-                        final directors = List<String>.from(
-                          data['favDirectors'] ?? const [],
-                        );
-                        final actors = List<String>.from(
-                          data['favActors'] ?? const [],
-                        );
-
-                        if ((age == null || (age is int && age <= 0)) &&
-                            genres.isEmpty &&
-                            directors.isEmpty &&
-                            actors.isEmpty) {
-                          return const SizedBox.shrink();
-                        }
-
-                        Widget chipWrap(String title, List<String> items) {
-                          if (items.isEmpty) return const SizedBox.shrink();
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                                const SizedBox(height: 8),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: items
-                                      .map((e) => Chip(label: Text(e)))
-                                      .toList(),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (age is int && age > 0)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8.0),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.cake, size: 18),
-                                    const SizedBox(width: 6),
-                                    Text('Yaş: $age'),
-                                  ],
-                                ),
-                              ),
-                            chipWrap('Sevdiğin türler', genres),
-                            chipWrap('Sevdiğin yönetmenler', directors),
-                            chipWrap('Sevdiğin oyuncular', actors),
-                          ],
-                        );
-                      },
-                    ),
-
-                    if (_lbUsername != null) ...[
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Text(
-                            'Favori Filmler',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ],
-                      ),
-                      FutureBuilder<List<LetterboxdFilm>>(
-                        future: _futureFavs,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const SizedBox(
-                              height: 180,
-                              child: Center(child: CircularProgressIndicator()),
-                            );
-                          }
-                          if (snapshot.hasError) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Favoriler alınamadı: ${snapshot.error}',
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: FilledButton.icon(
-                                      onPressed: _refreshFavorites,
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Tekrar dene'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                          final items = snapshot.data ?? [];
-                          if (items.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text('Favori film bulunamadı.'),
-                            );
-                          }
-                          return SizedBox(
-                            height: 180,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: items.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 12),
-                              itemBuilder: (context, i) {
-                                final f = items[i];
-                                return AspectRatio(
-                                  aspectRatio: 2 / 3,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: _posterTile(f),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Text(
-                            'Sevdiği Filmler',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ],
-                      ),
-                      FutureBuilder<List<LetterboxdFilm>>(
-                        future: _futureFiveStar,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const SizedBox(
-                              height: 180,
-                              child: Center(child: CircularProgressIndicator()),
-                            );
-                          }
-                          if (snapshot.hasError) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text('5★ film bulunamadı.'),
-                            );
-                          }
-                          final items = snapshot.data ?? [];
-                          if (items.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text('5★ film bulunamadı.'),
-                            );
-                          }
-                          return SizedBox(
-                            height: 180,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: items.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 12),
-                              itemBuilder: (context, i) {
-                                final f = items[i];
-                                return AspectRatio(
-                                  aspectRatio: 2 / 3,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: _posterTile(f),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Text(
-                            'Sevmediği Filmler',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ],
-                      ),
-                      FutureBuilder<List<LetterboxdFilm>>(
-                        future: _futureDisliked,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const SizedBox(
-                              height: 180,
-                              child: Center(child: CircularProgressIndicator()),
-                            );
-                          }
-                          if (snapshot.hasError) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Sevmediği filmler alınamadı: ${snapshot.error}',
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: FilledButton.icon(
-                                      onPressed: _refreshFavorites,
-                                      icon: const Icon(Icons.refresh),
-                                      label: const Text('Tekrar dene'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                          final items = snapshot.data ?? [];
-                          if (items.isEmpty) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Text('Sevmediği film bulunamadı.'),
-                            );
-                          }
-                          return SizedBox(
-                            height: 180,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: items.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 12),
-                              itemBuilder: (context, i) {
-                                final f = items[i];
-                                return AspectRatio(
-                                  aspectRatio: 2 / 3,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: _posterTile(f),
-                                  ),
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Text(
-                          'Watchlist',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                    _watchlistSectionFromKeys(
-                      List<dynamic>.from(
-                        (_lastUserData?['watchlistKeys'] ?? const []),
-                      ).map((e) => e.toString()).toList(),
-                      maxItems: 30,
-                    ),
-                    const SizedBox(height: 17),
-                    Row(
-                      children: [
-                        Text(
-                          'Aktiviteler',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          tooltip: 'Yenile',
-                          icon: const Icon(Icons.refresh),
-                          onPressed: _loadingActivities
-                              ? null
-                              : _loadActivities,
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 10),
-                    if (_loadingActivities)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (_activities.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Text('Henüz aktivite yok.'),
-                      )
-                    else
-                      ListView.separated(
-                        itemCount: _activities.length,
-                        physics: const NeverScrollableScrollPhysics(),
-                        shrinkWrap: true,
-                        padding: EdgeInsets.zero,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 0.5, thickness: 0.5),
-                        itemBuilder: (context, i) {
-                          final a = _activities[i];
-                          final when = a.createdAt;
-                          String timeLabel = '';
-                          if (when != null) {
-                            final diff = DateTime.now().difference(when);
-                            if (diff.inMinutes < 60) {
-                              timeLabel = '${diff.inMinutes}m';
-                            } else if (diff.inHours < 24) {
-                              timeLabel = '${diff.inHours}h';
-                            } else {
-                              timeLabel = '${diff.inDays}g';
-                            }
-                          }
-                          return Container(
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white10, // semi-transparent card
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color.fromARGB(3, 255, 255, 255),
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Poster yalnızca film eklenmişse gösterilsin (placeholder yok)
-                                if ((a.posterUrl).isNotEmpty) ...[
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(
-                                      a.posterUrl,
-                                      width: 44,
-                                      height: 66,
-                                      fit: BoxFit.cover,
-                                      headers: LetterboxdService.imageHeaders,
-                                      errorBuilder: (_, __, ___) => Container(
-                                        width: 44,
-                                        height: 66,
-                                        color: Colors.grey.shade800,
-                                        child: const Icon(Icons.movie),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                ],
-                                // Metinler
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // Kullanıcı adı (kalın) + aktivite tipi + zaman etiketi
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              _shownName(
-                                                FirebaseAuth
-                                                    .instance
-                                                    .currentUser!,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleSmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            a.type == 'repost'
-                                                ? 'Alıntıladı'
-                                                : 'Paylaştı',
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.labelSmall,
-                                          ),
-                                          if (timeLabel.isNotEmpty) ...[
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              timeLabel,
-                                              style: Theme.of(
-                                                context,
-                                              ).textTheme.labelSmall,
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                      // Gönderi metni (yalnızca bir kez)
-                                      if (a.text.isNotEmpty)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 4.0,
-                                          ),
-                                          child: Text(
-                                            a.text,
-                                            maxLines: 4,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      // Metrikler
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          top: 6.0,
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.favorite_border,
-                                              size: 16,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text('${a.likeCount}'),
-                                            const SizedBox(width: 12),
-                                            const Icon(
-                                              Icons.mode_comment_outlined,
-                                              size: 16,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text('${a.replyCount}'),
-                                            const SizedBox(width: 12),
-                                            const Icon(Icons.repeat, size: 16),
-                                            const SizedBox(width: 4),
-                                            Text('${a.repostCount}'),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    const SizedBox(height: 40),
                   ],
                 ),
+              ],
+              // No bottom: TabBar here - TabBar will be under header in body
+            ),
+            extendBodyBehindAppBar: true,
+            body: NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) {
+                return [
+                  SliverToBoxAdapter(
+                    child: Stack(
+                      children: [
+                        // Backdrop behind header + tab bar
+                        SizedBox(
+                          height:
+                              MediaQuery.of(context).padding.top +
+                              kToolbarHeight +
+                              36 +
+                              12 +
+                              36, // appbar + header + spacing + tabbar approx
+                          child: _blurBackdrop(),
+                        ),
+                        Column(
+                          children: [
+                            SizedBox(
+                              height:
+                                  MediaQuery.of(context).padding.top +
+                                  kToolbarHeight,
+                            ),
+                            _profileHeaderSection(
+                              context: context,
+                              user: user,
+                              followers: _followers,
+                              following: _following,
+                              lbUsername: _lbUsername,
+                              shownName: _shownName,
+                            ),
+                            const SizedBox(height: 12),
+                            // Transparent TabBar inside scrolling header
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: TabBar(
+                                isScrollable: false,
+                                indicator: UnderlineTabIndicator(
+                                  borderSide: BorderSide(
+                                    width: 2,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
+                                ),
+                                indicatorSize: TabBarIndicatorSize.tab,
+                                overlayColor: WidgetStateProperty.all(
+                                  Colors.transparent,
+                                ),
+                                labelPadding: const EdgeInsets.symmetric(
+                                  vertical: 6,
+                                ),
+                                labelStyle: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                                unselectedLabelStyle: Theme.of(
+                                  context,
+                                ).textTheme.titleSmall,
+                                labelColor: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface,
+                                unselectedLabelColor: Theme.of(
+                                  context,
+                                ).colorScheme.onSurface.withValues(alpha: 0.7),
+                                tabs: const [
+                                  Tab(text: 'Filmler'),
+                                  Tab(text: 'Aktiviteler'),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ];
+              },
+              // Body is each tab's scrollable content; header (incl. TabBar) scrolls off
+              body: TabBarView(
+                children: [
+                  _buildProfileContentAfterHeader(),
+                  _buildActivitiesTab(),
+                ],
               ),
-            ],
+            ),
           ),
         );
       },
     );
+  }
+}
+
+// Widget for the "Add Film" tile/button
+class _AddFilmTile extends StatelessWidget {
+  final VoidCallback? onFilmAdded;
+  const _AddFilmTile({this.onFilmAdded});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        final result = await showDialog<String>(
+          context: context,
+          builder: (context) => _AddFilmDialog(),
+        );
+        if (result != null && result.trim().isNotEmpty) {
+          // Write to Firestore
+          final user = FirebaseAuth.instance.currentUser;
+          if (user != null) {
+            await FirebaseFirestore.instance.collection('userAddedFilms').add({
+              'title': result.trim(),
+              'authorId': user.uid,
+              'createdAt': FieldValue.serverTimestamp(),
+            });
+            if (onFilmAdded != null) {
+              onFilmAdded!();
+            }
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Film eklendi: $result')));
+          }
+        }
+      },
+      child: Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: Colors.black26,
+        child: Container(
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.add, size: 40, color: Colors.white70),
+              SizedBox(height: 8),
+              Text(
+                'Film Ekle',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Dialog for entering film name
+class _AddFilmDialog extends StatefulWidget {
+  @override
+  State<_AddFilmDialog> createState() => _AddFilmDialogState();
+}
+
+class _AddFilmDialogState extends State<_AddFilmDialog> {
+  final TextEditingController _controller = TextEditingController();
+  bool _submitting = false;
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Yeni Film Ekle'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Film adı'),
+        onSubmitted: _submit,
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.pop(context),
+          child: const Text('İptal'),
+        ),
+        ElevatedButton(
+          onPressed: _submitting ? null : () => _submit(_controller.text),
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Ekle'),
+        ),
+      ],
+    );
+  }
+
+  void _submit(String value) async {
+    final filmName = value.trim();
+    if (filmName.isEmpty) return;
+    setState(() => _submitting = true);
+    // Delay just for UX, actual write is handled outside dialog
+    await Future.delayed(const Duration(milliseconds: 200));
+    Navigator.of(context).pop(filmName);
   }
 }

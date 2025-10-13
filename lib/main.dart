@@ -5,11 +5,30 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:fluttergirdi/services/push_token_service.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Ensure Firebase is available in background isolate
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  // We keep background handling minimal; the OS shows the notification payload.
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Register FCM background/foreground handlers
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // Optional: foreground messages (if push arrives while app is visible)
+  FirebaseMessaging.onMessage.listen((RemoteMessage m) {
+    // No-op here: if the push has a notification payload, Android/iOS shows it automatically when backgrounded.
+    // For foreground, your in-app NotificationService already surfaces social/chat events via Firestore listeners.
+  });
 
   // Load saved theme preference before launching the app
   try {
@@ -30,6 +49,18 @@ Future<void> main() async {
   } catch (_) {
     // ignore errors and use system default
   }
+
+  // Initialize local notifications and bind to auth state
+  await NotificationService.I.init();
+  FirebaseAuth.instance.authStateChanges().listen((u) {
+    if (u != null) {
+      NotificationService.I.start();
+      PushTokenService.I.start();
+    } else {
+      NotificationService.I.dispose();
+      PushTokenService.I.stop();
+    }
+  });
 
   runApp(const MyApp());
 }
