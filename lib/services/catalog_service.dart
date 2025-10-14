@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:developer';
-import 'tmdb_service.dart';
 
 class CatalogService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;

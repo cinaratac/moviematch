@@ -556,11 +556,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   Widget _buildProfileTabBody(Map<String, dynamic> data) {
-    final displayName = (data['displayName'] ?? '') as String;
-    final lb = (data['letterboxdUsername'] ?? '') as String;
-    final photoURL = (data['photoURL'] ?? '') as String;
-    final appUsername = (data['username'] ?? '') as String;
-
     final favKeys = List<String>.from(data['favoritesKeys'] ?? const []);
     final fiveKeys = List<String>.from(data['fiveStarKeys'] ?? const []);
     final disKeys = List<String>.from(data['dislikedKeys'] ?? const []);

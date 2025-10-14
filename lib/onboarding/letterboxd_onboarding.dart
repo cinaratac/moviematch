@@ -513,7 +513,6 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-            final cs = Theme.of(context).colorScheme;
             return SingleChildScrollView(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 24 + bottomInset),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
