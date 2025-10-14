@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../screens/public_profile_screen.dart';
 import '../services/follow_system_service.dart';
 import '../screens/chat_room_screen.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
 
 import 'dart:async';
 
@@ -86,95 +87,107 @@ class PostTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(20),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => PublicProfileScreen(uid: authorId),
-                  ),
-                );
-              },
-              child: CircleAvatar(
-                radius: 20,
-                backgroundImage: photoURL.isNotEmpty
-                    ? NetworkImage(photoURL)
-                    : null,
-                child: photoURL.isEmpty ? const Icon(Icons.person) : null,
-              ),
-            ),
-            const SizedBox(width: 12),
+            // Avatar, name, handle, follow/menu row replaced with StreamBuilder:
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    PublicProfileScreen(uid: authorId),
-                              ),
-                            );
-                          },
-                          child: Text(
-                            displayName.isEmpty ? 'Kullanıcı' : displayName,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
+                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(authorId)
+                        .snapshots(includeMetadataChanges: false),
+                    builder: (context, uSnap) {
+                      String effName = displayName;
+                      String effHandle = handle; // may be like '@lb'
+                      String effPhoto = photoURL;
 
-                      // Handle önceden geldiyse Firestore okuma yapma; boşsa tek sefer fetch et
-                      if (handle.isNotEmpty)
-                        Flexible(
-                          child: Text(
-                            '$handle · $timeLabel',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: cs.onSurfaceVariant,
+                      if (uSnap.hasData && uSnap.data!.exists) {
+                        final u = uSnap.data!.data()!;
+                        final username = (u['username'] ?? '') as String;
+                        final disp = (u['displayName'] ?? '') as String;
+                        final lb = (u['letterboxdUsername'] ?? '') as String;
+                        final p = (u['photoURL'] ?? '') as String;
+                        if (disp.isNotEmpty) effName = disp;
+                        // prefer username, else letterboxd
+                        if (username.isNotEmpty) {
+                          effHandle = '@$username';
+                        } else if (lb.isNotEmpty) {
+                          effHandle = '@$lb';
+                        }
+                        if (p.isNotEmpty) effPhoto = p;
+                      }
+
+                      return Row(
+                        children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      PublicProfileScreen(uid: authorId),
+                                ),
+                              );
+                            },
+                            child: CircleAvatar(
+                              radius: 20,
+                              backgroundImage: effPhoto.isNotEmpty
+                                  ? NetworkImage(effPhoto)
+                                  : null,
+                              child: effPhoto.isEmpty
+                                  ? const Icon(Icons.person)
+                                  : null,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        )
-                      else
-                        FutureBuilder<String?>(
-                          future: _lbHandleFor(authorId),
-                          builder: (context, snap) {
-                            final lb = (snap.data ?? '').toString();
-                            final showLb = lb.isNotEmpty;
-                            return Flexible(
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        PublicProfileScreen(uid: authorId),
+                                  ),
+                                );
+                              },
                               child: Text(
-                                '${showLb ? '@$lb · ' : ''}$timeLabel',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
+                                effName.isEmpty ? 'Kullanıcı' : effName,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
-                            );
-                          },
-                        ),
-
-                      const Spacer(),
-                      if (!isOwner)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: _FollowButton(authorId: authorId),
-                        ),
-                      _PostMenu(
-                        authorId: authorId,
-                        postId: postId,
-                        onStartChat: onStartChat,
-                        onFollow: onFollow,
-                        onReport: onReport,
-                      ),
-                    ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              (effHandle.isNotEmpty ? '$effHandle · ' : '') +
+                                  timeLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (!isOwner)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: _FollowButton(authorId: authorId),
+                            ),
+                          _PostMenu(
+                            authorId: authorId,
+                            postId: postId,
+                            onStartChat: onStartChat,
+                            onFollow: onFollow,
+                            onReport: onReport,
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 6),
                   Text(text),
@@ -236,41 +249,31 @@ class _MovieAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: cs.outlineVariant),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (posterUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 120, // smaller thumbnail
-                height: 180, // keep 2:3 ratio
-                child: Image.network(
-                  posterUrl,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      const Center(child: Icon(Icons.movie)),
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (posterUrl.isNotEmpty)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 120, // smaller thumbnail
+              height: 180, // keep 2:3 ratio
+              child: PosterImage(
+                posterUrl: posterUrl,
+                title: title,
+                fit: BoxFit.cover,
               ),
             ),
-          if (posterUrl.isNotEmpty) const SizedBox(height: 8),
-          if (title.isNotEmpty)
-            Text(
-              title,
-              style: Theme.of(context).textTheme.bodyMedium,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-        ],
-      ),
+          ),
+        if (posterUrl.isNotEmpty) const SizedBox(height: 8),
+        if (title.isNotEmpty)
+          Text(
+            title,
+            style: Theme.of(context).textTheme.bodyMedium,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+      ],
     );
   }
 }
@@ -684,7 +687,7 @@ class _ActionBarState extends State<_ActionBar> {
     }
 
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      mainAxisAlignment: MainAxisAlignment.start,
       children: [
         btn(Icons.mode_comment_outlined, _replyCount, () async {
           await showModalBottomSheet(
@@ -702,8 +705,7 @@ class _ActionBarState extends State<_ActionBar> {
             ),
           );
         }),
-        btn(Icons.repeat_outlined, widget.repostCount, () {}),
-        // LIKE button — red heart when liked, tap again to unlike
+        const SizedBox(width: 8),
         btn(
           _liked ? Icons.favorite : Icons.favorite_border,
           _likeCount,
@@ -711,11 +713,6 @@ class _ActionBarState extends State<_ActionBar> {
             _toggleLike();
           },
           highlighted: _liked,
-        ),
-        IconButton(
-          icon: const Icon(Icons.share_outlined, size: 20),
-          onPressed: () {},
-          tooltip: 'Paylaş',
         ),
       ],
     );

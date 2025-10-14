@@ -47,6 +47,15 @@ class MessagesPage extends StatelessWidget {
             return db.compareTo(da); // newest first
           });
 
+          // Hide chats that current user chose to hide (visibleFor[uid] == false)
+          docs.removeWhere((doc) {
+            final data = doc.data();
+            final vis =
+                (data['visibleFor'] as Map<String, dynamic>?) ?? const {};
+            final v = vis[uid];
+            return v is bool && v == false;
+          });
+
           if (docs.isEmpty) {
             return const _EmptyMessagesInteractive();
           }
@@ -70,34 +79,73 @@ class MessagesPage extends StatelessWidget {
               final last = (data['lastMessage'] ?? '') as String;
               final lastAt = (data['lastMessageAt'] as Timestamp?)?.toDate();
 
+              // Use cached denormalized fields from chat doc to avoid ID flicker
+              final titles =
+                  (data['titles'] as Map<String, dynamic>?) ?? const {};
+              String title = (titles[uid] as String?)?.trim() ?? '';
+
+              final photos =
+                  (data['photos'] as Map<String, dynamic>?) ?? const {};
+              String? photoURL = (photos[otherUid] as String?)?.trim();
+
               return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                 future: fs.collection('users').doc(otherUid).get(),
                 builder: (context, uSnap) {
-                  String title = otherUid;
-                  String? photoURL;
+                  String effectiveTitle = title; // prefer cached
+                  String? effectivePhoto = photoURL; // prefer cached
+
                   if (uSnap.hasData && uSnap.data!.exists) {
                     final u = uSnap.data!.data()!;
                     final username = (u['username'] ?? '') as String;
                     final displayName = (u['displayName'] ?? '') as String;
                     final lb = (u['letterboxdUsername'] ?? '') as String;
-                    photoURL = (u['photoURL'] ?? '') as String;
-                    title = username.isNotEmpty
+                    final fetchedPhoto = (u['photoURL'] ?? '') as String;
+
+                    // Compute best title from user doc
+                    final computed = username.isNotEmpty
                         ? username
                         : (displayName.isNotEmpty
                               ? displayName
                               : (lb.isNotEmpty ? '@$lb' : otherUid));
+
+                    if (effectiveTitle.isEmpty) effectiveTitle = computed;
+                    if (effectivePhoto == null || effectivePhoto.isEmpty) {
+                      effectivePhoto = fetchedPhoto.isNotEmpty
+                          ? fetchedPhoto
+                          : null;
+                    }
+
+                    // Write back denormalized fields so next build shows instantly with no flicker
+                    final needWriteTitle =
+                        (titles[uid] as String?)?.trim() != computed;
+                    final needWritePhoto =
+                        (photos[otherUid] as String?)?.trim() !=
+                        (effectivePhoto ?? '');
+                    if (needWriteTitle || needWritePhoto) {
+                      unawaited(
+                        fs.collection('chats').doc(d.id).set({
+                          if (needWriteTitle) 'titles': {uid: computed},
+                          if (needWritePhoto)
+                            'photos': {otherUid: effectivePhoto ?? ''},
+                        }, SetOptions(merge: true)),
+                      );
+                    }
                   }
 
                   return ListTile(
                     leading: CircleAvatar(
-                      backgroundImage: (photoURL != null && photoURL.isNotEmpty)
-                          ? NetworkImage(photoURL)
+                      backgroundImage:
+                          (effectivePhoto != null && effectivePhoto.isNotEmpty)
+                          ? NetworkImage(effectivePhoto)
                           : null,
-                      child: (photoURL == null || photoURL.isEmpty)
+                      child: (effectivePhoto == null || effectivePhoto.isEmpty)
                           ? const Icon(Icons.person)
                           : null,
                     ),
-                    title: Text(title, overflow: TextOverflow.ellipsis),
+                    title: Text(
+                      effectiveTitle.isNotEmpty ? effectiveTitle : '…',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     subtitle:
                         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                           stream: fs
@@ -128,7 +176,6 @@ class MessagesPage extends StatelessWidget {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // Last message sent time (live)
                         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                           stream: FirebaseFirestore.instance
                               .collection('chats')
@@ -166,8 +213,6 @@ class MessagesPage extends StatelessWidget {
                             );
                           },
                         ),
-
-                        // Unread badge
                         StreamBuilder<int>(
                           stream: ChatService.instance.unreadCountForChat(
                             d.id,
@@ -199,9 +244,7 @@ class MessagesPage extends StatelessWidget {
                       ],
                     ),
                     onTap: () async {
-                      final chatId = d.id; // chats id zaten pairId
-
-                      // Hemen odaya git (UI bloklanmasın)
+                      final chatId = d.id;
                       if (context.mounted) {
                         Navigator.push(
                           context,
@@ -209,21 +252,55 @@ class MessagesPage extends StatelessWidget {
                             builder: (_) => ChatRoomScreen(
                               chatId: chatId,
                               otherUid: otherUid,
-                              otherTitle: title,
+                              otherTitle: effectiveTitle.isNotEmpty
+                                  ? effectiveTitle
+                                  : null,
                             ),
                           ),
                         );
                       }
-
-                      // Arkadan chat stub onarımı + okundu işareti (fire-and-forget)
                       unawaited(
                         fs.collection('chats').doc(chatId).set({
                           'participants': parts,
                           'updatedAt': FieldValue.serverTimestamp(),
+                          'visibleFor': {uid: true},
                         }, SetOptions(merge: true)),
                       );
-
                       unawaited(ChatService.instance.markAsRead(chatId, uid));
+                    },
+                    onLongPress: () async {
+                      final chatId = d.id;
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text(
+                            'Bu sohbeti gizlemek istiyor musunuz?',
+                          ),
+                          content: const Text(
+                            'Yalnızca sende gizlenecek; karşı taraf etkilenmez.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('İptal'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text('Gizle'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        await fs.collection('chats').doc(chatId).set({
+                          'visibleFor': {uid: false},
+                        }, SetOptions(merge: true));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Sohbet gizlendi.')),
+                          );
+                        }
+                      }
                     },
                   );
                 },

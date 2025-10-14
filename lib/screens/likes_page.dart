@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart'
     show PublicProfileScreen;
+import 'package:fluttergirdi/widgets/poster_image.dart';
 
 class LikesPage extends StatelessWidget {
   const LikesPage({super.key});
@@ -697,14 +698,7 @@ class _PosterStrip extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: AspectRatio(
               aspectRatio: 2 / 3,
-              child: Image.network(
-                u,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Colors.grey.shade300,
-                  child: const Icon(Icons.broken_image),
-                ),
-              ),
+              child: PosterImage(posterUrl: u, title: null, fit: BoxFit.cover),
             ),
           );
         },

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
 
 // ---- Local (device) profile films model & storage (no Firebase) ----
 class LocalFilm {
@@ -116,6 +117,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid != null) {
       _svc.markAsRead(widget.chatId, myUid);
+      _svc.deleteIfEmpty(widget.chatId);
     }
     _latestSub?.cancel();
     _ctrl.dispose();
@@ -225,13 +227,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         final title = items[i]['title'] ?? '';
                         final poster = items[i]['poster'] ?? '';
                         return ListTile(
-                          leading: CircleAvatar(
-                            backgroundImage: poster.isNotEmpty
-                                ? NetworkImage(poster)
-                                : null,
-                            child: poster.isEmpty
-                                ? const Icon(Icons.movie)
-                                : null,
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: SizedBox(
+                              width: 40,
+                              height: 60,
+                              child: poster.isNotEmpty
+                                  ? PosterImage(
+                                      posterUrl: poster,
+                                      title: title,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : const ColoredBox(
+                                      color: Colors.black12,
+                                      child: Center(child: Icon(Icons.movie)),
+                                    ),
+                            ),
                           ),
                           title: Text(title.isEmpty ? 'İsimsiz Film' : title),
                           onTap: () {
@@ -462,24 +473,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                     return const SizedBox.shrink();
                                   return Padding(
                                     padding: const EdgeInsets.only(top: 8.0),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        posterUrl,
-                                        width: 220,
-                                        height: 330,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          width: 220,
-                                          height: 120,
-                                          alignment: Alignment.center,
-                                          color: Colors.black26,
-                                          child: const Icon(
-                                            Icons.broken_image,
-                                            color: Colors.white70,
-                                          ),
-                                        ),
-                                      ),
+                                    child: PosterImage(
+                                      posterUrl: posterUrl,
+                                      title: (m['movie'] is Map)
+                                          ? (Map<String, dynamic>.from(
+                                                      m['movie'],
+                                                    )['title']
+                                                    as String? ??
+                                                '')
+                                          : '',
+                                      width: 220,
+                                      height: 330,
+                                      fit: BoxFit.cover,
                                     ),
                                   );
                                 },

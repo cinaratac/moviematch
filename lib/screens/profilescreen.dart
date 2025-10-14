@@ -12,6 +12,7 @@ import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:fluttergirdi/models/shelf_target.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
 
 // --- In-memory shelf cache to avoid duplicate Firestore reads across screens ---
 class UserShelfCache {
@@ -83,9 +84,10 @@ class _CountPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textStyle = Theme.of(
-      context,
-    ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600);
+    final textStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w600,
+      color: Colors.white,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -133,7 +135,10 @@ Widget _profileHeaderSection({
             children: [
               Text(
                 shownName(user),
-                style: Theme.of(context).textTheme.titleLarge,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 6),
@@ -151,6 +156,18 @@ Widget _profileHeaderSection({
                         _CountPill(label: 'Takip', value: following),
                       ],
                     ),
+              SizedBox(height: 5),
+              if (lbUsername != null && lbUsername!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Letterboxd: @${lbUsername!}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
             ],
           ),
         ),
@@ -796,35 +813,10 @@ class _ProfilePageState extends State<ProfilePage> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(
-            f.posterUrl,
+          PosterImage(
+            posterUrl: f.posterUrl,
+            title: f.title,
             fit: BoxFit.cover,
-            gaplessPlayback: true,
-            headers: LetterboxdService.imageHeaders,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) return child;
-              return Container(
-                color: Colors.black12,
-                child: const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              );
-            },
-            errorBuilder: (_, __, ___) => Container(
-              color: Colors.grey.shade800,
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    _noYear(f.title),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ),
-              ),
-            ),
           ),
           Align(
             alignment: Alignment.bottomCenter,
@@ -855,17 +847,16 @@ class _ProfilePageState extends State<ProfilePage> {
         final hasPoster = list.isNotEmpty && (list.first.posterUrl).isNotEmpty;
         if (!hasPoster) return const SizedBox.shrink();
         final url = list.first.posterUrl;
-        return Positioned.fill(
+        return SizedBox.expand(
           child: Stack(
             fit: StackFit.expand,
             children: [
               ImageFiltered(
                 imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: Image.network(
-                  url,
+                child: PosterImage(
+                  posterUrl: url,
+                  title: list.first.title,
                   fit: BoxFit.cover,
-                  headers: LetterboxdService.imageHeaders,
-                  errorBuilder: (_, __, ___) => Container(color: Colors.black),
                 ),
               ),
               // dark scrim for contrast
@@ -987,9 +978,15 @@ class _ProfilePageState extends State<ProfilePage> {
           height: 180,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: films.length,
+            itemCount: films.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
+              if (i == films.length) {
+                return const AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _AddPosterTile(target: ShelfTarget.watchlist),
+                );
+              }
               final film = films[i];
               final poster =
                   (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
@@ -1003,13 +1000,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     fit: StackFit.expand,
                     children: [
                       poster.isNotEmpty
-                          ? Image.network(
-                              poster,
+                          ? PosterImage(
+                              posterUrl: poster,
+                              title: title,
                               fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                              headers: LetterboxdService.imageHeaders,
-                              errorBuilder: (_, __, ___) =>
-                                  Container(color: Colors.grey.shade800),
                             )
                           : Container(color: Colors.grey.shade800),
                       if (title.isNotEmpty)
@@ -1104,9 +1098,20 @@ class _ProfilePageState extends State<ProfilePage> {
           height: 180,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: films.length,
+            itemCount: films.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
+              if (i == films.length) {
+                final ShelfTarget target = fieldName == 'favoritesKeys'
+                    ? ShelfTarget.favorites
+                    : fieldName == 'fiveStarKeys'
+                    ? ShelfTarget.fiveStar
+                    : ShelfTarget.disliked;
+                return AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _AddPosterTile(target: target),
+                );
+              }
               final film = films[i];
               final poster =
                   (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
@@ -1120,13 +1125,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     fit: StackFit.expand,
                     children: [
                       poster.isNotEmpty
-                          ? Image.network(
-                              poster,
+                          ? PosterImage(
+                              posterUrl: poster,
+                              title: title,
                               fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                              headers: LetterboxdService.imageHeaders,
-                              errorBuilder: (_, __, ___) =>
-                                  Container(color: Colors.grey.shade800),
                             )
                           : Container(color: Colors.grey.shade800),
                       if (title.isNotEmpty)
@@ -1282,12 +1284,6 @@ class _ProfilePageState extends State<ProfilePage> {
                 'Aktiviteler',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Yenile',
-                icon: const Icon(Icons.refresh),
-                onPressed: _loadingActivities ? null : _loadActivities,
-              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -1340,18 +1336,12 @@ class _ProfilePageState extends State<ProfilePage> {
                       if ((a.posterUrl).isNotEmpty) ...[
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            a.posterUrl,
+                          child: PosterImage(
+                            posterUrl: a.posterUrl,
+                            title: a.title,
                             width: 44,
                             height: 66,
                             fit: BoxFit.cover,
-                            headers: LetterboxdService.imageHeaders,
-                            errorBuilder: (_, __, ___) => Container(
-                              width: 44,
-                              height: 66,
-                              color: Colors.grey.shade800,
-                              child: const Icon(Icons.movie),
-                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1464,11 +1454,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   Text('Letterboxd bağlı değil'),
                 ],
               ),
-            )
-          else
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Chip(label: Text('Letterboxd: @$_lbUsername')),
             ),
           const SizedBox(height: 12),
           Builder(
@@ -1535,135 +1520,62 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           if (_lbUsername != null) ...[
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Text(
-                  'Favori Filmler',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 28,
-                  child: IconButton(
-                    tooltip: 'Film Ekle',
-                    icon: const Icon(
-                      Icons.add,
-                      size: 20,
-                      color: Colors.white70,
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              SearchMoviePage(target: ShelfTarget.favorites),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Text(
+                'Favori Filmler',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
+            const SizedBox(height: 8),
             _shelfSectionFromUserField(
               'favoritesKeys',
               emptyText: 'Favori film bulunamadı.',
               maxItems: 30,
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Text(
-                  'Sevdiği Filmler',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(width: 8),
-                // "Film Ekle" button
-                SizedBox(
-                  height: 28,
-                  child: IconButton(
-                    tooltip: 'Film Ekle',
-                    icon: const Icon(
-                      Icons.add,
-                      size: 20,
-                      color: Colors.white70,
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              SearchMoviePage(target: ShelfTarget.fiveStar),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+              child: Text(
+                'Sevdiği Filmler',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
+            const SizedBox(height: 8),
             _shelfSectionFromUserField(
               'fiveStarKeys',
               emptyText: '5★ film bulunamadı.',
               maxItems: 30,
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Text(
-                  'Sevmediği Filmler',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 28,
-                  child: IconButton(
-                    tooltip: 'Film Ekle',
-                    icon: const Icon(
-                      Icons.add,
-                      size: 20,
-                      color: Colors.white70,
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              SearchMoviePage(target: ShelfTarget.disliked),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+              child: Text(
+                'Sevmediği Filmler',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
+            const SizedBox(height: 8),
             _shelfSectionFromUserField(
               'dislikedKeys',
               emptyText: 'Sevmediği film bulunamadı.',
               maxItems: 30,
             ),
           ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Text('Watchlist', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: 28,
-                child: IconButton(
-                  tooltip: 'Film Ekle',
-                  icon: const Icon(Icons.add, size: 20, color: Colors.white70),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            SearchMoviePage(target: ShelfTarget.watchlist),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+            child: Text(
+              'Watchlist',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
           ),
+          const SizedBox(height: 8),
           _watchlistSectionFromKeys(
             List<dynamic>.from(
               (_lastUserData?['watchlistKeys'] ?? const []),
@@ -1694,70 +1606,70 @@ class _ProfilePageState extends State<ProfilePage> {
         return DefaultTabController(
           length: 2,
           child: Scaffold(
-            appBar: AppBar(
-              title: const Text('Profil'),
-              backgroundColor: Colors.black.withValues(alpha: 0.20),
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              surfaceTintColor: Colors.transparent,
-              actions: [
-                IconButton(
-                  tooltip: 'Düzenle',
-                  icon: const Icon(Icons.edit_outlined),
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            EditProfilePage(initialUserData: _lastUserData),
-                      ),
-                    );
-                  },
-                ),
-                IconButton(
-                  tooltip: 'Yenile',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () async {
-                    await _refreshFavorites();
-                    await _loadActivities();
-                    await _bootstrapCounts();
-                  },
-                ),
-                PopupMenuButton<String>(
-                  onSelected: (value) async {
-                    if (value == 'settings') {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const SettingsPage()),
-                      );
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: 'settings',
-                      child: ListTile(
-                        leading: Icon(Icons.settings_outlined),
-                        title: Text('Ayarlar'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-              // No bottom: TabBar here - TabBar will be under header in body
-            ),
+            // AppBar removed for sliver app bar behavior
             extendBodyBehindAppBar: true,
             body: NestedScrollView(
               headerSliverBuilder: (context, innerBoxIsScrolled) {
                 return [
+                  SliverAppBar(
+                    floating: true,
+                    snap: true,
+                    backgroundColor: Colors.black.withOpacity(0.8),
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    automaticallyImplyLeading: false,
+                    actions: [
+                      IconButton(
+                        tooltip: 'Düzenle',
+                        icon: const Icon(Icons.edit_outlined),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => EditProfilePage(
+                                initialUserData: _lastUserData,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      IconButton(
+                        tooltip: 'Yenile',
+                        icon: const Icon(Icons.refresh),
+                        onPressed: () async {
+                          await _refreshFavorites();
+                          await _loadActivities();
+                          await _bootstrapCounts();
+                        },
+                      ),
+                      PopupMenuButton<String>(
+                        onSelected: (value) async {
+                          if (value == 'settings') {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const SettingsPage(),
+                              ),
+                            );
+                          }
+                        },
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'settings',
+                            child: ListTile(
+                              leading: Icon(Icons.settings_outlined),
+                              title: Text('Ayarlar'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                   SliverToBoxAdapter(
                     child: Stack(
                       children: [
                         // Backdrop behind header + tab bar
                         SizedBox(
-                          height:
-                              MediaQuery.of(context).padding.top +
-                              kToolbarHeight +
-                              36 +
-                              12 +
-                              36, // appbar + header + spacing + tabbar approx
+                          height: MediaQuery.of(context).size.height * 0.28,
                           child: _blurBackdrop(),
                         ),
                         Column(
@@ -1805,12 +1717,8 @@ class _ProfilePageState extends State<ProfilePage> {
                                 unselectedLabelStyle: Theme.of(
                                   context,
                                 ).textTheme.titleSmall,
-                                labelColor: Theme.of(
-                                  context,
-                                ).colorScheme.onSurface,
-                                unselectedLabelColor: Theme.of(
-                                  context,
-                                ).colorScheme.onSurface.withValues(alpha: 0.7),
+                                labelColor: Colors.white,
+                                unselectedLabelColor: Colors.white70,
                                 tabs: const [
                                   Tab(text: 'Filmler'),
                                   Tab(text: 'Aktiviteler'),
@@ -1891,6 +1799,32 @@ class _AddFilmTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// Poster-like "+" tile to append at the end of horizontal lists
+class _AddPosterTile extends StatelessWidget {
+  final ShelfTarget target;
+  const _AddPosterTile({required this.target});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)),
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          color: Colors.black26,
+          alignment: Alignment.center,
+          child: const Icon(Icons.add, size: 40, color: Colors.white70),
         ),
       ),
     );

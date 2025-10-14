@@ -6,6 +6,9 @@ import 'package:fluttergirdi/screens/search_profiles_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart'; // for UserShelfCache
 import 'package:fluttergirdi/services/feed_service.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/widgets/recommended_users.dart';
+import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FeedPage extends StatefulWidget {
@@ -226,13 +229,22 @@ class _FeedPageState extends State<FeedPage> {
                         final title = items[i]['title'] ?? '';
                         final poster = items[i]['poster'] ?? '';
                         return ListTile(
-                          leading: CircleAvatar(
-                            backgroundImage: poster.isNotEmpty
-                                ? NetworkImage(poster)
-                                : null,
-                            child: poster.isEmpty
-                                ? const Icon(Icons.movie)
-                                : null,
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: SizedBox(
+                              width: 40,
+                              height: 60,
+                              child: poster.isNotEmpty
+                                  ? PosterImage(
+                                      posterUrl: poster,
+                                      title: title,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : const ColoredBox(
+                                      color: Colors.black12,
+                                      child: Center(child: Icon(Icons.movie)),
+                                    ),
+                            ),
                           ),
                           title: Text(title.isEmpty ? 'İsimsiz Film' : title),
                           onTap: () {
@@ -273,173 +285,249 @@ class _FeedPageState extends State<FeedPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leadingWidth: 160,
-        toolbarHeight: 40,
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 12),
-          child: Align(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          toolbarHeight: 60,
+          titleSpacing: 12,
+          title: Align(
             alignment: Alignment.centerLeft,
-            child: Text(
-              '/Cinematch',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontFamily: 'Inter',
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
-                color: Theme.of(context).colorScheme.primary,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 240),
+              child: InkWell(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SearchProfilesScreen(),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(24),
+                child: Container(
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Icon(
+                        Icons.search,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Kullanıcı Adı Ara',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-        title: Text(
-          'Feed',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          iconTheme: IconThemeData(
             color: Theme.of(context).colorScheme.onSurface,
           ),
-        ),
-        iconTheme: IconThemeData(
-          color: Theme.of(context).colorScheme.onSurface,
-        ),
-        actionsIconTheme: IconThemeData(
-          color: Theme.of(context).colorScheme.onSurface,
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SearchProfilesScreen()),
-              );
-            },
+          actionsIconTheme: IconThemeData(
+            color: Theme.of(context).colorScheme.onSurface,
           ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) async {
-              if (value == 'settings') {
-                Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'settings',
-                child: ListTile(
-                  leading: Icon(Icons.settings_outlined),
-                  title: Text('Ayarlar'),
-                ),
-              ),
-            ],
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Divider(
-            height: 1,
-            thickness: 1,
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        color: Theme.of(context).colorScheme.primary,
-        backgroundColor: Theme.of(context).colorScheme.surfaceVariant,
-        child: _initialLoading
-            ? Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation(
-                    Theme.of(context).colorScheme.primary,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () {
+                // TODO: Navigate to notifications screen when available
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Bildirimler yakında.')),
+                );
+              },
+            ),
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              onSelected: (value) async {
+                if (value == 'settings') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsPage()),
+                  );
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'settings',
+                  child: ListTile(
+                    leading: Icon(Icons.settings_outlined),
+                    title: Text('Ayarlar'),
                   ),
                 ),
-              )
-            : ListView.separated(
-                controller: _listController,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, i) {
-                  // Composer at index 0
-                  if (i == 0) {
-                    return Column(
-                      children: [
-                        _Composer(
-                          controller: _controller,
-                          focusNode: _focusNode,
-                          maxChars: _maxChars,
-                          selectedMovie: _selectedMovie,
-                          onPickMovie: _pickMovie,
-                          onClearMovie: () {
-                            setState(() => _selectedMovie = null);
-                          },
-                          onSend: (text) async {
-                            await _createPost(text);
-                            _controller.clear();
-                            _focusNode.requestFocus();
-                          },
-                        ),
-                        const Divider(height: 1),
-                      ],
-                    );
-                  }
-                  // Loading indicator at the very end when paging
-                  if (_loadingMore && i == _posts.length + 1) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          valueColor: AlwaysStoppedAnimation(
-                            Theme.of(context).colorScheme.primary,
-                          ),
+              ],
+            ),
+          ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(44),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TabBar(
+                  isScrollable: false,
+                  labelStyle: Theme.of(context).textTheme.labelLarge,
+                  labelColor: Theme.of(context).colorScheme.onSurface,
+                  unselectedLabelColor: Theme.of(
+                    context,
+                  ).colorScheme.onSurfaceVariant,
+                  indicatorColor: Theme.of(context).colorScheme.primary,
+                  tabs: const [
+                    Tab(text: 'Popüler'),
+                    Tab(text: 'Takip Edilenler'),
+                  ],
+                ),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // 1) Popüler: mevcut akış, hiçbir şey değişmiyor
+            RefreshIndicator(
+              onRefresh: _refresh,
+              color: Theme.of(context).colorScheme.primary,
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
+              child: _initialLoading
+                  ? Center(
+                      child: CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation(
+                          Theme.of(context).colorScheme.primary,
                         ),
                       ),
-                    );
-                  }
-                  final d = _posts[i - 1];
-                  final m = d.data() ?? const <String, dynamic>{};
-                  final createdAt = (m['createdAt'] as Timestamp?);
-                  final timeLabel = createdAt == null
-                      ? ''
-                      : _timeAgo(createdAt.toDate());
-                  final movieTitle =
-                      ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '')
-                          .toString();
-                  final moviePoster =
-                      ((m['moviePoster'] ??
-                                  (m['movie']?['poster'] ??
-                                      m['movie']?['posterUrl'])) ??
-                              '')
-                          .toString();
-                  return PostTile(
-                    postId: d.id,
-                    authorId: (m['authorId'] ?? '') as String,
-                    displayName: (m['displayName'] ?? '') as String,
-                    handle: (m['handle'] ?? '') as String,
-                    photoURL: (m['photoURL'] ?? '') as String,
-                    timeLabel: timeLabel,
-                    movieTitle: movieTitle.isEmpty ? null : movieTitle,
-                    moviePoster: moviePoster.isEmpty ? null : moviePoster,
-                    text: (m['text'] ?? '') as String,
-                    likeCount: (m['likeCount'] ?? 0) is int
-                        ? m['likeCount'] as int
-                        : ((m['likeCount'] ?? 0) as num).toInt(),
-                    replyCount: (m['replyCount'] ?? 0) is int
-                        ? m['replyCount'] as int
-                        : ((m['replyCount'] ?? 0) as num).toInt(),
-                    repostCount: (m['repostCount'] ?? 0) is int
-                        ? m['repostCount'] as int
-                        : ((m['repostCount'] ?? 0) as num).toInt(),
-                    onToggleLike: _toggleLike,
-                    onStartChat: (String _) async {},
-                    onFollow: _follow,
-                    onReport: _reportPost,
-                  );
-                },
+                    )
+                  : ListView.separated(
+                      controller: _listController,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: _posts.length + (_loadingMore ? 1 : 0),
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, i) {
+                        // Loading indicator at the very end when paging
+                        if (_loadingMore && i == _posts.length) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation(
+                                  Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                        final d = _posts[i];
+                        final m = d.data() ?? const <String, dynamic>{};
+                        final createdAt = (m['createdAt'] as Timestamp?);
+                        final timeLabel = createdAt == null
+                            ? ''
+                            : _timeAgo(createdAt.toDate());
+                        final movieTitle =
+                            ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '')
+                                .toString();
+                        final moviePoster =
+                            ((m['moviePoster'] ??
+                                        (m['movie']?['poster'] ??
+                                            m['movie']?['posterUrl'])) ??
+                                    '')
+                                .toString();
+                        final postWidget = PostTile(
+                          postId: d.id,
+                          authorId: (m['authorId'] ?? '') as String,
+                          displayName: (m['displayName'] ?? '') as String,
+                          handle: (m['handle'] ?? '') as String,
+                          photoURL: (m['photoURL'] ?? '') as String,
+                          timeLabel: timeLabel,
+                          movieTitle: movieTitle.isEmpty ? null : movieTitle,
+                          moviePoster: moviePoster.isEmpty ? null : moviePoster,
+                          text: (m['text'] ?? '') as String,
+                          likeCount: (m['likeCount'] ?? 0) is int
+                              ? m['likeCount'] as int
+                              : ((m['likeCount'] ?? 0) as num).toInt(),
+                          replyCount: (m['replyCount'] ?? 0) is int
+                              ? m['replyCount'] as int
+                              : ((m['replyCount'] ?? 0) as num).toInt(),
+                          repostCount: (m['repostCount'] ?? 0) is int
+                              ? m['repostCount'] as int
+                              : ((m['repostCount'] ?? 0) as num).toInt(),
+                          onToggleLike: _toggleLike,
+                          onStartChat: (String _) async {},
+                          onFollow: _follow,
+                          onReport: _reportPost,
+                        );
+
+                        final shouldInjectAfterThis =
+                            (i == 3) ||
+                            (i == _posts.length - 1 && _posts.length < 4);
+
+                        if (shouldInjectAfterThis) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              postWidget,
+                              const SizedBox(height: 12),
+                              const RecommendedUsers(
+                                title: 'Önerilen kullanıcılar',
+                                limit: 12,
+                              ),
+                            ],
+                          );
+                        }
+
+                        return postWidget;
+                      },
+                    ),
+            ),
+
+            // 2) Takip Edilenler: basit takip feed'i
+            const _FollowingFeed(),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (ctx) => _ComposePostPage(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  maxChars: _maxChars,
+                  selectedMovie: _selectedMovie,
+                  onPickMovie: _pickMovie,
+                  onClearMovie: () => setState(() => _selectedMovie = null),
+                  onSend: (text) async {
+                    await _createPost(text);
+                    _controller.clear();
+                    _focusNode.requestFocus();
+                    if (!mounted) return;
+                    Navigator.of(context).pop();
+                  },
+                ),
               ),
+            );
+          },
+          child: const Icon(Icons.edit_note_rounded),
+        ),
       ),
     );
   }
@@ -614,8 +702,9 @@ class _Composer extends StatelessWidget {
                             if ((selectedMovie!['poster'] ?? '').isNotEmpty)
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  selectedMovie!['poster']!,
+                                child: PosterImage(
+                                  posterUrl: selectedMovie!['poster']!,
+                                  title: selectedMovie!['title'],
                                   width: 44,
                                   height: 66,
                                   fit: BoxFit.cover,
@@ -684,6 +773,258 @@ class _Composer extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _ComposePostPage extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final int maxChars;
+  final Map<String, String>? selectedMovie;
+  final VoidCallback onPickMovie;
+  final VoidCallback onClearMovie;
+  final void Function(String) onSend;
+
+  const _ComposePostPage({
+    required this.controller,
+    required this.focusNode,
+    required this.maxChars,
+    required this.selectedMovie,
+    required this.onPickMovie,
+    required this.onClearMovie,
+    required this.onSend,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Yeni Gönderi')),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
+        children: [
+          _Composer(
+            controller: controller,
+            focusNode: focusNode,
+            maxChars: maxChars,
+            selectedMovie: selectedMovie,
+            onPickMovie: onPickMovie,
+            onClearMovie: onClearMovie,
+            onSend: onSend,
+          ),
+          const Divider(height: 1),
+        ],
+      ),
+    );
+  }
+}
+
+class _FollowingFeed extends StatefulWidget {
+  const _FollowingFeed({super.key});
+
+  @override
+  State<_FollowingFeed> createState() => _FollowingFeedState();
+}
+
+class _FollowingFeedState extends State<_FollowingFeed> {
+  bool _loading = true;
+  List<DocumentSnapshot<Map<String, dynamic>>> _items = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final me = FirebaseAuth.instance.currentUser?.uid;
+      if (me == null) {
+        setState(() {
+          _items = [];
+          _loading = false;
+        });
+        return;
+      }
+
+      // 1) following list
+      final followingQs = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(me)
+          .collection('following')
+          .limit(500)
+          .get();
+      final uids = followingQs.docs.map((d) => d.id).toList();
+
+      if (uids.isEmpty) {
+        setState(() {
+          _items = [];
+          _loading = false;
+        });
+        return;
+      }
+
+      // 2) fetch posts in batches using whereIn (<=10 per batch), then sort by createdAt desc
+      final List<DocumentSnapshot<Map<String, dynamic>>> acc = [];
+      for (var i = 0; i < uids.length; i += 10) {
+        final chunk = uids.sublist(
+          i,
+          i + 10 > uids.length ? uids.length : i + 10,
+        );
+        final qs = await FirebaseFirestore.instance
+            .collection('posts')
+            .where('authorId', whereIn: chunk)
+            .limit(50)
+            .get(const GetOptions(source: Source.server));
+        acc.addAll(qs.docs);
+      }
+
+      // de-dup and sort
+      final map = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      for (final d in acc) {
+        map[d.id] = d;
+      }
+      final list = map.values.toList();
+      list.sort((a, b) {
+        final ma = a.data() ?? const <String, dynamic>{};
+        final mb = b.data() ?? const <String, dynamic>{};
+        final ta = (ma['createdAt'] as Timestamp?);
+        final tb = (mb['createdAt'] as Timestamp?);
+        final da = ta?.toDate();
+        final db = tb?.toDate();
+        if (da == null && db == null) return 0;
+        if (da == null) return 1;
+        if (db == null) return -1;
+        return db.compareTo(da);
+      });
+
+      setState(() {
+        _items = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _refresh() => _load();
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation(
+            Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      );
+    }
+
+    if (_items.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const GreenEyesCharacter(size: 180),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Birilerini takip etmelisin',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: _items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (context, i) {
+          final d = _items[i];
+          final m = d.data() ?? const <String, dynamic>{};
+          final createdAt = (m['createdAt'] as Timestamp?);
+          final timeLabel = createdAt == null
+              ? ''
+              : _FeedPageState._timeAgo(createdAt.toDate());
+          final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '')
+              .toString();
+          final moviePoster =
+              ((m['moviePoster'] ??
+                          (m['movie']?['poster'] ??
+                              m['movie']?['posterUrl'])) ??
+                      '')
+                  .toString();
+
+          return PostTile(
+            postId: d.id,
+            authorId: (m['authorId'] ?? '') as String,
+            displayName: (m['displayName'] ?? '') as String,
+            handle: (m['handle'] ?? '') as String,
+            photoURL: (m['photoURL'] ?? '') as String,
+            timeLabel: timeLabel,
+            movieTitle: movieTitle.isEmpty ? null : movieTitle,
+            moviePoster: moviePoster.isEmpty ? null : moviePoster,
+            text: (m['text'] ?? '') as String,
+            likeCount: (m['likeCount'] ?? 0) is int
+                ? m['likeCount'] as int
+                : ((m['likeCount'] ?? 0) as num).toInt(),
+            replyCount: (m['replyCount'] ?? 0) is int
+                ? m['replyCount'] as int
+                : ((m['replyCount'] ?? 0) as num).toInt(),
+            repostCount: (m['repostCount'] ?? 0) is int
+                ? m['repostCount'] as int
+                : ((m['repostCount'] ?? 0) as num).toInt(),
+            onToggleLike: (postId, like) =>
+                FeedService().toggleLike(postId: postId, like: like),
+            onStartChat: (String _) async {},
+            onFollow: (uid) async {
+              final me = FirebaseAuth.instance.currentUser?.uid;
+              if (me == null || me == uid) return;
+              await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(me)
+                  .collection('following')
+                  .doc(uid)
+                  .set({
+                    'createdAt': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true));
+            },
+            onReport: (postId) async {
+              final me = FirebaseAuth.instance.currentUser?.uid;
+              if (me == null) return;
+              await FirebaseFirestore.instance
+                  .collection('reports')
+                  .doc('${postId}_$me')
+                  .set({
+                    'type': 'post',
+                    'postId': postId,
+                    'by': me,
+                    'createdAt': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true));
+            },
+          );
+        },
+      ),
     );
   }
 }

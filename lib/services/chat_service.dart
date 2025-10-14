@@ -202,4 +202,17 @@ class ChatService {
   Future<void> stopChatNotifications() async {
     await NotificationService.I.dispose();
   }
+
+  /// Deletes the chat document if it has no messages.
+  Future<void> deleteIfEmpty(String chatId) async {
+    try {
+      final chatRef = _fs.collection('chats').doc(chatId);
+      final msgSnap = await chatRef.collection('messages').limit(1).get();
+      if (msgSnap.docs.isEmpty) {
+        await chatRef.delete();
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
 }

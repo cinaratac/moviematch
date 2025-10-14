@@ -10,6 +10,7 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/likes_page.dart';
 import 'package:fluttergirdi/screens/passes_page.dart';
 import 'package:swipe_cards/swipe_cards.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
 
 // Simple in-memory cache to persist match list within app session
 class _MatchListSessionCache {
@@ -1181,19 +1182,10 @@ class _Grid extends StatelessWidget {
                   aspectRatio: 2 / 3,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      film.posterUrl,
+                    child: PosterImage(
+                      posterUrl: film.posterUrl,
+                      title: film.title,
                       fit: BoxFit.cover,
-                      cacheWidth: 300, // ~2x of 150px width
-                      filterQuality: FilterQuality.low,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerHighest,
-                        child: const Center(
-                          child: Icon(Icons.image_not_supported),
-                        ),
-                      ),
                     ),
                   ),
                 ),
@@ -1384,16 +1376,7 @@ class _PosterStrip extends StatelessWidget {
             aspectRatio: 2 / 3,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                u,
-                fit: BoxFit.cover,
-                cacheWidth: 240, // ~120px * 2 devicePixelRatio
-                filterQuality: FilterQuality.low,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: const Center(child: Icon(Icons.image_not_supported)),
-                ),
-              ),
+              child: PosterImage(posterUrl: u, title: null, fit: BoxFit.cover),
             ),
           );
         },

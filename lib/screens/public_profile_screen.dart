@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
 
@@ -31,13 +32,20 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   bool _isBlocked = false; // I blocked them
   bool _hasBlockedMe = false; // They blocked me
 
+  // Generic cache to avoid re-fetching the same catalog docs during rebuilds
+  final Map<String, Future<List<Map<String, dynamic>?>>> _catalogFutureCache =
+      {};
+
   /// Blurred full-screen backdrop from the first favorite *catalog* poster (Firestore)
   Widget _blurBackdropFromKeys(List<String> favKeys) {
     if (favKeys.isEmpty) return const SizedBox.shrink();
     final firstKey = favKeys.first.trim();
     if (firstKey.isEmpty) return const SizedBox.shrink();
+    final cacheKey = 'backdrop:$firstKey';
     return FutureBuilder<List<Map<String, dynamic>?>>(
-      future: _fetchCatalogForKeys([firstKey]),
+      future: (_catalogFutureCache[cacheKey] ??= _fetchCatalogForKeys([
+        firstKey,
+      ])),
       builder: (context, snap) {
         final m = (snap.data != null && snap.data!.isNotEmpty)
             ? snap.data!.first
@@ -52,11 +60,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             children: [
               ImageFiltered(
                 imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: Image.network(
-                  url,
+                child: PosterImage(
+                  posterUrl: url,
+                  title: _catalogTitle(m ?? const {}),
                   fit: BoxFit.cover,
-                  headers: _lbImageHeaders,
-                  errorBuilder: (_, __, ___) => Container(color: Colors.black),
                 ),
               ),
               Container(
@@ -101,7 +108,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         Text(title, style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         FutureBuilder<List<Map<String, dynamic>?>>(
-          future: _fetchCatalogForKeys(limited),
+          future: (() {
+            final k = 'shelf:${title.toLowerCase()}:${limited.join('|')}';
+            return _catalogFutureCache[k] ??= _fetchCatalogForKeys(limited);
+          })(),
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const SizedBox(
@@ -139,17 +149,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                         fit: StackFit.expand,
                         children: [
                           poster.isNotEmpty
-                              ? Image.network(
-                                  poster,
-                                  headers: _lbImageHeaders,
+                              ? PosterImage(
+                                  posterUrl: poster,
+                                  title: t,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
-                                    color: Colors.black26,
-                                    alignment: Alignment.center,
-                                    child: const Icon(
-                                      Icons.image_not_supported,
-                                    ),
-                                  ),
                                 )
                               : Container(color: Colors.black26),
                           if (t.isNotEmpty)
@@ -343,18 +346,28 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
     // Listen local follow/unfollow events to update UI instantly without extra reads
     _followSub = FollowSystemService.I.events.listen((e) {
-      if (e.targetUid == widget.uid) {
-        if (!mounted) return;
+      if (e.targetUid != widget.uid) return;
+      if (!mounted) return;
+      int? newFollowers = _followersCount;
+      bool? newIsFollowing = _isFollowing;
+
+      // Update follower count only if we already have a value
+      if (newFollowers != null) {
+        newFollowers = (newFollowers + (e.followed ? 1 : -1));
+        if (newFollowers < 0) newFollowers = 0;
+      }
+
+      // If the actor is me, reflect following state immediately
+      if (FirebaseAuth.instance.currentUser?.uid == e.actorUid) {
+        newIsFollowing = e.followed;
+      }
+
+      final changed =
+          (newFollowers != _followersCount) || (newIsFollowing != _isFollowing);
+      if (changed) {
         setState(() {
-          // Update follower count of the viewed profile
-          if (_followersCount != null) {
-            _followersCount = (_followersCount ?? 0) + (e.followed ? 1 : -1);
-            if (_followersCount! < 0) _followersCount = 0;
-          }
-          // If the actor is me, reflect following state immediately
-          if (FirebaseAuth.instance.currentUser?.uid == e.actorUid) {
-            _isFollowing = e.followed;
-          }
+          _followersCount = newFollowers;
+          _isFollowing = newIsFollowing;
         });
       }
     });
@@ -363,7 +376,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   Future<void> _loadFollowing() async {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid == null || myUid == widget.uid) {
-      setState(() => _isFollowing = null);
+      if (_isFollowing != null) setState(() => _isFollowing = null);
       return;
     }
     try {
@@ -374,7 +387,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           .doc(widget.uid)
           .get(const GetOptions(source: Source.server));
       if (!mounted) return;
-      setState(() => _isFollowing = snap.exists);
+      final v = snap.exists;
+      if (_isFollowing != v) setState(() => _isFollowing = v);
     } catch (_) {
       try {
         final snap = await FirebaseFirestore.instance
@@ -384,10 +398,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             .doc(widget.uid)
             .get(const GetOptions(source: Source.cache));
         if (!mounted) return;
-        setState(() => _isFollowing = snap.exists);
+        final v = snap.exists;
+        if (_isFollowing != v) setState(() => _isFollowing = v);
       } catch (_) {
         if (!mounted) return;
-        setState(() => _isFollowing = null);
+        if (_isFollowing != null) setState(() => _isFollowing = null);
       }
     }
   }
@@ -421,10 +436,14 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         widget.uid,
       );
       if (!mounted) return;
-      setState(() {
-        _followersCount = followers;
-        _followingCount = following;
-      });
+      final changeFollowers = _followersCount != followers;
+      final changeFollowing = _followingCount != following;
+      if (changeFollowers || changeFollowing) {
+        setState(() {
+          _followersCount = followers;
+          _followingCount = following;
+        });
+      }
     } catch (_) {
       // leave as nulls; UI handles gracefully
     }
@@ -709,17 +728,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               fit: StackFit.expand,
                               children: [
                                 poster.isNotEmpty
-                                    ? Image.network(
-                                        poster,
-                                        headers: _lbImageHeaders,
+                                    ? PosterImage(
+                                        posterUrl: poster,
+                                        title: title,
                                         fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Container(
-                                          color: Colors.black26,
-                                          alignment: Alignment.center,
-                                          child: const Icon(
-                                            Icons.image_not_supported,
-                                          ),
-                                        ),
                                       )
                                     : Container(color: Colors.black26),
                                 if (title.isNotEmpty)
@@ -847,8 +859,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Profil'),
-          backgroundColor: Colors.black.withValues(alpha: 0.20),
+          // title removed so the app bar has no title text
+          backgroundColor: Colors.transparent,
           elevation: 0,
           scrolledUnderElevation: 0,
           surfaceTintColor: Colors.transparent,
@@ -905,7 +917,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         ),
         extendBodyBehindAppBar: true,
         body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: doc.snapshots(),
+          stream: doc.snapshots(includeMetadataChanges: false),
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
@@ -936,7 +948,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                           height:
                               MediaQuery.of(context).padding.top +
                               kToolbarHeight +
-                              140,
+                              165,
                           child: Stack(
                             children: [
                               _blurBackdropFromKeys(
@@ -1114,24 +1126,25 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 12),
-                              if (lb.isNotEmpty)
-                                Wrap(
-                                  alignment: WrapAlignment.spaceBetween,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  runAlignment: WrapAlignment.center,
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
+                              const SizedBox(height: 17),
+                              Wrap(
+                                alignment: WrapAlignment.spaceBetween,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                runAlignment: WrapAlignment.center,
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  if (lb.isNotEmpty)
                                     Text(
                                       'Letterboxd: @$lb',
                                       style: Theme.of(
                                         context,
                                       ).textTheme.bodyMedium,
                                     ),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (lb.isNotEmpty)
                                         TextButton.icon(
                                           onPressed: () => _openUrl(
                                             'https://letterboxd.com/$lb/',
@@ -1139,82 +1152,83 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                           icon: const Icon(Icons.open_in_new),
                                           label: const Text('Profili aç'),
                                         ),
-                                        const SizedBox(width: 3),
-                                        if (!_isBlocked && !_hasBlockedMe)
-                                          TextButton.icon(
-                                            onPressed: () async {
-                                              final myUid = FirebaseAuth
+                                      const SizedBox(width: 3),
+                                      if (!_isBlocked &&
+                                          !_hasBlockedMe &&
+                                          FirebaseAuth
                                                   .instance
-                                                  .currentUser!
-                                                  .uid;
-                                              await _loadBlockStatus();
-                                              if (!mounted) return;
-                                              if (_isBlocked || _hasBlockedMe) {
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                      'Mesajlaşma engellendi.',
-                                                    ),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              final chatId = await ChatService
-                                                  .instance
-                                                  .getOrCreateChat(
-                                                    myUid,
-                                                    widget.uid,
-                                                  );
-                                              if (!context.mounted) return;
-                                              Navigator.push(
+                                                  .currentUser
+                                                  ?.uid !=
+                                              widget.uid)
+                                        TextButton.icon(
+                                          onPressed: () async {
+                                            final myUid = FirebaseAuth
+                                                .instance
+                                                .currentUser
+                                                ?.uid;
+                                            if (myUid == null) {
+                                              ScaffoldMessenger.of(
                                                 context,
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      ChatRoomScreen(
-                                                        chatId: chatId,
-                                                        otherUid: widget.uid,
-                                                      ),
+                                              ).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text(
+                                                    'Giriş yapmalısın.',
+                                                  ),
                                                 ),
                                               );
-                                            },
-                                            icon: const Icon(Icons.message),
-                                            label: const Text('Mesaj gönder'),
+                                              return;
+                                            }
+                                            final chatId = await ChatService
+                                                .instance
+                                                .getOrCreateChat(
+                                                  myUid,
+                                                  widget.uid,
+                                                );
+                                            if (!context.mounted) return;
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => ChatRoomScreen(
+                                                  chatId: chatId,
+                                                  otherUid: widget.uid,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          icon: const Icon(Icons.message),
+                                          label: const Text('Mesaj gönder'),
+                                        ),
+                                      if (FirebaseAuth
+                                                  .instance
+                                                  .currentUser
+                                                  ?.uid !=
+                                              null &&
+                                          FirebaseAuth
+                                                  .instance
+                                                  .currentUser!
+                                                  .uid !=
+                                              widget.uid) ...[
+                                        const SizedBox(width: 3),
+                                        TextButton.icon(
+                                          onPressed: _followBusy
+                                              ? null
+                                              : _toggleFollow,
+                                          icon: _isFollowing == true
+                                              ? const Icon(Icons.check)
+                                              : const Icon(
+                                                  Icons.person_add_alt_1,
+                                                ),
+                                          label: Text(
+                                            _isFollowing == true
+                                                ? 'Takiptesin'
+                                                : 'Takip et',
                                           ),
-                                        if (FirebaseAuth
-                                                    .instance
-                                                    .currentUser
-                                                    ?.uid !=
-                                                null &&
-                                            FirebaseAuth
-                                                    .instance
-                                                    .currentUser!
-                                                    .uid !=
-                                                widget.uid) ...[
-                                          const SizedBox(width: 3),
-                                          TextButton.icon(
-                                            onPressed: _followBusy
-                                                ? null
-                                                : _toggleFollow,
-                                            icon: _isFollowing == true
-                                                ? const Icon(Icons.check)
-                                                : const Icon(
-                                                    Icons.person_add_alt_1,
-                                                  ),
-                                            label: Text(
-                                              _isFollowing == true
-                                                  ? 'Takiptesin'
-                                                  : 'Takip et',
-                                            ),
-                                          ),
-                                        ],
+                                        ),
                                       ],
-                                    ),
-                                  ],
-                                )
-                              else
-                                const Text('Letterboxd bağlı değil'),
+                                    ],
+                                  ),
+                                ],
+                              ),
                               const SizedBox(height: 12),
                               // Transparent TabBar that scrolls with content
                               TabBar(
@@ -1339,19 +1353,12 @@ class _ActivityItem extends StatelessWidget {
           if (hasPoster)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                posterUrl,
+              child: PosterImage(
+                posterUrl: posterUrl,
+                title: movieTitle,
                 width: 56,
                 height: 84,
                 fit: BoxFit.cover,
-                headers: _lbImageHeaders,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 56,
-                  height: 84,
-                  color: Colors.black26,
-                  alignment: Alignment.center,
-                  child: const Icon(Icons.image_not_supported, size: 20),
-                ),
               ),
             ),
           if (hasPoster) const SizedBox(width: 12),
