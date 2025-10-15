@@ -33,7 +33,6 @@ class _SearchMovieScreenState extends State<SearchMovieScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ... other widgets ...
               ElevatedButton(
                 onPressed: () async {
                   try {

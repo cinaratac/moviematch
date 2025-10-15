@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class EditProfilePage extends StatefulWidget {
   final Map<String, dynamic>?
@@ -345,9 +346,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
       String? currLb = newLb.isEmpty ? null : newLb; // already lowercased above
       bool lbChanged = prevLb != currLb;
       if (lbChanged) {
-        payload['letterboxdUsername'] = (currLb != null)
-            ? currLb
-            : FieldValue.delete();
+        if (currLb != null) {
+          payload['letterboxdUsername'] = currLb;
+          payload['letterboxdUsername_lc'] = currLb; // normalized
+          payload['lbUsername'] = currLb; // legacy compatibility
+        } else {
+          payload['letterboxdUsername'] = FieldValue.delete();
+          payload['letterboxdUsername_lc'] = FieldValue.delete();
+          payload['lbUsername'] = FieldValue.delete();
+        }
       }
 
       // only set updatedAt if there is a real change
@@ -357,6 +364,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
           .collection('users')
           .doc(user.uid)
           .set(payload, SetOptions(merge: true));
+
+      // Persist lbUsername in SharedPreferences for instant update in other screens
+      try {
+        final sp = await SharedPreferences.getInstance();
+        if (currLb != null) {
+          await sp.setString('lb_username_${user.uid}', currLb);
+        } else {
+          await sp.remove('lb_username_${user.uid}');
+        }
+      } catch (_) {}
 
       try {
         if (lbChanged && currLb != null) {
@@ -371,9 +388,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
       } catch (_) {}
 
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Profil güncellendi.')));
+      final msg = (lbChanged && currLb != null)
+          ? 'Profil güncellendi. Letterboxd eşitlemesi başlatıldı.'
+          : 'Profil güncellendi.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
       // sync originals with the just-saved state
       _origUsername = currUsername;

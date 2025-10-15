@@ -226,7 +226,6 @@ class _PassDetailCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fs = FirebaseFirestore.instance;
     final theme = Theme.of(context);
 
     return InkWell(

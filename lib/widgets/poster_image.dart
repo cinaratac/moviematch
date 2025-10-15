@@ -1,5 +1,6 @@
 // lib/widgets/poster_image.dart
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../services/poster_fallback_service.dart';
 
 class PosterImage extends StatelessWidget {
@@ -41,12 +42,15 @@ class PosterImage extends StatelessWidget {
       builder: (context, snap) {
         final url = snap.data ?? posterUrl;
         final child = (url != null && url.isNotEmpty)
-            ? Image.network(
-                url,
+            ? CachedNetworkImage(
+                imageUrl: url,
                 width: width,
                 height: height,
                 fit: fit,
-                errorBuilder: (_, __, ___) => _placeholder(),
+                memCacheWidth: 400,
+                fadeInDuration: const Duration(milliseconds: 200),
+                placeholder: (_, __) => _placeholder(),
+                errorWidget: (_, __, ___) => _placeholder(),
               )
             : _placeholder();
         if (borderRadius != null) {

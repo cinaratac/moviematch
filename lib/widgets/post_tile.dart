@@ -232,6 +232,16 @@ class PostTile extends StatelessWidget {
                       );
                     },
                   ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      timeLabel,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

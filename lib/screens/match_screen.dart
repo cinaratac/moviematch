@@ -287,6 +287,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
         bucket: _bucket,
         child: Scaffold(
           appBar: AppBar(
+            toolbarHeight: 50,
             title: const Text('Eşleşmeler'),
             bottom: TabBar(
               tabs: [
@@ -297,11 +298,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
               ],
             ),
             actions: [
-              IconButton(
-                tooltip: 'Beni beğenenler',
-                icon: const Icon(Icons.favorite_outline),
-                onPressed: _openIncomingLikes,
-              ),
+              _LikesIndicatorHeart(onPressed: _openIncomingLikes),
               PopupMenuButton<String>(
                 onSelected: (value) async {
                   if (value == 'settings') {
@@ -821,11 +818,7 @@ class _MatchScreenState extends State<MatchScreen>
           maxLines: 1,
         ),
         actions: [
-          IconButton(
-            tooltip: 'Beni beğenenler',
-            icon: const Icon(Icons.favorite_outline),
-            onPressed: _openIncomingLikes,
-          ),
+          _LikesIndicatorHeart(onPressed: _openIncomingLikes),
           IconButton(
             tooltip: 'Geç',
             icon: const Icon(Icons.close_rounded),
@@ -1526,6 +1519,78 @@ class _Eye extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// --- Likes indicator heart widget ---
+class _LikesIndicatorHeart extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _LikesIndicatorHeart({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final cs = Theme.of(context).colorScheme;
+
+    if (uid == null) {
+      return IconButton(
+        icon: const Icon(Icons.favorite_outline, color: Colors.grey),
+        onPressed: null,
+      );
+    }
+
+    // We need to check two directions (a==me or b==me). Use two StreamBuilders and combine.
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('likes')
+          .where('a', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapA) {
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance
+              .collection('likes')
+              .where('b', isEqualTo: uid)
+              .snapshots(),
+          builder: (context, snapB) {
+            bool hasNew = false;
+
+            // Helper to scan docs with current schema
+            bool _scan(
+              Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs, {
+              required bool meIsA,
+            }) {
+              for (final d in docs) {
+                final m = d.data();
+                final bool otherLiked = meIsA
+                    ? (m['bLiked'] == true)
+                    : (m['aLiked'] == true);
+                final bool seen = meIsA
+                    ? (m['aSeen'] == true)
+                    : (m['bSeen'] == true);
+                if (otherLiked && !seen) return true;
+              }
+              return false;
+            }
+
+            if (snapA.hasData) {
+              hasNew = hasNew || _scan(snapA.data!.docs, meIsA: true);
+            }
+            if (snapB.hasData) {
+              hasNew = hasNew || _scan(snapB.data!.docs, meIsA: false);
+            }
+
+            return IconButton(
+              tooltip: hasNew ? 'Seni beğenenler var' : 'Beğeniler',
+              icon: Icon(
+                Icons.favorite,
+                color: hasNew ? Colors.green : cs.onSurfaceVariant,
+              ),
+              onPressed: onPressed,
+            );
+          },
+        );
+      },
     );
   }
 }

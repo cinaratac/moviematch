@@ -139,11 +139,6 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                 ),
                 const SizedBox(height: 8),
 
-                const SizedBox(height: 12),
-                Text(
-                  movie['overview'] ?? 'Açıklama yok',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
                 const SizedBox(height: 24),
                 Align(
                   alignment: Alignment.centerRight,

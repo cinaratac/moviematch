@@ -8,6 +8,7 @@ import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/widgets/watchlist_wheel.dart';
 
 // ---- Local (device) profile films model & storage (no Firebase) ----
 class LocalFilm {
@@ -513,42 +514,113 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           // Girdi alanı
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8.0,
-                vertical: 6.0,
-              ),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
               child: Row(
                 children: [
-                  IconButton(
-                    tooltip: 'Film paylaş',
-                    onPressed: _openFilmPicker,
-                    icon: const Icon(Icons.local_movies_outlined),
-                  ),
                   Expanded(
-                    child: TextField(
-                      controller: _ctrl,
-                      minLines: 1,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: 'Mesaj yaz…',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          const SizedBox(width: 8),
+                          // Text input expands
+                          Expanded(
+                            child: TextField(
+                              controller: _ctrl,
+                              minLines: 1,
+                              maxLines: 4,
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => _send(),
+                              decoration: const InputDecoration(
+                                hintText: 'Mesaj',
+                                isCollapsed: true,
+                                border: InputBorder.none,
+                              ),
+                            ),
+                          ),
+                          // Right-side actions inside the field
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Film paylaş icon
+                              IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Film paylaş',
+                                onPressed: _openFilmPicker,
+                                icon: Icon(
+                                  Icons.local_movies_outlined,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              // Seçim Çarkı (Ortak Watchlist)
+                              IconButton(
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Watchlist Çarkı',
+                                onPressed: () {
+                                  showModalBottomSheet(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    useSafeArea: true,
+                                    builder: (_) => _WatchlistWheelSheet(
+                                      chatId: widget.chatId,
+                                      myUid: FirebaseAuth
+                                          .instance
+                                          .currentUser!
+                                          .uid,
+                                      otherUid: widget.otherUid,
+                                    ),
+                                  );
+                                },
+                                icon: Icon(
+                                  Icons.donut_large,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(onPressed: _send, icon: const Icon(Icons.send)),
+                  // Optional small send button; keep for convenience
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    child: IconButton(
+                      onPressed: _send,
+                      icon: const Icon(Icons.send, color: Colors.white),
+                      tooltip: 'Gönder',
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
         ],
       ),
+      // floatingActionButton removed
     );
   }
 }
@@ -732,4 +804,535 @@ String _formatTime(DateTime dt) {
     return '$hh:$mm';
   }
   return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
+}
+
+// --- Mutual Watchlist Sheet ---
+class _MutualWatchlistSheet extends StatefulWidget {
+  final String myUid;
+  final String otherUid;
+  const _MutualWatchlistSheet({required this.myUid, required this.otherUid});
+
+  @override
+  State<_MutualWatchlistSheet> createState() => _MutualWatchlistSheetState();
+}
+
+class _MutualWatchlistSheetState extends State<_MutualWatchlistSheet> {
+  final _fs = FirebaseFirestore.instance;
+  late Future<List<_MovieItem>> _loader;
+
+  @override
+  void initState() {
+    super.initState();
+    _loader = _load();
+  }
+
+  Future<List<_MovieItem>> _load() async {
+    final a = await _fetchUserWatchlist(widget.myUid);
+    final b = await _fetchUserWatchlist(widget.otherUid);
+
+    // Intersect by normalized title
+    final setB = b.map((m) => _norm((m['title'] ?? '').toString())).toSet();
+    final out = <_MovieItem>[];
+    for (final m in a) {
+      final t = (m['title'] ?? '').toString();
+      if (t.isEmpty) continue;
+      if (setB.contains(_norm(t))) {
+        out.add(
+          _MovieItem(
+            title: t,
+            poster: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+          ),
+        );
+      }
+    }
+    // If posters missing on A but present on B, patch
+    if (out.any((x) => (x.poster ?? '').isEmpty)) {
+      final mapB = {
+        for (final m in b)
+          _norm((m['title'] ?? '').toString()):
+              (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+      };
+      for (final it in out) {
+        if ((it.poster ?? '').isEmpty) {
+          final p = mapB[_norm(it.title)] ?? '';
+          if (p.isNotEmpty) it.poster = p;
+        }
+      }
+    }
+    // Sort alphabetically
+    out.sort((x, y) => x.title.toLowerCase().compareTo(y.title.toLowerCase()));
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchUserWatchlist(String uid) async {
+    final res = <Map<String, dynamic>>[];
+    // 1) Subcollection: /users/{uid}/watchlist
+    try {
+      final qs = await _fs
+          .collection('users')
+          .doc(uid)
+          .collection('watchlist')
+          .limit(500)
+          .get();
+      for (final d in qs.docs) {
+        final m = d.data();
+        final title = (m['title'] ?? m['name'] ?? '').toString();
+        final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '')
+            .toString();
+        if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+      }
+    } catch (_) {}
+
+    // 2) Nested: /users/{uid}/shelves/watchlist/items
+    try {
+      final items = await _fs
+          .collection('users')
+          .doc(uid)
+          .collection('shelves')
+          .doc('watchlist')
+          .collection('items')
+          .limit(500)
+          .get();
+      for (final d in items.docs) {
+        final m = d.data();
+        final title = (m['title'] ?? m['name'] ?? '').toString();
+        final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '')
+            .toString();
+        if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+      }
+    } catch (_) {}
+
+    // 3) Array field on user doc: users/{uid} -> watchlist: [ {title, poster} ] or [title]
+    try {
+      final u = await _fs.collection('users').doc(uid).get();
+      if (u.exists) {
+        final data = u.data() ?? {};
+        final arr = data['watchlist'];
+        if (arr is List) {
+          for (final e in arr) {
+            if (e is Map) {
+              final title = (e['title'] ?? e['name'] ?? '').toString();
+              final poster = (e['poster'] ?? e['posterUrl'] ?? e['image'] ?? '')
+                  .toString();
+              if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+            } else if (e is String) {
+              final title = e.trim();
+              if (title.isNotEmpty) res.add({'title': title, 'poster': ''});
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Deduplicate by normalized title (prefer ones with poster)
+    final byKey = <String, Map<String, dynamic>>{};
+    for (final m in res) {
+      final key = _norm((m['title'] ?? '').toString());
+      if (key.isEmpty) continue;
+      if (!byKey.containsKey(key)) {
+        byKey[key] = m;
+      } else {
+        final existing = byKey[key]!;
+        final hasPoster = ((existing['poster'] ?? '').toString()).isNotEmpty;
+        final newPoster = ((m['poster'] ?? '').toString()).isNotEmpty;
+        if (!hasPoster && newPoster) byKey[key] = m;
+      }
+    }
+    return byKey.values.toList();
+  }
+
+  static String _norm(String s) => s.toLowerCase().trim();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (context, controller) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Text(
+                    'Ortak Watchlist',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Kapat',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: FutureBuilder<List<_MovieItem>>(
+                future: _loader,
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final items = snap.data ?? const <_MovieItem>[];
+                  if (items.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'Ortak watchlist bulunamadı.',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    controller: controller,
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final it = items[i];
+                      return ListTile(
+                        leading: _PosterThumb(url: it.poster, title: it.title),
+                        title: Text(
+                          it.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PosterThumb extends StatelessWidget {
+  final String? url;
+  final String title;
+  const _PosterThumb({required this.url, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    if (url != null && url!.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          url!,
+          width: 40,
+          height: 60,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const SizedBox(
+            width: 40,
+            height: 60,
+            child: ColoredBox(color: Colors.black12),
+          ),
+        ),
+      );
+    }
+    return const SizedBox(
+      width: 40,
+      height: 60,
+      child: ColoredBox(color: Colors.black12),
+    );
+  }
+}
+
+class _MovieItem {
+  final String title;
+  String? poster;
+  _MovieItem({required this.title, this.poster});
+}
+
+// --- Watchlist Wheel Sheet ---
+
+class _WatchlistWheelSheet extends StatefulWidget {
+  final String chatId;
+  final String myUid;
+  final String otherUid;
+  const _WatchlistWheelSheet({
+    required this.chatId,
+    required this.myUid,
+    required this.otherUid,
+  });
+
+  @override
+  State<_WatchlistWheelSheet> createState() => _WatchlistWheelSheetState();
+}
+
+class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
+  final _fs = FirebaseFirestore.instance;
+  late Future<List<WatchlistMovie>> _loader;
+
+  @override
+  void initState() {
+    super.initState();
+    _loader = _loadWheelItems();
+  }
+
+  Future<List<WatchlistMovie>> _loadWheelItems() async {
+    final a = await _fetchUserWatchlist(widget.myUid);
+    final b = await _fetchUserWatchlist(widget.otherUid);
+
+    final setB = b.map((m) => _norm((m['title'] ?? '').toString())).toSet();
+    final out = <WatchlistMovie>[];
+    for (final m in a) {
+      final t = (m['title'] ?? '').toString();
+      if (t.isEmpty) continue;
+      if (setB.contains(_norm(t))) {
+        out.add(
+          WatchlistMovie(
+            title: t,
+            posterUrl: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+          ),
+        );
+      }
+    }
+    if (out.any((x) => (x.posterUrl ?? '').isEmpty)) {
+      final mapB = {
+        for (final m in b)
+          _norm((m['title'] ?? '').toString()):
+              (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+      };
+      for (var i = 0; i < out.length; i++) {
+        final it = out[i];
+        if ((it.posterUrl ?? '').isEmpty) {
+          final p = mapB[_norm(it.title)] ?? '';
+          if (p.isNotEmpty)
+            out[i] = WatchlistMovie(title: it.title, posterUrl: p);
+        }
+      }
+    }
+    // If empty (no mutual), fall back to my list (so wheel still works)
+    if (out.isEmpty) {
+      return a
+          .map(
+            (m) => WatchlistMovie(
+              title: (m['title'] ?? '').toString(),
+              posterUrl: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+            ),
+          )
+          .where((m) => m.title.isNotEmpty)
+          .toList();
+    }
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchUserWatchlist(String uid) async {
+    final res = <Map<String, dynamic>>[];
+    try {
+      final qs = await _fs
+          .collection('users')
+          .doc(uid)
+          .collection('watchlist')
+          .limit(500)
+          .get();
+      for (final d in qs.docs) {
+        final m = d.data();
+        final title = (m['title'] ?? m['name'] ?? '').toString();
+        final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '')
+            .toString();
+        if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+      }
+    } catch (_) {}
+
+    try {
+      final items = await _fs
+          .collection('users')
+          .doc(uid)
+          .collection('shelves')
+          .doc('watchlist')
+          .collection('items')
+          .limit(500)
+          .get();
+      for (final d in items.docs) {
+        final m = d.data();
+        final title = (m['title'] ?? m['name'] ?? '').toString();
+        final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '')
+            .toString();
+        if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+      }
+    } catch (_) {}
+
+    try {
+      final u = await _fs.collection('users').doc(uid).get();
+      if (u.exists) {
+        final data = u.data() ?? {};
+        final arr = data['watchlist'];
+        if (arr is List) {
+          for (final e in arr) {
+            if (e is Map) {
+              final title = (e['title'] ?? e['name'] ?? '').toString();
+              final poster = (e['poster'] ?? e['posterUrl'] ?? e['image'] ?? '')
+                  .toString();
+              if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+            } else if (e is String) {
+              final title = e.trim();
+              if (title.isNotEmpty) res.add({'title': title, 'poster': ''});
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // dedupe by normalized title
+    final byKey = <String, Map<String, dynamic>>{};
+    for (final m in res) {
+      final key = _norm((m['title'] ?? '').toString());
+      if (key.isEmpty) continue;
+      if (!byKey.containsKey(key)) {
+        byKey[key] = m;
+      } else {
+        final hasPoster = ((byKey[key]!['poster'] ?? '').toString()).isNotEmpty;
+        final newPoster = ((m['poster'] ?? '').toString()).isNotEmpty;
+        if (!hasPoster && newPoster) byKey[key] = m;
+      }
+    }
+    return byKey.values.toList();
+  }
+
+  static String _norm(String s) => s.toLowerCase().trim();
+
+  Future<void> _sendChosenToChat(WatchlistMovie m) async {
+    try {
+      final msgRef = await _fs
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .add({
+            'authorId': widget.myUid,
+            'text': m.title.isNotEmpty
+                ? '🎯 Çark seçimi: ${m.title}'
+                : '🎯 Çark seçimi',
+            'type': 'movie',
+            'movie': {'title': m.title, 'poster': m.posterUrl ?? ''},
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+      await _fs.collection('chats').doc(widget.chatId).set({
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastMessageId': msgRef.id,
+      }, SetOptions(merge: true));
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Seçilen film gönderildi: ${m.title}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Gönderilemedi: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.9,
+      minChildSize: 0.6,
+      maxChildSize: 0.95,
+      builder: (context, controller) {
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Text(
+                    'Watchlist Çarkı',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Kapat',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: FutureBuilder<List<WatchlistMovie>>(
+                future: _loader,
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final items = snap.data ?? const <WatchlistMovie>[];
+                  if (items.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          'Ortak watchlist bulunamadı. Önce watchlist ekleyin.',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: cs.onSurfaceVariant),
+                        ),
+                      ),
+                    );
+                  }
+                  return ListView(
+                    controller: controller,
+                    children: [
+                      const SizedBox(height: 16),
+                      Center(
+                        child: WatchlistWheel(
+                          items: items,
+                          size: 340,
+                          onChosen: (m) async {
+                            // Ask to send to chat
+                            final send = await showDialog<bool>(
+                              context: context,
+                              builder: (dctx) {
+                                return AlertDialog(
+                                  title: const Text('Film seçildi'),
+                                  content: Text(m.title),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(dctx, false),
+                                      child: const Text('Kapat'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.pop(dctx, true),
+                                      child: const Text('Mesaja ekle'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                            if (send == true) {
+                              await _sendChosenToChat(m);
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }

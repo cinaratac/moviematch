@@ -67,6 +67,34 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _onForgotPassword() async {
+    if (_loading) return;
+    final email = _email.text.trim();
+    if (email.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lütfen e-posta adresini girin')),
+      );
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Şifre sıfırlama bağlantısı e-posta adresine gönderildi.',
+          ),
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Hata: ${e.message ?? e.code}')));
+    }
+  }
+
   @override
   void dispose() {
     _email.dispose();
@@ -193,6 +221,14 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.center,
+                      child: TextButton(
+                        onPressed: _loading ? null : _onForgotPassword,
+                        child: const Text('Şifremi unuttum'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     TextButton(
                       onPressed: _loading
                           ? null

@@ -157,11 +157,11 @@ Widget _profileHeaderSection({
                       ],
                     ),
               SizedBox(height: 5),
-              if (lbUsername != null && lbUsername!.isNotEmpty)
+              if (lbUsername != null && lbUsername.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
-                    'Letterboxd: @${lbUsername!}',
+                    'Letterboxd: @${lbUsername}',
                     style: Theme.of(
                       context,
                     ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
@@ -925,9 +925,17 @@ class _ProfilePageState extends State<ProfilePage> {
   // --- WATCHLIST SECTION (cache‑first, single fetch; no extra user stream) ---
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     if (keys.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: Text('Watchlist boş.'),
+      return SizedBox(
+        height: 180,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: 1,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, i) => const AspectRatio(
+            aspectRatio: 2 / 3,
+            child: _AddPosterTile(target: ShelfTarget.watchlist),
+          ),
+        ),
       );
     }
 
@@ -963,7 +971,20 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
-        if (!filmSnap.hasData) return const SizedBox.shrink();
+        if (!filmSnap.hasData) {
+          return SizedBox(
+            height: 180,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, i) => const AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _AddPosterTile(target: ShelfTarget.watchlist),
+              ),
+            ),
+          );
+        }
         final films = filmSnap.data!
             .where((m) => m != null)
             .map((m) => m!)
@@ -972,7 +993,20 @@ class _ProfilePageState extends State<ProfilePage> {
         // Publish watchlist into in‑memory cache so other screens reuse it without extra reads
         UserShelfCache.setWatchlistFromMaps(films);
 
-        if (films.isEmpty) return const SizedBox.shrink();
+        if (films.isEmpty) {
+          return SizedBox(
+            height: 180,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, i) => const AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _AddPosterTile(target: ShelfTarget.watchlist),
+              ),
+            ),
+          );
+        }
 
         return SizedBox(
           height: 180,
@@ -1049,9 +1083,22 @@ class _ProfilePageState extends State<ProfilePage> {
     ).map((e) => e.toString()).toList();
 
     if (keys.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text(emptyText),
+      final ShelfTarget target = fieldName == 'favoritesKeys'
+          ? ShelfTarget.favorites
+          : fieldName == 'fiveStarKeys'
+          ? ShelfTarget.fiveStar
+          : ShelfTarget.disliked;
+      return SizedBox(
+        height: 180,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: 1,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, i) => AspectRatio(
+            aspectRatio: 2 / 3,
+            child: _AddPosterTile(target: target),
+          ),
+        ),
       );
     }
 
@@ -1086,13 +1133,49 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
-        if (!filmSnap.hasData) return const SizedBox.shrink();
+        if (!filmSnap.hasData) {
+          final ShelfTarget target = fieldName == 'favoritesKeys'
+              ? ShelfTarget.favorites
+              : fieldName == 'fiveStarKeys'
+              ? ShelfTarget.fiveStar
+              : ShelfTarget.disliked;
+          return SizedBox(
+            height: 180,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, i) => AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _AddPosterTile(target: target),
+              ),
+            ),
+          );
+        }
         final films = filmSnap.data!
             .where((m) => m != null)
             .map((m) => m!)
             .toList();
 
-        if (films.isEmpty) return const SizedBox.shrink();
+        if (films.isEmpty) {
+          final ShelfTarget target = fieldName == 'favoritesKeys'
+              ? ShelfTarget.favorites
+              : fieldName == 'fiveStarKeys'
+              ? ShelfTarget.fiveStar
+              : ShelfTarget.disliked;
+          return SizedBox(
+            height: 180,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, i) => AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _AddPosterTile(target: target),
+              ),
+            ),
+          );
+        }
 
         return SizedBox(
           height: 180,
@@ -1180,9 +1263,25 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         }
         if (snapshot.hasError) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text('5★ film bulunamadı.'),
+          return SizedBox(
+            height: 180,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: 1,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, i) => AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _AddFilmTile(
+                  onFilmAdded: () {
+                    setState(() {
+                      _futureFiveStar = LetterboxdService.fetchFiveStar(
+                        _lbUsername ?? "",
+                      );
+                    });
+                  },
+                ),
+              ),
+            ),
           );
         }
         final items = snapshot.data ?? [];

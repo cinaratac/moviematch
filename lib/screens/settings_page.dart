@@ -141,6 +141,107 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Future<void> _clearLetterboxdSync() async {
+    final user = _user;
+    if (user == null) return;
+
+    // Onay al
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Letterboxd eşleştirmesini kaldır?'),
+        content: const Text(
+          'Letterboxd’dan içe aktarılan/ eşleştirilen tüm film listeleri (favoriler, izleme listesi, beğenmedikler vb.) kaldırılacak. Devam edilsin mi?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Kaldır'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _busy = true);
+    final fs = FirebaseFirestore.instance;
+    final uid = user.uid;
+
+    try {
+      // 1) SharedPreferences: kayıtlı lb kullanıcı adını sil
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('lb_username_$uid');
+      } catch (_) {}
+
+      // 2) User doc üzerindeki LB alanlarını sil (best-effort)
+      await fs.collection('users').doc(uid).set({
+        'lbUsername': FieldValue.delete(),
+        'lbSyncedAt': FieldValue.delete(),
+        'letterboxdUsername': FieldValue.delete(),
+        'letterboxdUsername_lc': FieldValue.delete(),
+        // olası dizi alanları
+        'favorites': FieldValue.delete(),
+        'favoritesKeys': FieldValue.delete(),
+        'watchlist': FieldValue.delete(),
+        'watchlistKeys': FieldValue.delete(),
+        'disliked': FieldValue.delete(),
+        'dislikedKeys': FieldValue.delete(),
+        'fiveStar': FieldValue.delete(),
+        'fiveStarKeys': FieldValue.delete(),
+        'liked': FieldValue.delete(),
+        'likedKeys': FieldValue.delete(),
+        'shelfCounts': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 3) Alt koleksiyonları temizle (varsa): shelves/*, movies, userMovies
+      // shelves/*/items
+      try {
+        final shelvesCol = fs
+            .collection('users')
+            .doc(uid)
+            .collection('shelves');
+        final shelvesSnap = await shelvesCol.get();
+        for (final shelf in shelvesSnap.docs) {
+          // items alt koleksiyonunu temizle
+          try {
+            await _deleteQuery(shelf.reference.collection('items'));
+          } catch (_) {}
+          // shelf dokümanını sil
+          try {
+            await shelf.reference.delete();
+          } catch (_) {}
+        }
+      } catch (_) {}
+
+      // users/{uid}/movies
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('movies'),
+        );
+      } catch (_) {}
+
+      // users/{uid}/userMovies
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('userMovies'),
+        );
+      } catch (_) {}
+
+      _toast('Letterboxd eşleştirmesi ve filmler kaldırıldı');
+    } catch (e) {
+      _toast('Kaldırma hatası: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _verifyEmail() async {
     final user = _user;
     if (user == null) return;
@@ -525,6 +626,13 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('Tema'),
             subtitle: const Text('Aydınlık / Karanlık / Sistem'),
             onTap: _busy ? null : _pickTheme,
+          ),
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.link_off_outlined),
+            title: const Text('Letterboxd eşleştirmesini kaldır'),
+            subtitle: const Text('İçe aktarılan tüm film listelerini temizle'),
+            onTap: _busy ? null : _clearLetterboxdSync,
           ),
           const Divider(height: 0),
 

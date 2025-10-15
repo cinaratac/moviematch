@@ -75,13 +75,27 @@ class FeedService {
     }, SetOptions(merge: false));
   }
 
-  /// Beğeni değiştir (idempotent, tek batch).
+  /// Beğeni değiştir (idempotent, tek batch) + bildirim (transaction dışı).
   Future<void> toggleLike({required String postId, required bool like}) async {
-    final me = _auth.currentUser?.uid;
+    final user = _auth.currentUser;
+    final me = user?.uid;
     if (me == null) return;
 
     final postRef = _postRef(postId);
     final likeRef = postRef.collection('likes').doc(me);
+
+    // Post sahibini transaction dışı, hafif bir okumayla al
+    String postAuthorUid = '';
+    try {
+      final ps = await postRef.get(const GetOptions(source: Source.server));
+      postAuthorUid = (ps.data()?['authorId'] ?? '').toString();
+      if (postAuthorUid.isEmpty) {
+        final pc = await postRef.get(const GetOptions(source: Source.cache));
+        postAuthorUid = (pc.data()?['authorId'] ?? '').toString();
+      }
+    } catch (_) {}
+
+    bool addedLike = false;
 
     await _fs.runTransaction((tx) async {
       final likeSnap = await tx.get(likeRef);
@@ -97,6 +111,7 @@ class FeedService {
             'likeCount': FieldValue.increment(1),
             'updatedAt': now,
           });
+          addedLike = true; // transaction dışında bildirim yazacağız
         }
       } else {
         if (likeSnap.exists) {
@@ -108,6 +123,23 @@ class FeedService {
         }
       }
     });
+
+    // Bildirim: transaction DIŞINDA, böylece like/yorum akışı asla bloklanmaz
+    if (addedLike && postAuthorUid.isNotEmpty && postAuthorUid != me) {
+      try {
+        await _writeNotification(
+          toUid: postAuthorUid,
+          type: 'like',
+          postId: postId,
+          actorId: me,
+          actorName: user?.displayName,
+          actorPhotoURL: user?.photoURL,
+          deterministicId: '${postId}_${me}_like', // aynı like için tek kayıt
+        );
+      } catch (_) {
+        // Bildirim yazılamazsa like yine de başarılıdır; sessizce geç
+      }
+    }
   }
 
   /// Takip et (idempotent; okuma gerekmez).
@@ -137,5 +169,89 @@ class FeedService {
       'by': me,
       'createdAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// Yorum bildirimi göndermek için harici çağrı.
+  /// Yorum ekleme kodunun olduğu yerde bu fonksiyonu çağır.
+  Future<void> notifyComment({
+    required String postId,
+    required String postAuthorUid,
+    String? preview,
+  }) async {
+    final user = _auth.currentUser;
+    final me = user?.uid;
+    if (me == null) return;
+    if (postAuthorUid.isEmpty || postAuthorUid == me) return;
+
+    try {
+      await _writeNotification(
+        toUid: postAuthorUid,
+        type: 'comment',
+        postId: postId,
+        actorId: me,
+        actorName: user?.displayName,
+        actorPhotoURL: user?.photoURL,
+        preview: preview,
+        deterministicId: null, // birden fazla yorum için ayrı kayıt
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _writeNotification({
+    required String toUid,
+    required String type,
+    required String postId,
+    required String actorId,
+    String? actorName,
+    String? actorPhotoURL,
+    String? preview,
+    String? deterministicId,
+  }) async {
+    final col = _fs.collection('users').doc(toUid).collection('notifications');
+    final ref = (deterministicId == null)
+        ? col.doc()
+        : col.doc(deterministicId);
+    await ref.set({
+      'type': type,
+      'actorId': actorId,
+      'postId': postId,
+      if (preview != null && preview.isNotEmpty) 'preview': preview,
+      'createdAt': FieldValue.serverTimestamp(),
+      'read': false,
+      // UI hızlandırma cache alanları (opsiyonel)
+      'actorName': actorName ?? '',
+      'actorPhotoURL': actorPhotoURL ?? '',
+    }, SetOptions(merge: true));
+  }
+
+  /// Takip bildirimi: bir kullanıcı başka bir kullanıcıyı takip ettiğinde çağır.
+  Future<void> notifyFollow({required String toUid}) async {
+    final user = _auth.currentUser;
+    final me = user?.uid;
+    if (me == null) return;
+    if (toUid.isEmpty || toUid == me) return;
+
+    try {
+      final col = _fs
+          .collection('users')
+          .doc(toUid)
+          .collection('notifications');
+
+      // Deterministik id: aynı takip için tekrar kayıt oluşmasın
+      final ref = col.doc('${me}_follow');
+
+      await ref.set({
+        'type': 'follow',
+        'actorId': me,
+        'postId': '-', // follow için kullanılmıyor
+        'createdAt': FieldValue.serverTimestamp(),
+        'read': false,
+        // UI için küçük cache alanları (opsiyonel)
+        'actorName': user?.displayName ?? '',
+        'actorPhotoURL': user?.photoURL ?? '',
+      }, SetOptions(merge: true));
+    } catch (_) {
+      // Bildirim düşmezse akışı bozma
+    }
   }
 }

@@ -13,8 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// - Görev: Uygulama açıkken **yerel bildirim** gösterir.
 /// - Kaynaklar:
 ///   • Chat mesajları: chats/{chatId}/messages/* (authorId != me)
-///   • Yeni takipçi:   users/{me}/followers/*
-///   • Beğeni:         likeLogs/*  (targetUid == me)
+///   • Sosyal akış:    users/{me}/notifications/* (type in ['like','comment','follow'])
 ///
 /// Not:
 ///  - Bu servis **push (FCM)** yerine **local notification** gösterir.
@@ -89,13 +88,10 @@ class NotificationService {
     if (user == null) return;
     final myUid = user.uid;
 
-    // Takipçiler
-    _listenFollowers(myUid);
+    // Sosyal bildirimleri (like/comment/follow) tek yerden dinle
+    _listenNotifications(myUid);
 
-    // Like logs (hedef benimse)
-    _listenLikeLogs(myUid);
-
-    // Sohbetlerim
+    // Sohbet mesajları
     _bindChatsAndMessages(myUid);
   }
 
@@ -108,60 +104,68 @@ class NotificationService {
     _chatSubs.clear();
   }
 
-  /* -------------------------- Internal: Followers ------------------------- */
-  Future<void> _listenFollowers(String myUid) async {
-    await _followersSub?.cancel();
-
+  /* ------------------------ Internal: Notifications coll ------------------------ */
+  Future<void> _listenNotifications(String myUid) async {
+    // Tek bir stream yeterli; ek olarak durdurma gerekirse burada tutulabilir
+    // (İleride isterseniz ayrı bir subscription alanı eklenebilir.)
     final prefs = await SharedPreferences.getInstance();
-    final lastKey = 'notif_last_follow_$myUid';
+    final lastKey = 'notif_last_social_$myUid';
     final lastTs = prefs.getInt(lastKey) ?? 0; // millis
     final since = Timestamp.fromMillisecondsSinceEpoch(lastTs);
 
     final q = FirebaseFirestore.instance
         .collection('users')
         .doc(myUid)
-        .collection('followers')
-        .where('createdAt', isGreaterThan: since);
+        .collection('notifications')
+        .where('createdAt', isGreaterThan: since)
+        .orderBy('createdAt', descending: true)
+        .limit(50);
 
-    _followersSub = q.snapshots().listen((qs) async {
-      // Güncel TS'yi yaz (spam engel)
+    q.snapshots().listen((qs) async {
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       await prefs.setInt(lastKey, nowMs);
 
-      for (final d in qs.docChanges) {
-        if (d.type != DocumentChangeType.added) continue;
-        final followerUid = d.doc.id;
-        await _showSocial(title: 'Yeni takipçi', body: 'Biri seni takip etti');
-        if (kDebugMode) debugPrint('notif: new follower $followerUid');
-      }
-    });
-  }
+      for (final ch in qs.docChanges) {
+        if (ch.type != DocumentChangeType.added) continue;
+        final m = ch.doc.data();
+        if (m == null) continue;
 
-  /* --------------------------- Internal: LikeLogs ------------------------- */
-  Future<void> _listenLikeLogs(String myUid) async {
-    await _likeLogsSub?.cancel();
+        final type = (m['type'] ?? '').toString();
+        final actorId = (m['actorId'] ?? '').toString();
+        final actorName = (m['actorName'] ?? '').toString();
+        final preview = (m['preview'] ?? '').toString();
 
-    final prefs = await SharedPreferences.getInstance();
-    final lastKey = 'notif_last_like_$myUid';
-    final lastTs = prefs.getInt(lastKey) ?? 0; // millis
-    final since = Timestamp.fromMillisecondsSinceEpoch(lastTs);
+        // Kendimden gelen olayları gösterme
+        if (actorId == myUid) continue;
 
-    // likeLogs şemasında: { targetUid, actorUid, postId, createdAt }
-    final q = FirebaseFirestore.instance
-        .collection('likeLogs')
-        .where('targetUid', isEqualTo: myUid)
-        .where('createdAt', isGreaterThan: since);
-
-    _likeLogsSub = q.snapshots().listen((qs) async {
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-      await prefs.setInt(lastKey, nowMs);
-
-      for (final d in qs.docChanges) {
-        if (d.type != DocumentChangeType.added) continue;
-        final actor = d.doc.data()?['actorUid'];
-        if (actor == myUid) continue; // kendi beğenim
-        await _showSocial(title: 'Yeni beğeni', body: 'Gönderin beğenildi');
-        if (kDebugMode) debugPrint('notif: like by $actor');
+        switch (type) {
+          case 'like':
+            await _showSocial(
+              title: 'Yeni beğeni',
+              body: (actorName.isNotEmpty
+                  ? '$actorName gönderinizi beğendi'
+                  : 'Gönderiniz beğenildi'),
+            );
+            break;
+          case 'comment':
+            final base = (actorName.isNotEmpty
+                ? '$actorName gönderinize yorum yaptı'
+                : 'Gönderinize yorum yapıldı');
+            final body = preview.isNotEmpty ? '$base: $preview' : base;
+            await _showSocial(title: 'Yeni yorum', body: body);
+            break;
+          case 'follow':
+            await _showSocial(
+              title: 'Yeni takipçi',
+              body: (actorName.isNotEmpty
+                  ? '$actorName seni takip etmeye başladı'
+                  : 'Yeni bir takipçin var'),
+            );
+            break;
+          default:
+            // bilinmeyen tipleri sessiz geç
+            break;
+        }
       }
     });
   }
@@ -232,15 +236,43 @@ class NotificationService {
 
   /* --------------------------- Local notify helpers ---------------------- */
   Future<void> _showChat({required String title, required String body}) async {
-    // Foreground’da bildirim göstermiyoruz.
-    return;
+    const android = AndroidNotificationDetails(
+      _chChat,
+      'Sohbet',
+      channelDescription: 'Sohbet mesaj bildirimleri',
+      importance: Importance.high,
+      priority: Priority.high,
+      styleInformation: BigTextStyleInformation(''),
+    );
+    const ios = DarwinNotificationDetails();
+    await _fln.show(
+      DateTime.now().millisecondsSinceEpoch.remainder(1000000),
+      title,
+      body,
+      const NotificationDetails(android: android, iOS: ios),
+      payload: 'chat',
+    );
   }
 
   Future<void> _showSocial({
     required String title,
     required String body,
   }) async {
-    // Foreground’da bildirim göstermiyoruz.
-    return;
+    const android = AndroidNotificationDetails(
+      _chSocial,
+      'Sosyal',
+      channelDescription: 'Takip ve beğeni bildirimleri',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      styleInformation: BigTextStyleInformation(''),
+    );
+    const ios = DarwinNotificationDetails();
+    await _fln.show(
+      DateTime.now().millisecondsSinceEpoch.remainder(1000000),
+      title,
+      body,
+      const NotificationDetails(android: android, iOS: ios),
+      payload: 'social',
+    );
   }
 }

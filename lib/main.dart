@@ -1,6 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/shell.dart';
@@ -21,14 +22,16 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Register FCM background/foreground handlers
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  // Register FCM background/foreground handlers (skip on web for now)
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  // Optional: foreground messages (if push arrives while app is visible)
-  FirebaseMessaging.onMessage.listen((RemoteMessage m) {
-    // No-op here: if the push has a notification payload, Android/iOS shows it automatically when backgrounded.
-    // For foreground, your in-app NotificationService already surfaces social/chat events via Firestore listeners.
-  });
+    // Optional: foreground messages (if push arrives while app is visible)
+    FirebaseMessaging.onMessage.listen((RemoteMessage m) {
+      // No-op here: if the push has a notification payload, Android/iOS shows it automatically when backgrounded.
+      // For foreground, your in-app NotificationService already surfaces social/chat events via Firestore listeners.
+    });
+  }
 
   // Load saved theme preference before launching the app
   try {
@@ -50,18 +53,36 @@ Future<void> main() async {
     // ignore errors and use system default
   }
 
-  // Initialize local notifications and bind to auth state
-  await NotificationService.I.init();
-  FirebaseAuth.instance.authStateChanges().listen((u) {
-    if (u != null) {
-      NotificationService.I.start();
-      PushTokenService.I.start();
-    } else {
-      NotificationService.I.dispose();
-      PushTokenService.I.stop();
-    }
-  });
-
+  // Initialize local notifications and bind to auth state (skip on web)
+  if (!kIsWeb) {
+    await NotificationService.I.init();
+    FirebaseAuth.instance.authStateChanges().listen((u) {
+      if (u != null) {
+        NotificationService.I.start();
+        PushTokenService.I.start();
+      } else {
+        NotificationService.I.dispose();
+        PushTokenService.I.stop();
+      }
+    });
+  }
+  // main() içinde, runApp'tan ÖNCE
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              'Hata:\n${details.exceptionAsString()}\n\n${details.stack}',
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
   runApp(const MyApp());
 }
 

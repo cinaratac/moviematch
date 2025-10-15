@@ -9,6 +9,7 @@ import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
+import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FeedPage extends StatefulWidget {
@@ -345,15 +346,7 @@ class _FeedPageState extends State<FeedPage> {
             color: Theme.of(context).colorScheme.onSurface,
           ),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.notifications_outlined),
-              onPressed: () {
-                // TODO: Navigate to notifications screen when available
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Bildirimler yakında.')),
-                );
-              },
-            ),
+            const NotificationsButton(),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert),
               onSelected: (value) async {
@@ -612,6 +605,7 @@ class _FeedPageState extends State<FeedPage> {
         .set({
           'createdAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+    await FeedService().notifyFollow(toUid: otherUid);
   }
 
   Future<void> _reportPost(String postId) async {
@@ -1008,6 +1002,7 @@ class _FollowingFeedState extends State<_FollowingFeed> {
                   .set({
                     'createdAt': FieldValue.serverTimestamp(),
                   }, SetOptions(merge: true));
+              await FeedService().notifyFollow(toUid: uid);
             },
             onReport: (postId) async {
               final me = FirebaseAuth.instance.currentUser?.uid;

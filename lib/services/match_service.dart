@@ -109,19 +109,12 @@ class MatchService {
       (meDoc.data()?['dislikedKeys'] ?? const []) as List,
     );
 
-    // NEW: profile vectors (lowercased)
-    final meMap = meDoc.data() ?? {};
-    final myGenres = _lcSet(meMap, 'favGenres');
-    final myDirectors = _lcSet(meMap, 'favDirectors');
-    final myActors = _lcSet(meMap, 'favActors');
+    // (genres/directors/actors disabled in matching)
+    final Set<String> myGenres = const {};
+    final Set<String> myDirectors = const {};
+    final Set<String> myActors = const {};
 
-    if (myFive.isEmpty &&
-        myFavs.isEmpty &&
-        myWatch.isEmpty &&
-        myDis.isEmpty &&
-        myGenres.isEmpty &&
-        myDirectors.isEmpty &&
-        myActors.isEmpty) {
+    if (myFive.isEmpty && myFavs.isEmpty && myWatch.isEmpty && myDis.isEmpty) {
       return [];
     }
 
@@ -175,31 +168,23 @@ class MatchService {
         (data['dislikedKeys'] ?? const []) as List,
       );
 
-      // semantic vectors (lowercased)
-      final theirGenres = _lcSet(data, 'favGenres');
-      final theirDirectors = _lcSet(data, 'favDirectors');
-      final theirActors = _lcSet(data, 'favActors');
-
-      // intersections
+      // intersections (ratings only)
       final common5 = myFive.intersection(theirFive).toList()..sort();
       final commonF = myFavs.intersection(theirFavs).toList()..sort();
       final commonW = myWatch.intersection(theirWatch).toList()..sort();
       final commonD = myDis.intersection(theirDis).toList()..sort();
 
-      final commonG = myGenres.intersection(theirGenres).toList()..sort();
-      final commonDir = myDirectors.intersection(theirDirectors).toList()
-        ..sort();
-      final commonAct = myActors.intersection(theirActors).toList()..sort();
-
       if (common5.isEmpty &&
           commonF.isEmpty &&
           commonW.isEmpty &&
-          commonD.isEmpty &&
-          commonG.isEmpty &&
-          commonDir.isEmpty &&
-          commonAct.isEmpty) {
+          commonD.isEmpty) {
         continue;
       }
+
+      // semantic overlaps disabled
+      final List<String> commonG = const [];
+      final List<String> commonDir = const [];
+      final List<String> commonAct = const [];
 
       // Weighted score: 5★ (w=3), favorites (w=2), watchlist (w=1.6), genres (w=1.5), directors (w=1.8), actors (w=1.2)
       // New denominator: double the intersection count
@@ -209,22 +194,14 @@ class MatchService {
         return w * (common / denom);
       }
 
-      // weights (favoriler boosted)
-      const w5 = 3.0,
-          wFav = 4.0,
-          wWatch = 1.6,
-          wG = 1.5,
-          wDir = 0.0,
-          wAct = 0.0;
+      // weights (genres/directors/actors excluded)
+      const w5 = 3.0, wFav = 4.0, wWatch = 1.6;
 
-      final maxScoreUnit = w5 + wFav + wWatch + wG + wDir + wAct;
+      final maxScoreUnit = w5 + wFav + wWatch;
       final unitScore =
           part(common5.length.toDouble(), 0, w5) +
           part(commonF.length.toDouble(), 0, wFav) +
-          part(commonW.length.toDouble(), 0, wWatch) +
-          part(commonG.length.toDouble(), 0, wG) +
-          part(commonDir.length.toDouble(), 0, wDir) +
-          part(commonAct.length.toDouble(), 0, wAct);
+          part(commonW.length.toDouble(), 0, wWatch);
 
       // --- Calibration for a slightly higher, friendlier score distribution ---
       // raw in [0,100]
@@ -252,7 +229,7 @@ class MatchService {
       );
     }
 
-    // Skor > ortak 5★ > ortak favori > ortak watchlist > ortak genre > ortak director > ortak actor sayısına göre sırala
+    // Sort by: Score > common 5★ > common favorites > common watchlist > common disliked
     out.sort((a, b) {
       final s = b.score.compareTo(a.score);
       if (s != 0) return s;
@@ -262,11 +239,7 @@ class MatchService {
       if (fav != 0) return fav;
       final w = b.commonWatchCount.compareTo(a.commonWatchCount);
       if (w != 0) return w;
-      final g = b.commonGenreCount.compareTo(a.commonGenreCount);
-      if (g != 0) return g;
-      final d0 = b.commonDirectorCount.compareTo(a.commonDirectorCount);
-      if (d0 != 0) return d0;
-      return b.commonActorCount.compareTo(a.commonActorCount);
+      return b.commonDisCount.compareTo(a.commonDisCount);
     });
 
     // Store in short-term cache
@@ -327,19 +300,6 @@ class MatchService {
       final cw = myWatch.intersection(theirWatch);
       final cd = myDis.intersection(theirDis);
 
-      // NEW: semantic overlaps
-      final myGenres = _lcSet(meDoc.data() ?? {}, 'favGenres');
-      final myDirectors = _lcSet(meDoc.data() ?? {}, 'favDirectors');
-      final myActors = _lcSet(meDoc.data() ?? {}, 'favActors');
-
-      final theirGenres = _lcSet(data, 'favGenres');
-      final theirDirectors = _lcSet(data, 'favDirectors');
-      final theirActors = _lcSet(data, 'favActors');
-
-      final cG = myGenres.intersection(theirGenres);
-      final cDir = myDirectors.intersection(theirDirectors);
-      final cAct = myActors.intersection(theirActors);
-
       final meetsA = c5.length >= minCommonFive && cf.length >= minCommonFav;
       final meetsB = cd.length >= minCommonDisliked;
       // NEW: allow watchlist synergy as an alternative path
@@ -366,9 +326,9 @@ class MatchService {
         'commonFavoritesCount': cf.length,
         'commonWatchlistCount': cw.length,
         'commonDislikedCount': cd.length,
-        'commonGenresCount': cG.length,
-        'commonDirectorsCount': cDir.length,
-        'commonActorsCount': cAct.length,
+        'commonGenresCount': 0,
+        'commonDirectorsCount': 0,
+        'commonActorsCount': 0,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'source': meetsB

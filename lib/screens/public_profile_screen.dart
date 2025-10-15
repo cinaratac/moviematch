@@ -1127,106 +1127,77 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                 ],
                               ),
                               const SizedBox(height: 17),
-                              Wrap(
-                                alignment: WrapAlignment.spaceBetween,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                runAlignment: WrapAlignment.center,
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (lb.isNotEmpty)
-                                    Text(
-                                      'Letterboxd: @$lb',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (lb.isNotEmpty)
-                                        TextButton.icon(
-                                          onPressed: () => _openUrl(
-                                            'https://letterboxd.com/$lb/',
-                                          ),
-                                          icon: const Icon(Icons.open_in_new),
-                                          label: const Text('Profili aç'),
-                                        ),
-                                      const SizedBox(width: 3),
-                                      if (!_isBlocked &&
-                                          !_hasBlockedMe &&
-                                          FirebaseAuth
-                                                  .instance
-                                                  .currentUser
-                                                  ?.uid !=
-                                              widget.uid)
-                                        TextButton.icon(
-                                          onPressed: () async {
-                                            final myUid = FirebaseAuth
-                                                .instance
-                                                .currentUser
-                                                ?.uid;
-                                            if (myUid == null) {
-                                              ScaffoldMessenger.of(
-                                                context,
-                                              ).showSnackBar(
-                                                const SnackBar(
-                                                  content: Text(
-                                                    'Giriş yapmalısın.',
-                                                  ),
-                                                ),
-                                              );
-                                              return;
-                                            }
-                                            final chatId = await ChatService
-                                                .instance
-                                                .getOrCreateChat(
-                                                  myUid,
-                                                  widget.uid,
-                                                );
-                                            if (!context.mounted) return;
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) => ChatRoomScreen(
-                                                  chatId: chatId,
-                                                  otherUid: widget.uid,
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                          icon: const Icon(Icons.message),
-                                          label: const Text('Mesaj gönder'),
-                                        ),
-                                      if (FirebaseAuth
-                                                  .instance
-                                                  .currentUser
-                                                  ?.uid !=
-                                              null &&
-                                          FirebaseAuth
-                                                  .instance
-                                                  .currentUser!
-                                                  .uid !=
-                                              widget.uid) ...[
-                                        const SizedBox(width: 3),
-                                        TextButton.icon(
-                                          onPressed: _followBusy
-                                              ? null
-                                              : _toggleFollow,
-                                          icon: _isFollowing == true
-                                              ? const Icon(Icons.check)
-                                              : const Icon(
-                                                  Icons.person_add_alt_1,
-                                                ),
-                                          label: Text(
-                                            _isFollowing == true
-                                                ? 'Takiptesin'
-                                                : 'Takip et',
-                                          ),
-                                        ),
-                                      ],
-                                    ],
+                              if (lb.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: Text(
+                                    'Letterboxd: @$lb',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodyMedium,
                                   ),
+                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (!_isBlocked &&
+                                      !_hasBlockedMe &&
+                                      FirebaseAuth.instance.currentUser?.uid !=
+                                          widget.uid)
+                                    TextButton.icon(
+                                      onPressed: () async {
+                                        final myUid = FirebaseAuth
+                                            .instance
+                                            .currentUser
+                                            ?.uid;
+                                        if (myUid == null) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Giriş yapmalısın.',
+                                              ),
+                                            ),
+                                          );
+                                          return;
+                                        }
+                                        final chatId = await ChatService
+                                            .instance
+                                            .getOrCreateChat(myUid, widget.uid);
+                                        if (!context.mounted) return;
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => ChatRoomScreen(
+                                              chatId: chatId,
+                                              otherUid: widget.uid,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.message),
+                                      label: const Text('Mesaj gönder'),
+                                    ),
+                                  if (FirebaseAuth.instance.currentUser?.uid !=
+                                          null &&
+                                      FirebaseAuth.instance.currentUser!.uid !=
+                                          widget.uid) ...[
+                                    const SizedBox(width: 3),
+                                    TextButton.icon(
+                                      onPressed: _followBusy
+                                          ? null
+                                          : _toggleFollow,
+                                      icon: _isFollowing == true
+                                          ? const Icon(Icons.check)
+                                          : const Icon(Icons.person_add_alt_1),
+                                      label: Text(
+                                        _isFollowing == true
+                                            ? 'Takiptesin'
+                                            : 'Takip et',
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                               const SizedBox(height: 12),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
@@ -79,6 +80,8 @@ class ChatService {
     // Use dotted-path update so Firestore reliably increments nested counters
     batch.update(chatRef, {'unreadCounts.$otherUid': FieldValue.increment(1)});
     await batch.commit();
+    // Once any message is sent between two mutually liked users, hide the mutual banner
+    unawaited(markMutualLikeSeen(fromUid, otherUid));
   }
 
   /// Mark all messages as read for [uid] in this chat.
@@ -117,6 +120,36 @@ class ChatService {
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
     await chatRef.update({'unreadCounts.$uid': 0});
+  }
+
+  /// If there is a mutual like between uidA and uidB, mark it as seen once a chat message is sent.
+  Future<void> markMutualLikeSeen(String uidA, String uidB) async {
+    try {
+      final likes = _fs.collection('likes');
+      // Try direction A -> B
+      var qs = await likes
+          .where('a', isEqualTo: uidA)
+          .where('b', isEqualTo: uidB)
+          .limit(1)
+          .get();
+      if (qs.docs.isEmpty) {
+        // Try direction B -> A
+        qs = await likes
+            .where('a', isEqualTo: uidB)
+            .where('b', isEqualTo: uidA)
+            .limit(1)
+            .get();
+      }
+      if (qs.docs.isNotEmpty) {
+        await qs.docs.first.reference.set({
+          'aSeen': true,
+          'bSeen': true,
+          'lastInteractedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {
+      // ignore
+    }
   }
 
   /// Stream the unread message count for a chat **for this user**.
