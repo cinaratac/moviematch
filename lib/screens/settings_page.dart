@@ -179,7 +179,19 @@ class _SettingsPageState extends State<SettingsPage> {
         await prefs.remove('lb_username_$uid');
       } catch (_) {}
 
-      // 2) User doc üzerindeki LB alanlarını sil (best-effort)
+      // 2) userTasteProfiles/{uid} belgesini temizle (Loved, Disliked, Watchlist)
+      await fs.collection('userTasteProfiles').doc(uid).set({
+        'letterboxdUsername': FieldValue.delete(),
+        'loved': <String>[],
+        'disliked': <String>[],
+        'watchlist': <String>[],
+        'posters': <String, String>{},
+        'vector': FieldValue.delete(),
+        'computedAtMs': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // 3) User doc üzerindeki LB alanlarını sil (eski/mirror alanları)
       await fs.collection('users').doc(uid).set({
         'lbUsername': FieldValue.delete(),
         'lbSyncedAt': FieldValue.delete(),
@@ -200,7 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 3) Alt koleksiyonları temizle (varsa): shelves/*, movies, userMovies
+      // 4) Alt koleksiyonları temizle (varsa): shelves/*, movies, userMovies
       // shelves/*/items
       try {
         final shelvesCol = fs
@@ -462,7 +474,7 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context) => AlertDialog(
         title: const Text('Hesabı kalıcı olarak sil?'),
         content: const Text(
-          'Bu işlem geri alınamaz. Tüm eşleşmeler, sohbetler, beğeniler ve profil verileri silinecek.',
+          'Bu işlem geri alınamaz. Tüm eşleşmeler, beğeniler, takipçi/takip listeleri ve profil verileri silinecek. Sohbet mesajlarınız karşı taraf için korunacaktır.',
         ),
         actions: [
           TextButton(
@@ -507,56 +519,130 @@ class _SettingsPageState extends State<SettingsPage> {
         fs.collection('matches').where('uids', arrayContains: uid),
       );
 
-      // 5) chats: participants contains uid → delete subcollections (best-effort), then chat doc
+      // 5) chats: messages SİLİNMEYECEK, sadece kullanıcının verisini temizle
       final chatsSnap = await fs
           .collection('chats')
           .where('participants', arrayContains: uid)
           .get();
       for (final chat in chatsSnap.docs) {
-        // delete reads
+        // reads: Okuma durumunu sil (bu kullanıcının özel verisi)
         try {
           await _deleteQuery(chat.reference.collection('reads'));
         } catch (_) {}
-        // delete messages
+        // Chat dokümanını güncelle: Katılımcı listesinden kullanıcıyı çıkar
         try {
-          await _deleteQuery(chat.reference.collection('messages'));
-        } catch (_) {}
-        // delete chat itself
-        try {
-          await chat.reference.delete();
+          await chat.reference.set({
+            'participants': FieldValue.arrayRemove([uid]),
+            'updatedAt': FieldValue.serverTimestamp(),
+            'deletedParticipant': uid, // Silindiğini işaretle
+          }, SetOptions(merge: true));
         } catch (_) {}
       }
 
-      // 6) userTasteProfiles/{uid}
+      // 6) Kullanıcının Postları
+      try {
+        await _deleteQuery(
+          fs.collection('posts').where('authorId', isEqualTo: uid),
+        );
+      } catch (_) {}
+
+      // 7) Kullanıcının Eklediği Filmler (userAddedFilms)
+      try {
+        await _deleteQuery(
+          fs.collection('userAddedFilms').where('authorId', isEqualTo: uid),
+        );
+      } catch (_) {}
+
+      // --- users/{uid} ALT KOLEKSİYONLARI TEMİZLE ---
+
+      // 8) users/{uid}/following
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('following'),
+        );
+      } catch (_) {}
+      // 9) users/{uid}/followers
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('followers'),
+        );
+      } catch (_) {}
+      // 10) users/{uid}/blocked & blockedBy
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('blocked'),
+        );
+      } catch (_) {}
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('blockedBy'),
+        );
+      } catch (_) {}
+      
+      // 11) users/{uid}/shelves (ve altındaki items), movies, userMovies
+      final shelvesCol = fs.collection('users').doc(uid).collection('shelves');
+      final shelvesSnap = await shelvesCol.get();
+      for (final shelf in shelvesSnap.docs) {
+          try {
+            await _deleteQuery(shelf.reference.collection('items'));
+          } catch (_) {}
+          try {
+            await shelf.reference.delete();
+          } catch (_) {}
+      }
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('movies'),
+        );
+      } catch (_) {}
+      try {
+        await _deleteQuery(
+          fs.collection('users').doc(uid).collection('userMovies'),
+        );
+      } catch (_) {}
+
+      // 12) userTasteProfiles/{uid} (Merkezi film verisi)
       try {
         await fs.collection('userTasteProfiles').doc(uid).delete();
       } catch (_) {}
 
-      // 7) users/{uid}
+      // 13) users/{uid} (Ana kullanıcı dokümanı)
       try {
         await fs.collection('users').doc(uid).delete();
       } catch (_) {}
 
-      // 8) Firebase Auth hesabını sil
+      // 14) Firebase Auth hesabını sil
       try {
         await user.delete();
+
+        // BAŞARILI SİLME: Auth silindi, AuthStateChanges tetiklenecek.
+        if (!mounted) return;
+        _toast('Hesabınız ve ilgili veriler silindi.');
+        // Ayarlar sayfasından çıkış yap, AuthGate LoginPage'e yönlendirecektir.
+        Navigator.of(context).pop();
+
       } on FirebaseAuthException catch (e) {
         if (e.code == 'requires-recent-login') {
+          // BAŞARISIZ SİLME: Kullanıcıyı bilgilendir, tekrar denemeye zorla.
+          if (!mounted) return;
           _toast(
-            'Güvenlik için tekrar giriş yapmanız gerekiyor. Lütfen tekrar giriş yaptıktan sonra hesabı silin.',
+            'Güvenlik nedeniyle tekrar giriş yapmanız gerekiyor. Lütfen ÇIKIŞ YAPIN, hemen tekrar giriş yapın ve silme işlemini tekrarlayın.',
           );
-        } else {
-          _toast('Hesap silme hatası: ${e.code}');
+          if (mounted) setState(() => _busy = false); // Butonu aktif et
+          return; // İşlemi durdur
         }
+        // Diğer Auth hataları
+        _toast('Hesap silme hatası: ${e.code}');
+        if (mounted) setState(() => _busy = false);
+        return; // İşlemi durdur
       }
 
-      if (!mounted) return;
-      _toast('Hesabınız ve ilgili veriler silindi.');
-      Navigator.of(context).pop();
+      // Bu koda sadece Auth delete başarılı olursa ulaşılır.
+      // Diğer durumlar yukarıdaki return'ler ile kontrol edildi.
+
     } catch (e) {
       _toast('Silme hatası: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false); // Kapsamlı hata durumunda butonu aktif et
     }
   }
 

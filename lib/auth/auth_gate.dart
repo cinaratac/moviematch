@@ -42,17 +42,20 @@ class AuthGate extends StatelessWidget {
                 );
               }
               if (!snap.hasData || !snap.data!.exists) {
-                return const OnboardingLetterboxd();
+                // HESAP SİLİNDİĞİNDE GİRİŞ EKRANINA YÖNLENDİR
+                return const LoginPage();
               }
               final data = snap.data!.data();
               final lb = (data?['letterboxdUsername'] ?? '').toString();
               if (lb.isEmpty) {
-                return const OnboardingLetterboxd();
+                // Letterboxd bilgisi eksikse de giriş ekranına yönlendir
+                return const LoginPage();
               }
               return const HomeShell();
             },
           );
         }
+        // Firebase Auth'tan çıkış yapıldıysa/silindiyse LoginPage göster
         return const LoginPage();
       },
     );
