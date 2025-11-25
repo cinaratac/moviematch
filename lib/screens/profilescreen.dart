@@ -372,6 +372,27 @@ class _ProfilePageState extends State<ProfilePage> {
     _loadActivities();
     _bootstrapCounts();
   }
+  // REHBER KARAKTER KONTROLÜ
+  void _checkGuideVisibility() {
+    if (!mounted) return;
+
+    // 1. Firestore'dan gelen veriyi kontrol et (Ana kaynak)
+    final favKeys = _lastUserData?['favoritesKeys'];
+    final hasFirestoreFavs = (favKeys is List && favKeys.isNotEmpty);
+
+    // 2. Önbellekteki veriyi kontrol et (Yedek kaynak)
+    final hasCacheFavs = UserShelfCache.favorites.isNotEmpty;
+
+    // Eğer herhangi bir kaynakta favori varsa karakteri GİZLE
+    if (hasFirestoreFavs || hasCacheFavs) {
+      _showGuideNotifier.value = false;
+    } else {
+      // İkisinde de yoksa GÖSTER (Veri yükleniyor olabilir ama varsayılan davranış bu)
+      // Not: _lastUserData null ise henüz yüklenmemiş olabilir, 
+      // ancak kullanıcı deneyimi açısından boş görüp göstermesi daha güvenli.
+      _showGuideNotifier.value = true;
+    }
+  }
 
   Future<void> _loadActivities() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -469,16 +490,7 @@ class _ProfilePageState extends State<ProfilePage> {
     // _primeShelfCache() verileri çeken asenkron fonksiyondur. 
     // .then((_) { ... }) diyerek bu işlem BİTTİKTEN SONRA kontrol yapıyoruz.
     _primeShelfCache().then((_) {
-      if (mounted) {
-        // Veriler tamamen yüklendi. Şimdi kontrol edelim:
-        if (UserShelfCache.favorites.isEmpty) {
-           // Gerçekten favori yoksa karakteri göster
-           _showGuideNotifier.value = true;
-        } else {
-           // Favoriler varsa karakteri GİZLE (veya hiç açma)
-           _showGuideNotifier.value = false;
-        }
-      }
+      _checkGuideVisibility(); // Merkezi kontrol fonksiyonunu çağır
     });
 
     // Diğer işlemler (await kullanmadan arka planda devam etsin)
