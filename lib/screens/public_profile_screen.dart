@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
@@ -859,6 +860,110 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
+
+ void _showReportDialog(String myUid, String targetUid) {
+    String selectedReason = 'Spam'; // Varsayılan
+    final TextEditingController detailsCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Kullanıcıyı Bildir'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Bu kullanıcıyı neden bildiriyorsunuz?'),
+                    const SizedBox(height: 10),
+                    
+                    RadioListTile<String>(
+                      title: const Text('Spam veya Yanıltıcı'),
+                      value: 'Spam',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!),
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('Hakaret / Zorbalık'),
+                      value: 'Harassment',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!),
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('Uygunsuz İçerik'),
+                      value: 'Inappropriate',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!),
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('Diğer'),
+                      value: 'Other',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!),
+                    ),
+
+                    if (selectedReason == 'Other')
+                      TextField(
+                        controller: detailsCtrl,
+                        decoration: const InputDecoration(
+                          hintText: 'Lütfen açıklayın...',
+                          labelText: 'Açıklama',
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('İptal'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    // Servis çağrısı
+                    UserProfileService.instance.reportUser(
+                      reporterId: myUid,
+                      reportedId: targetUid,
+                      reason: selectedReason,
+                      details: detailsCtrl.text.trim(),
+                    ).then((_) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          // İstenen mesaj değişikliği:
+                          const SnackBar(content: Text('Bildirim için teşekkürler.')),
+                        );
+                      }
+                    });
+                  },
+                  child: const Text('Bildir'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Radyo butonu için küçük yardımcı widget
+  Widget _buildRadioOption(String title, String value, String groupValue, StateSetter setState) {
+    return RadioListTile<String>(
+      title: Text(title, style: Theme.of(context).textTheme.bodyMedium),
+      value: value,
+      groupValue: groupValue,
+      contentPadding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      onChanged: (v) {
+        if (v != null) setState(() => groupValue = v); // Local değişkeni güncellemez, üstteki builder'ı tetikler
+      },
+    );
+  }
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -870,54 +975,31 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           scrolledUnderElevation: 0,
           surfaceTintColor: Colors.transparent,
           actions: [
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) async {
-                if (value == 'report') {
-                  final myUid = FirebaseAuth.instance.currentUser?.uid;
-                  if (myUid != null) {
-                    try {
-                      await FirebaseFirestore.instance
-                          .collection('reports')
-                          .add({
-                            'reporterUid': myUid,
-                            'targetUid': widget.uid,
-                            'createdAt': FieldValue.serverTimestamp(),
-                            'kind': 'user',
-                            'reason': 'manual',
-                          });
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Bildirimin alındı.')),
-                      );
-                    } catch (e) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Bildirim gönderilemedi: $e')),
-                      );
-                    }
-                  }
-                } else if (value == 'block') {
-                  await _blockUser();
-                }
-              },
-              itemBuilder: (ctx) => const [
-                PopupMenuItem(
-                  value: 'report',
-                  child: ListTile(
-                    leading: Icon(Icons.flag_outlined),
-                    title: Text('Kişiyi bildir'),
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'block',
-                  child: ListTile(
-                    leading: Icon(Icons.block),
-                    title: Text('Engelle'),
-                  ),
-                ),
-              ],
-            ),
+            // Mevcut kodunuzdaki actions: [ PopupMenuButton... ] kısmını bulun ve şöyle değiştirin:
+
+PopupMenuButton<String>(
+  icon: const Icon(Icons.more_vert),
+  onSelected: (value) async {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null) return;
+
+    if (value == 'report') {
+      // ESKİ KODU SİLİN -> YENİ DİYALOĞU ÇAĞIRIN
+      _showReportDialog(myUid, widget.uid); 
+      
+    } 
+  },
+  itemBuilder: (ctx) => const [
+    PopupMenuItem(
+      value: 'report',
+      child: ListTile(
+        leading: Icon(Icons.flag_outlined),
+        title: Text('Kişiyi bildir'),
+        contentPadding: EdgeInsets.zero,
+      ),
+    ),
+  ],
+),
           ],
         ),
         extendBodyBehindAppBar: true,

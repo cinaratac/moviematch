@@ -327,54 +327,78 @@ class _MatchCardState extends State<_MatchCard>
                 children: [
                   // Header: Photo & Name
                   Row(
-                    children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(color: theme.colorScheme.primary, width: 2),
-                          image: (m.photoURL != null && m.photoURL!.isNotEmpty)
-                              ? DecorationImage(
-                                  image: NetworkImage(m.photoURL!),
-                                  fit: BoxFit.cover)
-                              : null,
-                        ),
-                        child: (m.photoURL == null || m.photoURL!.isEmpty)
-                            ? Icon(Icons.person, size: 40, color: theme.primaryColor)
-                            : null,
+  children: [
+    // Fotoğraf ve İsim/Skor alanını tıklanabilir Expanded widget'ı ile sarıyoruz.
+    Expanded( 
+      child: InkWell(
+        borderRadius: BorderRadius.circular(50), 
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              // Hedef: PublicProfileScreen(uid)
+              builder: (_) => PublicProfileScreen(uid: m.uid),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0), // Tıklama alanını rahatlatmak için
+          child: Row(
+            children: [
+              // Fotoğraf (Original Container)
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: theme.colorScheme.primary, width: 2),
+                  image: (m.photoURL != null && m.photoURL!.isNotEmpty)
+                      ? DecorationImage(
+                          image: NetworkImage(m.photoURL!),
+                          fit: BoxFit.cover)
+                      : null,
+                ),
+                child: (m.photoURL == null || m.photoURL!.isEmpty)
+                    ? Icon(Icons.person, size: 40, color: theme.primaryColor)
+                    : null,
+              ),
+              const SizedBox(width: 16),
+              // İsim & Skor (Original Expanded Column)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold, fontSize: 22)),
+                    const SizedBox(height: 4),
+                    // Score Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(title,
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                    fontWeight: FontWeight.bold, fontSize: 22)),
-                            const SizedBox(height: 4),
-                            // Score Badge
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '%$pct Uyum',
-                                style: TextStyle(
-                                    color: theme.colorScheme.onPrimaryContainer,
-                                    fontWeight: FontWeight.bold),
-                              ),
-                            )
-                          ],
-                        ),
+                      child: Text(
+                        '%$pct Uyum',
+                        style: TextStyle(
+                            color: theme.colorScheme.onPrimaryContainer,
+                            fontWeight: FontWeight.bold),
                       ),
-                      IconButton(
-                          onPressed: widget.onOpen,
-                          icon: const Icon(Icons.info_outline_rounded))
-                    ],
-                  ),
+                    )
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    // Detay butonu (Original IconButton) - Tıklanabilir alan dışında kalır.
+    IconButton(
+        onPressed: widget.onOpen,
+        icon: const Icon(Icons.info_outline_rounded))
+  ],
+),
                   const SizedBox(height: 24),
 
                   // Stats Row

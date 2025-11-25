@@ -683,4 +683,22 @@ class UserProfileService {
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
+  /// Kullanıcıyı şikayet etme (Report) işlemi
+  Future<void> reportUser({
+    required String reporterId,
+    required String reportedId,
+    required String reason,
+    String? details,
+  }) async {
+    // 'reports' koleksiyonu root seviyededir (users'ın içinde değil)
+    await _fs.collection('reports').add({
+      'reporterId': reporterId,   // Bildiren (Ben)
+      'reportedId': reportedId,   // Bildirilen (O)
+      'reason': reason,           // Sebep (Spam, Hakaret vb.)
+      'details': details ?? '',   // Ek açıklama
+      'createdAt': FieldValue.serverTimestamp(),
+      'status': 'pending',        // Admin paneli için durum
+    });
+  }
+
 }

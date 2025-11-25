@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // Bildirim kontrolü için eklendi
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -16,13 +17,87 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _busy = false;
+  bool _notificationsEnabled = true; // Varsayılan açık
   final ImagePicker _picker = ImagePicker();
 
   User? get _user => FirebaseAuth.instance.currentUser;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadNotificationPreferences();
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // Bildirim tercihini yükle
+  Future<void> _loadNotificationPreferences() async {
+    final user = _user;
+    if (user == null) return;
+
+    // Önce yerel hafızadan hızlıca oku
+    final prefs = await SharedPreferences.getInstance();
+    final local = prefs.getBool('notifications_enabled');
+    if (local != null) {
+      if (mounted) setState(() => _notificationsEnabled = local);
+    }
+
+    // Sonra sunucudan (Firestore) güncel durumu al
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      if (doc.exists) {
+        final data = doc.data();
+        final serverEnabled = data?['notificationsEnabled'];
+        if (serverEnabled is bool) {
+          if (mounted) setState(() => _notificationsEnabled = serverEnabled);
+          // Yerel hafızayı da güncelle
+          await prefs.setBool('notifications_enabled', serverEnabled);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Bildirim tercihini değiştir
+  Future<void> _toggleNotifications(bool value) async {
+    final user = _user;
+    if (user == null) return;
+
+    // Önce UI'ı güncelle (Optimistic update)
+    setState(() => _notificationsEnabled = value);
+
+    // Eğer açılıyorsa izin kontrolü yap
+    if (value) {
+      final settings = await FirebaseMessaging.instance.requestPermission();
+      if (settings.authorizationStatus != AuthorizationStatus.authorized &&
+          settings.authorizationStatus != AuthorizationStatus.provisional) {
+        // İzin verilmediyse geri al
+        setState(() => _notificationsEnabled = false);
+        _toast('Bildirim izni verilmedi. Cihaz ayarlarından etkinleştirin.');
+        return;
+      }
+    }
+
+    try {
+      // Firestore'a kaydet
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'notificationsEnabled': value,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Yerel hafızaya kaydet
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('notifications_enabled', value);
+    } catch (e) {
+      // Hata olursa eski haline döndür
+      setState(() => _notificationsEnabled = !value);
+      _toast('Ayarlar kaydedilemedi: $e');
+    }
   }
 
   Future<String?> _promptText({
@@ -58,7 +133,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _setPhoto() async {
+ /* Future<void> _setPhoto() async {
     final user = _user;
     if (user == null) return;
 
@@ -92,7 +167,7 @@ class _SettingsPageState extends State<SettingsPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
+  }*/
 
   Future<void> _clearPhoto() async {
     final user = _user;
@@ -215,10 +290,8 @@ class _SettingsPageState extends State<SettingsPage> {
       // 4) Alt koleksiyonları temizle (varsa): shelves/*, movies, userMovies
       // shelves/*/items
       try {
-        final shelvesCol = fs
-            .collection('users')
-            .doc(uid)
-            .collection('shelves');
+        final shelvesCol =
+            fs.collection('users').doc(uid).collection('shelves');
         final shelvesSnap = await shelvesCol.get();
         for (final shelf in shelvesSnap.docs) {
           // items alt koleksiyonunu temizle
@@ -249,28 +322,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _toast('Letterboxd eşleştirmesi ve filmler kaldırıldı');
     } catch (e) {
       _toast('Kaldırma hatası: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _verifyEmail() async {
-    final user = _user;
-    if (user == null) return;
-    if (user.email == null || user.email!.isEmpty) {
-      _toast('Bu hesapta doğrulanacak bir e‑posta yok.');
-      return;
-    }
-    if (user.emailVerified) {
-      _toast('E‑posta zaten doğrulanmış.');
-      return;
-    }
-    setState(() => _busy = true);
-    try {
-      await user.sendEmailVerification();
-      _toast('Doğrulama e‑postası gönderildi.');
-    } catch (e) {
-      _toast('Hata: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -465,6 +516,37 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // Yardımcı: Oturum tazeleme (Re-authentication)
+  Future<bool> _reauthenticateUser() async {
+    final user = _user;
+    if (user == null) return false;
+
+    final email = user.email;
+    if (email == null) return false;
+
+    final password = await _promptText(
+      title: 'Güvenlik Doğrulaması',
+      hint: 'Hesabınızı silmek için şifrenizi girin',
+    );
+
+    if (password == null || password.isEmpty) return false; // Vazgeçti
+
+    try {
+      // E-posta/Şifre ile credential oluştur
+      AuthCredential credential = EmailAuthProvider.credential(
+        email: email,
+        password: password,
+      );
+
+      // Oturumu tazele
+      await user.reauthenticateWithCredential(credential);
+      return true;
+    } catch (e) {
+      _toast('Doğrulama başarısız: $e');
+      return false;
+    }
+  }
+
   Future<void> _deleteAccount() async {
     final user = _user;
     if (user == null) return;
@@ -503,110 +585,84 @@ class _SettingsPageState extends State<SettingsPage> {
         await ref.delete();
       } catch (_) {}
 
-      // 2) likes (pair docs): uids contains uid
+      // 2) Veritabanı temizliği (Auth silinmeden önce yapılmalı)
+      // likes
       await _deleteQuery(
         fs.collection('likes').where('uids', arrayContains: uid),
       );
-
-      // 3) likeLogs: from==uid, to==uid
+      // likeLogs
       await _deleteQuery(
         fs.collection('likeLogs').where('from', isEqualTo: uid),
       );
       await _deleteQuery(fs.collection('likeLogs').where('to', isEqualTo: uid));
-
-      // 4) matches: uids contains uid
+      // matches
       await _deleteQuery(
         fs.collection('matches').where('uids', arrayContains: uid),
       );
-
-      // 5) chats: messages SİLİNMEYECEK, sadece kullanıcının verisini temizle
+      // chats: sadece katılımcıdan çıkar
       final chatsSnap = await fs
           .collection('chats')
           .where('participants', arrayContains: uid)
           .get();
       for (final chat in chatsSnap.docs) {
-        // reads: Okuma durumunu sil (bu kullanıcının özel verisi)
         try {
           await _deleteQuery(chat.reference.collection('reads'));
         } catch (_) {}
-        // Chat dokümanını güncelle: Katılımcı listesinden kullanıcıyı çıkar
         try {
           await chat.reference.set({
             'participants': FieldValue.arrayRemove([uid]),
             'updatedAt': FieldValue.serverTimestamp(),
-            'deletedParticipant': uid, // Silindiğini işaretle
+            'deletedParticipant': uid,
           }, SetOptions(merge: true));
         } catch (_) {}
       }
-
-      // 6) Kullanıcının Postları
+      // posts
       try {
         await _deleteQuery(
           fs.collection('posts').where('authorId', isEqualTo: uid),
         );
       } catch (_) {}
-
-      // 7) Kullanıcının Eklediği Filmler (userAddedFilms)
+      // userAddedFilms
       try {
         await _deleteQuery(
           fs.collection('userAddedFilms').where('authorId', isEqualTo: uid),
         );
       } catch (_) {}
-
-      // --- users/{uid} ALT KOLEKSİYONLARI TEMİZLE ---
-
-      // 8) users/{uid}/following
+      // Alt koleksiyonlar
       try {
         await _deleteQuery(
-          fs.collection('users').doc(uid).collection('following'),
-        );
-      } catch (_) {}
-      // 9) users/{uid}/followers
-      try {
+            fs.collection('users').doc(uid).collection('following'));
         await _deleteQuery(
-          fs.collection('users').doc(uid).collection('followers'),
-        );
-      } catch (_) {}
-      // 10) users/{uid}/blocked & blockedBy
-      try {
+            fs.collection('users').doc(uid).collection('followers'));
         await _deleteQuery(
-          fs.collection('users').doc(uid).collection('blocked'),
-        );
-      } catch (_) {}
-      try {
+            fs.collection('users').doc(uid).collection('blocked'));
         await _deleteQuery(
-          fs.collection('users').doc(uid).collection('blockedBy'),
-        );
+            fs.collection('users').doc(uid).collection('blockedBy'));
       } catch (_) {}
-      
-      // 11) users/{uid}/shelves (ve altındaki items), movies, userMovies
+      // Shelves
       final shelvesCol = fs.collection('users').doc(uid).collection('shelves');
       final shelvesSnap = await shelvesCol.get();
       for (final shelf in shelvesSnap.docs) {
-          try {
-            await _deleteQuery(shelf.reference.collection('items'));
-          } catch (_) {}
-          try {
-            await shelf.reference.delete();
-          } catch (_) {}
+        try {
+          await _deleteQuery(shelf.reference.collection('items'));
+        } catch (_) {}
+        try {
+          await shelf.reference.delete();
+        } catch (_) {}
       }
       try {
         await _deleteQuery(
-          fs.collection('users').doc(uid).collection('movies'),
-        );
+            fs.collection('users').doc(uid).collection('movies'));
       } catch (_) {}
       try {
         await _deleteQuery(
-          fs.collection('users').doc(uid).collection('userMovies'),
-        );
+            fs.collection('users').doc(uid).collection('userMovies'));
       } catch (_) {}
 
-      // 12) userTasteProfiles/{uid} (Merkezi film verisi)
+      // Ana dokümanlar
       try {
         await fs.collection('userTasteProfiles').doc(uid).delete();
       } catch (_) {}
-
-      // 13) users/{uid} (Ana kullanıcı dokümanı)
       try {
         await fs.collection('users').doc(uid).delete();
       } catch (_) {}
@@ -615,35 +671,57 @@ class _SettingsPageState extends State<SettingsPage> {
       try {
         await user.delete();
 
-        // BAŞARILI SİLME: Auth silindi, AuthStateChanges tetiklenecek.
         if (!mounted) return;
         _toast('Hesabınız ve ilgili veriler silindi.');
-        // Ayarlar sayfasından çıkış yap, AuthGate LoginPage'e yönlendirecektir.
         Navigator.of(context).pop();
-
       } on FirebaseAuthException catch (e) {
         if (e.code == 'requires-recent-login') {
-          // BAŞARISIZ SİLME: Kullanıcıyı bilgilendir, tekrar denemeye zorla.
-          if (!mounted) return;
-          _toast(
-            'Güvenlik nedeniyle tekrar giriş yapmanız gerekiyor. Lütfen ÇIKIŞ YAPIN, hemen tekrar giriş yapın ve silme işlemini tekrarlayın.',
-          );
-          if (mounted) setState(() => _busy = false); // Butonu aktif et
-          return; // İşlemi durdur
+          _toast('Güvenlik için şifrenizi tekrar girmeniz gerekiyor...');
+
+          final reauthSuccess = await _reauthenticateUser();
+
+          if (reauthSuccess) {
+            try {
+              await user.delete();
+              if (!mounted) return;
+              _toast('Hesabınız başarıyla silindi.');
+              Navigator.of(context).pop();
+            } catch (e2) {
+              _toast('Silme hatası (2. deneme): $e2');
+            }
+          } else {
+            if (mounted) setState(() => _busy = false);
+            return;
+          }
+        } else {
+          _toast('Hesap silme hatası: ${e.code}');
+          if (mounted) setState(() => _busy = false);
+          return;
         }
-        // Diğer Auth hataları
-        _toast('Hesap silme hatası: ${e.code}');
-        if (mounted) setState(() => _busy = false);
-        return; // İşlemi durdur
       }
-
-      // Bu koda sadece Auth delete başarılı olursa ulaşılır.
-      // Diğer durumlar yukarıdaki return'ler ile kontrol edildi.
-
     } catch (e) {
       _toast('Silme hatası: $e');
-      if (mounted) setState(() => _busy = false); // Kapsamlı hata durumunda butonu aktif et
+      if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _showAboutApp() {
+    showAboutDialog(
+      context: context,
+      applicationName: 'MovieMatch',
+      applicationVersion: '1.0.0',
+      applicationLegalese: '© 2024 MovieMatch',
+      applicationIcon:
+          const Icon(Icons.movie_filter, size: 50), // Varsa asset icon kullanılabilir
+      children: [
+        const SizedBox(height: 24),
+        const Text(
+          'Film zevklerinizi eşleştiren, sosyalleşmenizi sağlayan ve sinema tutkunlarını bir araya getiren uygulama.',
+        ),
+        const SizedBox(height: 12),
+        const Text('Geliştirici: Çınar Ataç'),
+      ],
+    );
   }
 
   @override
@@ -666,7 +744,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       body: ListView(
         children: [
-          ListTile(
+         /* ListTile(
             leading: const Icon(Icons.image_outlined),
             title: const Text('Profil fotoğrafını ayarla'),
             subtitle: (user?.photoURL != null && user!.photoURL!.isNotEmpty)
@@ -683,29 +761,16 @@ class _SettingsPageState extends State<SettingsPage> {
             leading: const Icon(Icons.image_not_supported_outlined),
             title: const Text('Profil fotoğrafını kaldır'),
             enabled:
-                (user?.photoURL != null &&
-                (user!.photoURL?.isNotEmpty ?? false)),
+                (user?.photoURL != null && (user!.photoURL?.isNotEmpty ?? false)),
             onTap: _busy ? null : _clearPhoto,
-          ),
+          ),*/
           const Divider(height: 0),
           ListTile(
             leading: const Icon(Icons.lock_reset),
             title: const Text('Şifre sıfırla'),
             onTap: _busy ? null : _resetPassword,
           ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.mark_email_read_outlined),
-            title: const Text('E-postayı doğrula'),
-            subtitle: (user?.email != null)
-                ? Text(
-                    user!.email!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  )
-                : const Text('Hesabınız e‑posta ile bağlı görünmüyor'),
-            onTap: _busy ? null : _verifyEmail,
-          ),
+
           const Divider(height: 0),
           ListTile(
             leading: const Icon(Icons.color_lens_outlined),
@@ -722,22 +787,21 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 0),
 
-          const ListTile(
-            leading: Icon(Icons.notifications_outlined),
-            title: Text('Bildirimler'),
-            subtitle: Text('Bildirim tercihlerini yapılandır'),
+          // GÜNCELLEME: Bildirimleri açma/kapama Switch'i
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications_outlined),
+            title: const Text('Bildirimler'),
+            subtitle: const Text('Bildirim almayı etkinleştir'),
+            value: _notificationsEnabled,
+            onChanged: _busy ? null : _toggleNotifications,
           ),
+
           const Divider(height: 0),
-          const ListTile(
-            leading: Icon(Icons.lock_outline),
-            title: Text('Gizlilik'),
-            subtitle: Text('Hesap ve veri ayarları'),
-          ),
-          const Divider(height: 0),
-          const ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('Hakkında'),
-            subtitle: Text('Sürüm ve lisanslar'),
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Hakkında'),
+            subtitle: const Text('Sürüm ve lisanslar'),
+            onTap: _showAboutApp, // ARTIK TIKLANABİLİR
           ),
           const Divider(height: 0),
           ListTile(

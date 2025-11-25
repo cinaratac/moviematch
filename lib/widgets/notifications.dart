@@ -1,20 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
-/// Firestore beklenen şema (öneri):
-/// users/{uid}/notifications/{notifId}
-/// {
-///   type: 'like' | 'comment',
-///   actorId: '<otherUid>',
-///   postId: '<postId>',
-///   commentId: '<optional>',
-///   preview: '<yorum kısa metni – opsiyonel>',
-///   createdAt: Timestamp,
-///   read: bool,
-///   actorName: '<cache için isim – opsiyonel>',
-///   actorPhotoURL: '<opsiyonel>'
-/// }
+import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil yönlendirmesi için
 
 /// AppBar içinde kullan: NotificationsButton()
 class NotificationsButton extends StatelessWidget {
@@ -119,7 +106,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         .collection('notifications')
         .orderBy('createdAt', descending: true)
         .limit(100);
-    // Sheet açılır açılmaz okunmamış olanları okundu işaretle
+    
+    // Sheet açıldığında okunmamışları okundu yap
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _markAllReadOnOpen();
     });
@@ -195,7 +183,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                       final m = docs[i].data();
                       final type = (m['type'] ?? '').toString();
                       final actorId = (m['actorId'] ?? '').toString();
-                      final postId = (m['postId'] ?? '').toString();
                       final createdAt = (m['createdAt'] as Timestamp?);
                       final read = (m['read'] ?? false) == true;
 
@@ -212,10 +199,16 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           final actor = actorSnap.data;
                           return ListTile(
                             onTap: () async {
-                              // okundu işaretle
-                              docs[i].reference.update({'read': true});
-                              // TODO: post detayına veya yoruma gitmek istersen burada yönlendir
-                              Navigator.of(context).pop();
+                              // Tıklandığında okundu işaretle ve ilgili profile git
+                              await docs[i].reference.update({'read': true});
+                              if (context.mounted && actorId.isNotEmpty) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => PublicProfileScreen(uid: actorId),
+                                  ),
+                                );
+                              }
                             },
                             leading: _Avatar(url: actor?.photoURL),
                             title: Text(
@@ -270,6 +263,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return 'Yeni beğeni';
       case 'comment':
         return 'Yeni yorum';
+      case 'follow':
+        return 'Yeni takipçi';
       default:
         return 'Bildirim';
     }
@@ -281,19 +276,19 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return 'gönderinizi beğendi';
       case 'comment':
         return 'gönderinize yorum yaptı';
+      case 'follow':
+        return 'sizi takip etmeye başladı';
       default:
         return 'bir etkinlikte bulundu';
     }
   }
 
   Future<_Actor> _getActor(String uid, Map<String, dynamic> notif) async {
-    // Önce bildirime gömülü cache alanlarına bak
     final cachedName = (notif['actorName'] ?? '').toString();
     final cachedHandle = (notif['actorHandle'] ?? '').toString();
     final cachedPhoto = (notif['actorPhotoURL'] ?? '').toString();
-    if (cachedName.isNotEmpty ||
-        cachedPhoto.isNotEmpty ||
-        cachedHandle.isNotEmpty) {
+    
+    if (cachedName.isNotEmpty || cachedPhoto.isNotEmpty || cachedHandle.isNotEmpty) {
       return _Actor(
         uid: uid,
         displayName: cachedName.isNotEmpty ? cachedName : null,
@@ -302,7 +297,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       );
     }
 
-    // Yoksa users/{uid} oku
     if (uid.isEmpty) return _Actor(uid: uid);
     try {
       final u = await FirebaseFirestore.instance
@@ -313,20 +307,9 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         final m = u.data() ?? {};
         return _Actor(
           uid: uid,
-          displayName:
-              (m['displayName'] ?? m['name'] ?? '').toString().trim().isEmpty
-              ? null
-              : (m['displayName'] ?? m['name']).toString(),
-          handle:
-              (m['handle'] ?? m['letterboxdUsername'] ?? '')
-                  .toString()
-                  .trim()
-                  .isEmpty
-              ? null
-              : (m['handle'] ?? m['letterboxdUsername']).toString(),
-          photoURL: (m['photoURL'] ?? '').toString().trim().isEmpty
-              ? null
-              : (m['photoURL'] ?? '').toString(),
+          displayName: (m['displayName'] ?? m['name'] ?? '').toString(),
+          handle: (m['handle'] ?? m['letterboxdUsername'] ?? '').toString(),
+          photoURL: (m['photoURL'] ?? '').toString(),
         );
       }
     } catch (_) {}
