@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:fluttergirdi/services/match_service.dart';
+import 'package:flutter/services.dart'; 
 
 class OnboardingLetterboxd extends StatefulWidget {
   const OnboardingLetterboxd({super.key});
@@ -124,21 +125,27 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     }
   }
 
-  String? _validator(String? v) {
-    final val = (v ?? '').trim();
-    if (val.isEmpty) return 'Kullanıcı adı zorunlu';
-    final ok = RegExp(r'^[a-zA-Z0-9_\-\.]+$').hasMatch(val);
-    if (!ok) return 'Geçersiz karakter var';
-    if (val.length < 2) return 'En az 2 karakter';
-    return null;
-  }
+  // Eski _validator yerine bunu kullanın:
+String? _validator(String? v) {
+  final val = (v ?? '').trim();
+  
+  // EĞER BOŞSA GEÇERLİ SAY (Hata döndürme)
+  if (val.isEmpty) return null; 
+
+  // Boş değilse regex kontrolü yap
+  final ok = RegExp(r'^[a-zA-Z0-9_\-\.]+$').hasMatch(val);
+  if (!ok) return 'Geçersiz karakter var';
+  if (val.length < 2) return 'En az 2 karakter';
+  
+  return null;
+}
 
   int? _parseAge(String s) {
     final t = s.trim();
     if (t.isEmpty) return null;
     final v = int.tryParse(t);
     if (v == null) return null;
-    if (v < 13 || v > 120) return null;
+    if (v < 16 || v > 120) return null;
     return v;
   }
 
@@ -187,7 +194,7 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
             TextFormField(
               controller: _controller,
               decoration: const InputDecoration(
-                labelText: 'Letterboxd adı',
+                labelText: 'Letterboxd adı (İsteğe bağlı)',
                 border: OutlineInputBorder(),
               ),
               textInputAction: TextInputAction.done,
@@ -216,6 +223,18 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
               ),
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly, // Sadece rakamlara izin verir
+                LengthLimitingTextInputFormatter(3), // (Opsiyonel) En fazla 3 karakter (örn: 120) girilmesini sağlar
+              ],
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Yaş zorunlu';
+                final val = int.tryParse(v);
+                if (val == null) return 'Geçersiz değer';
+                if (val < 16) return 'Uygulamayı kullanmak için 16+ olmalısınız';
+                if (val > 120) return 'Geçersiz yaş';
+                return null;
+              },
             ),
           ],
         );
@@ -411,6 +430,7 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
       });
       primarySaved = true;
 
+      if (raw.isNotEmpty) { 
       try {
         await UserProfileService.instance.saveFromLetterboxd(
           uid: uid,
@@ -427,6 +447,7 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
           );
         }
       }
+    }
 
       try {
         await _retryFirestore(
@@ -531,16 +552,14 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
                               onPressed: _saving
                                   ? null
                                   : () async {
-                                      if (_step == 0) {
-                                        // Düzeltme: Süslü parantezler eklendi
-                                        if (!_formKey.currentState!.validate()) {
-                                          return;
-                                        }
+                                      // DEĞİŞİKLİK: Sadece step 0 değil, her adımda kontrol et
+                                      if (!_formKey.currentState!.validate()) {
+                                        return; // Hata varsa (örn: yaş < 16) ilerleme durur
                                       }
+
                                       if (_step < _totalSteps - 1) {
                                         setState(() {
                                           _step += 1;
-                                          // Düzeltme: Süslü parantezler eklendi
                                           if (_maxStepReached < _step) {
                                             _maxStepReached = _step;
                                           }

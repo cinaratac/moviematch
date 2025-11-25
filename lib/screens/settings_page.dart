@@ -719,14 +719,13 @@ class _SettingsPageState extends State<SettingsPage> {
           'Film zevklerinizi eşleştiren, sosyalleşmenizi sağlayan ve sinema tutkunlarını bir araya getiren uygulama.',
         ),
         const SizedBox(height: 12),
-        const Text('Geliştirici: Çınar Ataç'),
+        const Text('Kozmosoft tarafından geliştirilmiştir.'),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = _user;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Ayarlar'),

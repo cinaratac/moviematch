@@ -6,6 +6,7 @@ import 'package:fluttergirdi/screens/match_screen.dart';
 import 'package:fluttergirdi/screens/messagesscreen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/screens/search_profiles_screen.dart';
+import 'package:fluttergirdi/services/announcement_service.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -15,6 +16,14 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnnouncementService.instance.checkAndShowAnnouncement(context);
+    });
+  }
   int _index = 0;
 
   final List<Widget> _pages = [
@@ -103,6 +112,8 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 }
+
+
 
 class _MessagesIcon extends StatelessWidget {
   final bool selected;

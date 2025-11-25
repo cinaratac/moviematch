@@ -838,19 +838,31 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   /// Blurred header using the first favorite film poster as a fullscreen background
-  Widget _blurBackdrop() {
-    if (_futureFavs == null) return const SizedBox.shrink();
+ Widget _blurBackdrop() {
+    // 1. Güvenlik Katmanı: Her durumda arka planın siyah olduğundan emin olmak için
+    // SizedBox.expand + ColoredBox kullanıyoruz. Tema beyaz olsa bile burası siyah kalır.
+    const Widget baseBlack = SizedBox.expand(child: ColoredBox(color: Colors.black));
+
+    if (_futureFavs == null) return baseBlack;
+
     return FutureBuilder<List<LetterboxdFilm>>(
       future: _futureFavs,
       builder: (context, snap) {
         final list = snap.data ?? const <LetterboxdFilm>[];
         final hasPoster = list.isNotEmpty && (list.first.posterUrl).isNotEmpty;
-        if (!hasPoster) return const SizedBox.shrink();
+        
+        // Eğer poster yoksa direkt simsiyah ekran göster
+        if (!hasPoster) return baseBlack;
+
         final url = list.first.posterUrl;
         return SizedBox.expand(
           child: Stack(
             fit: StackFit.expand,
             children: [
+              // KATMAN 1: En alta sabit siyah zemin (Resim şeffafsa arkası beyaz görünmesin diye)
+              const ColoredBox(color: Colors.black),
+              
+              // KATMAN 2: Bulanıklaştırılmış Poster Resmi
               ImageFiltered(
                 imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
                 child: PosterImage(
@@ -859,16 +871,17 @@ class _ProfilePageState extends State<ProfilePage> {
                   fit: BoxFit.cover,
                 ),
               ),
-              // dark scrim for contrast
+              
+              // KATMAN 3: Karartma (Gradient) - Yazıların okunması için daha koyu yapıldı
               Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Color(0xCC000000),
-                      Color(0x99000000),
-                      Color(0x66000000),
+                      Color(0xE6000000), // %90 Opak Siyah (Üst kısım)
+                      Color(0xCC000000), // %80 Opak Siyah
+                      Color(0x99000000), // %60 Opak Siyah (Alt kısım)
                     ],
                   ),
                 ),
@@ -879,7 +892,6 @@ class _ProfilePageState extends State<ProfilePage> {
       },
     );
   }
-
   // Zorla yenile: cache'i temizleyip tekrar çekmek için
   Future<void> _refreshFavorites() async {
     if (_lbUsername == null || _lbUsername!.isEmpty) {
@@ -1617,7 +1629,7 @@ class _ProfilePageState extends State<ProfilePage> {
               );
             },
           ),
-          if (_lbUsername != null) ...[
+          
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.only(bottom: 8.0),
@@ -1664,7 +1676,7 @@ class _ProfilePageState extends State<ProfilePage> {
               emptyText: 'Sevmediği film bulunamadı.',
               maxItems: 30,
             ),
-          ],
+          
           Padding(
             padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
             child: Text(
@@ -1713,7 +1725,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   SliverAppBar(
                     floating: true,
                     snap: true,
-                    backgroundColor: Colors.black.withOpacity(0.8),
+                    backgroundColor: Colors.black,
                     elevation: 0,
                     scrolledUnderElevation: 0,
                     surfaceTintColor: Colors.transparent,

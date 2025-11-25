@@ -1215,7 +1215,7 @@ PopupMenuButton<String>(
                               const SizedBox(height: 17),
                               if (lb.isNotEmpty)
                                 Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  padding: const EdgeInsets.only(bottom: 10.0),
                                   child: Text(
                                     'Letterboxd: @$lb',
                                     style: Theme.of(
