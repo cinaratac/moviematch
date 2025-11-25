@@ -55,25 +55,21 @@ class UserShelfCache {
 // Lightweight view model for profile activities (top-level)
 class _ActivityItem {
   final String id; // postId
-  final String type; // 'post' | 'repost'
   final String text;
   final DateTime? createdAt;
   final String posterUrl; // optional movie poster
   final String title; // optional movie title
   final int likeCount;
   final int replyCount;
-  final int repostCount;
 
   const _ActivityItem({
     required this.id,
-    required this.type,
     required this.text,
     required this.createdAt,
     this.posterUrl = '',
     this.title = '',
     this.likeCount = 0,
     this.replyCount = 0,
-    this.repostCount = 0,
   });
 }
 
@@ -402,7 +398,6 @@ class _ProfilePageState extends State<ProfilePage> {
         items.add(
           _ActivityItem(
             id: d.id,
-            type: 'post',
             text: (m['text'] ?? '').toString(),
             createdAt: ts is Timestamp ? ts.toDate() : null,
             posterUrl: info['poster'] ?? '',
@@ -413,9 +408,6 @@ class _ProfilePageState extends State<ProfilePage> {
             replyCount: (m['replyCount'] ?? 0) is int
                 ? (m['replyCount'] ?? 0) as int
                 : ((m['replyCount'] ?? 0) as num).toInt(),
-            repostCount: (m['repostCount'] ?? 0) is int
-                ? (m['repostCount'] ?? 0) as int
-                : ((m['repostCount'] ?? 0) as num).toInt(),
           ),
         );
       }
@@ -423,49 +415,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     // 2) Reposts by the user (best-effort via collectionGroup 'reposts' with doc == uid)
     // If your data model differs, feel free to rename 'reposts' or remove this block.
-    try {
-      final cg = db
-          .collectionGroup('reposts')
-          .where('userId', isEqualTo: uid) // use field, not documentId()
-          .limit(50);
-      final cgSnap = await cg.get();
-      for (final rpDoc in cgSnap.docs) {
-        final postRef = rpDoc.reference.parent.parent; // posts/{postId}
-        if (postRef == null) continue;
-        try {
-          final p = await postRef.get(const GetOptions(source: Source.cache));
-          final data =
-              (p.exists ? p.data() : null) ??
-              (await postRef.get(
-                const GetOptions(source: Source.server),
-              )).data();
-          if (data == null) continue;
-          final ts = data['createdAt'];
-          final info = _extractMovieInfo(data);
-          items.add(
-            _ActivityItem(
-              id: postRef.id,
-              type: 'repost',
-              text: (data['text'] ?? '').toString(),
-              createdAt: ts is Timestamp ? ts.toDate() : null,
-              posterUrl: info['poster'] ?? '',
-              title: info['title'] ?? '',
-              likeCount: (data['likeCount'] ?? 0) is int
-                  ? (data['likeCount'] ?? 0) as int
-                  : ((data['likeCount'] ?? 0) as num).toInt(),
-              replyCount: (data['replyCount'] ?? 0) is int
-                  ? (data['replyCount'] ?? 0) as int
-                  : ((data['replyCount'] ?? 0) as num).toInt(),
-              repostCount: (data['repostCount'] ?? 0) is int
-                  ? (data['repostCount'] ?? 0) as int
-                  : ((data['repostCount'] ?? 0) as num).toInt(),
-            ),
-          );
-        } catch (_) {}
-      }
-    } catch (_) {
-      // collectionGroup may be unavailable in rules; ignore silently
-    }
+    
 
     // Sort by time desc and publish
     items.sort((a, b) {
@@ -1477,12 +1427,10 @@ class _ProfilePageState extends State<ProfilePage> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Text(
-                                  a.type == 'repost'
-                                      ? 'Alıntıladı'
-                                      : 'Paylaştı',
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
+                               Text(
+  'Paylaştı',
+  style: Theme.of(context).textTheme.labelSmall,
+),
                                 if (timeLabel.isNotEmpty) ...[
                                   const SizedBox(width: 6),
                                   Text(
@@ -1520,7 +1468,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                   const SizedBox(width: 12),
                                   const Icon(Icons.repeat, size: 16),
                                   const SizedBox(width: 4),
-                                  Text('${a.repostCount}'),
+                                  
                                 ],
                               ),
                             ),

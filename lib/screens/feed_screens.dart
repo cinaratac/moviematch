@@ -545,7 +545,6 @@ class _FeedPageState extends State<FeedPage> {
       'createdAt': FieldValue.serverTimestamp(),
       'likeCount': 0,
       'replyCount': 0,
-      'repostCount': 0,
       'visibility': 'public',
     };
     if (_selectedMovie != null) {
