@@ -406,6 +406,7 @@ class _MatchCardState extends State<_MatchCard>
                   const SizedBox(height: 20),
 
                   // Async Data: Genres & Posters
+                  // Async Data: Genres & Posters
                   FutureBuilder<_CardData>(
                     future: _future,
                     builder: (context, snap) {
@@ -417,6 +418,8 @@ class _MatchCardState extends State<_MatchCard>
                       
                       final commonGenres = m.commonGenres;
                       final commonDirectors = m.commonDirectors;
+                      // Veri var mı ve film listesi dolu mu kontrolü
+                      final hasFilms = cd != null && cd.allFilms.isNotEmpty;
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -447,23 +450,24 @@ class _MatchCardState extends State<_MatchCard>
                           ],
 
                           // Posters
-                          if (cd != null && cd.allPosters.isNotEmpty) ...[
+                          if (hasFilms) ...[
                             Text('ORTAK FİLMLER', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)),
                             const SizedBox(height: 8),
                             SizedBox(
                               height: 140,
                               child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
-                                itemCount: cd.allPosters.length,
+                                itemCount: cd!.allFilms.length, // allPosters yerine allFilms
                                 separatorBuilder: (_, __) => const SizedBox(width: 10),
                                 itemBuilder: (ctx, i) {
+                                  final film = cd.allFilms[i]; // Film objesini al
                                   return ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
                                     child: AspectRatio(
                                       aspectRatio: 2 / 3,
                                       child: PosterImage(
-                                        posterUrl: cd.allPosters[i],
-                                        title: null,
+                                        posterUrl: film.posterUrl,
+                                        title: film.title, // Title parametresi eklendi
                                         fit: BoxFit.cover,
                                       ),
                                     ),
@@ -471,7 +475,8 @@ class _MatchCardState extends State<_MatchCard>
                                 },
                               ),
                             )
-                          ] else 
+                          ] else ...[
+                            // Eğer film yoksa gösterilecek kutu (Spread operatörü ile listeye eklendi)
                             Container(
                                padding: const EdgeInsets.all(16),
                                width: double.infinity,
@@ -481,6 +486,7 @@ class _MatchCardState extends State<_MatchCard>
                                ),
                                child: const Text('Ortak film detayı yükleniyor veya yok...', textAlign: TextAlign.center, style: TextStyle(fontSize: 12))
                             )
+                          ]
                         ],
                       );
                     },
@@ -776,38 +782,50 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
 
 // --- Card Data Fetcher for Swipe Card Preview ---
 
+// --- GÜNCELLENMİŞ VERSİYON ---
+
 class _CardData {
-  final List<String> allPosters; // Combined robust posters
-  const _CardData({this.allPosters = const []});
+  // Artık sadece String listesi değil, FilmItem listesi tutuyoruz (Title + Poster)
+  final List<FilmItem> allFilms; 
+  const _CardData({this.allFilms = const []});
 }
 
 Future<_CardData> _loadCardData(global_match.MatchResult m) async {
   final db = FirebaseFirestore.instance;
   
-  // Combine priority keys: 5stars -> favorites -> watchlist
+  // Öncelik sırası: 5 yıldız -> favoriler -> watchlist
   final allKeys = <String>{
     ...m.commonFiveStars.take(4),
     ...m.commonFavorites.take(4),
     ...m.commonWatchlist.take(2)
-  }.take(6).toList(); // Max 6 posters on preview
+  }.take(6).toList(); 
 
   if(allKeys.isEmpty) return const _CardData();
 
-  final posters = <String>[];
-  // Reuse robust logic roughly (simplified for preview)
+  final films = <FilmItem>[];
+  
   try {
-     // Check Doc IDs first
+     // Doc ID ile ara
      var qs = await db.collection('catalog_films').where(FieldPath.documentId, whereIn: allKeys).get();
+     
+     // Bulamazsa 'key' alanı ile ara (Yedek)
      if (qs.docs.isEmpty) {
        qs = await db.collection('catalog_films').where('key', whereIn: allKeys).get();
      }
+
      for(final d in qs.docs) {
-       final p = (d.data()['posterUrl'] ?? d.data()['poster'] ?? '').toString();
-       if(p.isNotEmpty) posters.add(p);
+       final data = d.data();
+       final p = (data['posterUrl'] ?? data['poster'] ?? '').toString();
+       final t = (data['title'] ?? data['name'] ?? '').toString(); // Title'ı da alıyoruz!
+       
+       // Poster boş olsa bile listeye ekle, çünkü PosterImage widget'ı title ile bulacak.
+       if (t.isNotEmpty) {
+         films.add(FilmItem(title: t, posterUrl: p));
+       }
      }
   } catch(_) {}
 
-  return _CardData(allPosters: posters);
+  return _CardData(allFilms: films);
 }
 
 // --- Components for Incoming Likes Bottom Sheet ---
