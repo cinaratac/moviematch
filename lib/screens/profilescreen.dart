@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/services/match_service.dart';
@@ -180,6 +181,8 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+
+  bool _showGuide = false;
   Map<String, dynamic>? _lastUserData;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
   String? _lbUsername;
@@ -431,7 +434,7 @@ class _ProfilePageState extends State<ProfilePage> {
       });
     }
   }
-
+  final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
   Future<void> _loadPrefs() async {
     final sp = await SharedPreferences.getInstance();
     final user = FirebaseAuth.instance.currentUser;
@@ -447,6 +450,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final u = uid != null
         ? sp.getString('lb_username_$uid')
         : sp.getString('lb_username');
+
     setState(() {
       _lbUsername = u;
       _futureFavs = (u == null || u.isEmpty)
@@ -459,18 +463,30 @@ class _ProfilePageState extends State<ProfilePage> {
           ? null
           : LetterboxdService.fetchDisliked(u);
     });
-    // Fill in-memory cache when futures complete (no extra Firestore reads)
-    // ignore: discarded_futures
-    _primeShelfCache();
 
-    // Ensure users/{uid}.letterboxdUsername is set from prefs if missing
-    // ignore: discarded_futures
+    // --- KRİTİK DÜZELTME ---
+    // Future.delayed KULLANMIYORUZ.
+    // _primeShelfCache() verileri çeken asenkron fonksiyondur. 
+    // .then((_) { ... }) diyerek bu işlem BİTTİKTEN SONRA kontrol yapıyoruz.
+    _primeShelfCache().then((_) {
+      if (mounted) {
+        // Veriler tamamen yüklendi. Şimdi kontrol edelim:
+        if (UserShelfCache.favorites.isEmpty) {
+           // Gerçekten favori yoksa karakteri göster
+           _showGuideNotifier.value = true;
+        } else {
+           // Favoriler varsa karakteri GİZLE (veya hiç açma)
+           _showGuideNotifier.value = false;
+        }
+      }
+    });
+
+    // Diğer işlemler (await kullanmadan arka planda devam etsin)
     _forceWriteLbUsernameIfMissing();
-
-    // Kick a first-time sync if Firestore hasn't got LB mirrors yet
-    // ignore: discarded_futures
     _ensureInitialSyncIfNeeded();
   }
+
+  
 
   void _bindLbFromFirestore() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -743,6 +759,7 @@ class _ProfilePageState extends State<ProfilePage> {
   void dispose() {
     _userSub?.cancel();
     _followSub?.cancel();
+    _showGuideNotifier.dispose();
     super.dispose();
   }
 
@@ -1428,9 +1445,9 @@ class _ProfilePageState extends State<ProfilePage> {
                                 ),
                                 const SizedBox(width: 8),
                                Text(
-  'Paylaştı',
-  style: Theme.of(context).textTheme.labelSmall,
-),
+                                  ' Paylaştı',
+                                style: Theme.of(context).textTheme.labelSmall,
+                                ),
                                 if (timeLabel.isNotEmpty) ...[
                                   const SizedBox(width: 6),
                                   Text(
@@ -1647,10 +1664,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
   // --- END: Profile & Activities Tabs ---
 
-  @override
+ @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.userChanges(), // canlı dinle
+      stream: FirebaseAuth.instance.userChanges(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -1665,146 +1682,169 @@ class _ProfilePageState extends State<ProfilePage> {
         return DefaultTabController(
           length: 2,
           child: Scaffold(
-            // AppBar removed for sliver app bar behavior
             extendBodyBehindAppBar: true,
-            body: NestedScrollView(
-              headerSliverBuilder: (context, innerBoxIsScrolled) {
-                return [
-                  SliverAppBar(
-                    floating: true,
-                    snap: true,
-                    backgroundColor: Colors.black,
-                    elevation: 0,
-                    scrolledUnderElevation: 0,
-                    surfaceTintColor: Colors.transparent,
-                    automaticallyImplyLeading: false,
-                    actions: [
-                      IconButton(
-                        tooltip: 'Düzenle',
-                        icon: const Icon(Icons.edit_outlined),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => EditProfilePage(
-                                initialUserData: _lastUserData,
+            // Stack yapısı burada başlıyor
+            body: Stack(
+              children: [
+                // 1. KATMAN: PROFİL İÇERİĞİ (Sabit, rebuild olmaz)
+                NestedScrollView(
+                  headerSliverBuilder: (context, innerBoxIsScrolled) {
+                    return [
+                      SliverAppBar(
+                        // ... (SliverAppBar kodları aynı kalacak) ...
+                        // Buradaki kodları aynen koru
+                        floating: true,
+                        snap: true,
+                        backgroundColor: Colors.black,
+                        elevation: 0,
+                        scrolledUnderElevation: 0,
+                        surfaceTintColor: Colors.transparent,
+                        automaticallyImplyLeading: false,
+                        actions: [
+                          IconButton(
+                            tooltip: 'Düzenle',
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => EditProfilePage(
+                                    initialUserData: _lastUserData,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          IconButton(
+                            tooltip: 'Yenile',
+                            icon: const Icon(Icons.refresh),
+                            onPressed: () async {
+                              await _refreshFavorites();
+                              await _loadActivities();
+                              await _bootstrapCounts();
+                            },
+                          ),
+                          PopupMenuButton<String>(
+                            onSelected: (value) async {
+                              if (value == 'settings') {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const SettingsPage(),
+                                  ),
+                                );
+                              }
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: 'settings',
+                                child: ListTile(
+                                  leading: Icon(Icons.settings_outlined),
+                                  title: Text('Ayarlar'),
+                                ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        tooltip: 'Yenile',
-                        icon: const Icon(Icons.refresh),
-                        onPressed: () async {
-                          await _refreshFavorites();
-                          await _loadActivities();
-                          await _bootstrapCounts();
-                        },
-                      ),
-                      PopupMenuButton<String>(
-                        onSelected: (value) async {
-                          if (value == 'settings') {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const SettingsPage(),
-                              ),
-                            );
-                          }
-                        },
-                        itemBuilder: (context) => const [
-                          PopupMenuItem(
-                            value: 'settings',
-                            child: ListTile(
-                              leading: Icon(Icons.settings_outlined),
-                              title: Text('Ayarlar'),
-                            ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                  SliverToBoxAdapter(
-                    child: Stack(
-                      children: [
-                        // Backdrop behind header + tab bar
-                        SizedBox(
-                          height: MediaQuery.of(context).size.height * 0.28,
-                          child: _blurBackdrop(),
-                        ),
-                        Column(
+                      SliverToBoxAdapter(
+                        child: Stack(
                           children: [
                             SizedBox(
-                              height:
-                                  MediaQuery.of(context).padding.top +
-                                  kToolbarHeight,
+                              height: MediaQuery.of(context).size.height * 0.28,
+                              child: _blurBackdrop(),
                             ),
-                            _profileHeaderSection(
-                              context: context,
-                              user: user,
-                              followers: _followers,
-                              following: _following,
-                              lbUsername: _lbUsername,
-                              shownName: _shownName,
-                            ),
-                            const SizedBox(height: 12),
-                            // Transparent TabBar inside scrolling header
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                              ),
-                              child: TabBar(
-                                isScrollable: false,
-                                indicator: UnderlineTabIndicator(
-                                  borderSide: BorderSide(
-                                    width: 2,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
+                            Column(
+                              children: [
+                                SizedBox(
+                                  height:
+                                      MediaQuery.of(context).padding.top +
+                                      kToolbarHeight,
+                                ),
+                                _profileHeaderSection(
+                                  context: context,
+                                  user: user,
+                                  followers: _followers,
+                                  following: _following,
+                                  lbUsername: _lbUsername,
+                                  shownName: _shownName,
+                                ),
+                                const SizedBox(height: 12),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: TabBar(
+                                    isScrollable: false,
+                                    indicator: UnderlineTabIndicator(
+                                      borderSide: BorderSide(
+                                        width: 2,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .primary,
+                                      ),
+                                    ),
+                                    indicatorSize: TabBarIndicatorSize.tab,
+                                    overlayColor: WidgetStateProperty.all(
+                                      Colors.transparent,
+                                    ),
+                                    labelPadding: const EdgeInsets.symmetric(
+                                      vertical: 6,
+                                    ),
+                                    labelStyle: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                    unselectedLabelStyle: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall,
+                                    labelColor: Colors.white,
+                                    unselectedLabelColor: Colors.white70,
+                                    tabs: const [
+                                      Tab(text: 'Filmler'),
+                                      Tab(text: 'Aktiviteler'),
+                                    ],
                                   ),
                                 ),
-                                indicatorSize: TabBarIndicatorSize.tab,
-                                overlayColor: WidgetStateProperty.all(
-                                  Colors.transparent,
-                                ),
-                                labelPadding: const EdgeInsets.symmetric(
-                                  vertical: 6,
-                                ),
-                                labelStyle: Theme.of(context)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                                unselectedLabelStyle: Theme.of(
-                                  context,
-                                ).textTheme.titleSmall,
-                                labelColor: Colors.white,
-                                unselectedLabelColor: Colors.white70,
-                                tabs: const [
-                                  Tab(text: 'Filmler'),
-                                  Tab(text: 'Aktiviteler'),
-                                ],
-                              ),
+                                const SizedBox(height: 8),
+                              ],
                             ),
-                            const SizedBox(height: 8),
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ];
+                  },
+                  body: TabBarView(
+                    children: [
+                      _buildProfileContentAfterHeader(),
+                      _buildActivitiesTab(),
+                    ],
                   ),
-                ];
-              },
-              // Body is each tab's scrollable content; header (incl. TabBar) scrolls off
-              body: TabBarView(
-                children: [
-                  _buildProfileContentAfterHeader(),
-                  _buildActivitiesTab(),
-                ],
-              ),
+                ),
+
+                // 2. KATMAN: REHBER KARAKTER (Sadece burası dinlenir)
+                ValueListenableBuilder<bool>(
+                  valueListenable: _showGuideNotifier,
+                  builder: (context, isVisible, child) {
+                    if (!isVisible) return const SizedBox.shrink();
+                    
+                    return GuideCharacterOverlay(
+                      message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.",
+                      isVisible: isVisible,
+                      onClose: () {
+                        // Burada setState YOK. Sadece değeri false yapıyoruz.
+                        // GuideCharacterOverlay kendi içinde animasyonu bitirip bunu çağıracak.
+                        _showGuideNotifier.value = false;
+                      },
+                    );
+                  },
+                ),
+              ],
             ),
           ),
         );
       },
     );
   }
+ 
 }
 
 // Widget for the "Add Film" tile/button

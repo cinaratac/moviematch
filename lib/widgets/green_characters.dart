@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // EKLENDİ
 
 /// Yeşil karakter: parmak/işaretçiyi takip eden gözler
 ///
@@ -109,8 +110,9 @@ class _GreenEyesPainter extends CustomPainter {
 
     // Arka plan katmanları
     final pOuter = Paint()..color = outer;
-    final pMid = Paint()..color = mid.withOpacity(0.9);
-    final pInner = Paint()..color = inner.withOpacity(0.9);
+    // withOpacity yerine withValues kullanıldı (Yeni Flutter sürümleri için)
+    final pMid = Paint()..color = mid.withValues(alpha: 0.9);
+    final pInner = Paint()..color = inner.withValues(alpha: 0.9);
 
     canvas.drawCircle(center, radius, pOuter);
     canvas.drawCircle(center, radius * 0.82, pMid);
@@ -193,11 +195,11 @@ class _ForestFace extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          _ring(140, base.withOpacity(0.90)),
-          _ring(112, base.withOpacity(0.75)),
-          _ring(88, base.withOpacity(0.55)),
-          _ring(64, base.withOpacity(0.35)),
-          _ring(44, base.withOpacity(0.20)),
+          _ring(140, base.withValues(alpha: 0.90)),
+          _ring(112, base.withValues(alpha: 0.75)),
+          _ring(88, base.withValues(alpha: 0.55)),
+          _ring(64, base.withValues(alpha: 0.35)),
+          _ring(44, base.withValues(alpha: 0.20)),
           Positioned(left: 38, top: 54, child: _eye(offsetX, offsetY)),
           Positioned(right: 38, top: 54, child: _eye(offsetX, offsetY)),
         ],
@@ -300,6 +302,175 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
           ),
         );
       },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GÜNCELLENEN WIDGET: REHBER KARAKTER (Sayaçlı Metin Değişimi)
+// ---------------------------------------------------------------------------
+
+/// Karakterin sağ üstten çıkıp konuşma balonu ile mesaj verdiği widget.
+class GuideCharacterOverlay extends StatefulWidget {
+  final String message;
+  final VoidCallback onClose;
+  final bool isVisible;
+
+  const GuideCharacterOverlay({
+    super.key,
+    required this.message,
+    required this.onClose,
+    this.isVisible = true,
+  });
+
+  @override
+  State<GuideCharacterOverlay> createState() => _GuideCharacterOverlayState();
+}
+
+class _GuideCharacterOverlayState extends State<GuideCharacterOverlay>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _offsetAnimation;
+  int _dismissCount = 0; // Kapatılma sayısını tutar
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDismissCount(); // Sayacı yükle
+
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
+
+    // Sağ taraftan (ekran dışından) içeri kayma animasyonu
+    _offsetAnimation = Tween<Offset>(
+      begin: const Offset(1.5, 0.0), // 1.5 diyerek iyice sağa ittik
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+
+    if (widget.isVisible) {
+      _controller.forward();
+    }
+  }
+
+  // SharedPreferences'tan kaç kez kapatıldığını yükler
+  Future<void> _loadDismissCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _dismissCount = prefs.getInt('guide_dismiss_count') ?? 0;
+      });
+    }
+  }
+
+  // Kapatma işlemini yönetir: Önce animasyonu ters çevirir, sonra kapatır ve sayacı artırır.
+  Future<void> _handleClose() async {
+    // Sayacı artırıp kaydet
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('guide_dismiss_count', _dismissCount + 1);
+
+    // 1. Önce animasyonu geri sar (Ekranda sağa doğru kayar)
+    await _controller.reverse();
+
+    // 2. Animasyon bittikten sonra parent'a haber ver (Ekrandan silinir)
+    widget.onClose();
+  }
+
+  @override
+  void didUpdateWidget(covariant GuideCharacterOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Eğer dışarıdan visible false gelirse de animasyonla kapatalım
+    if (!widget.isVisible && oldWidget.isVisible) {
+      _handleClose();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 100, // Yukarıdan mesafe
+      right: 0,
+      child: SlideTransition(
+        position: _offsetAnimation,
+        child: Container(
+          width: 280, // Toplam genişlik
+          padding: const EdgeInsets.only(right: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              // Konuşma Balonu
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 20, right: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(16),
+                          bottomLeft: Radius.circular(16),
+                          bottomRight: Radius.circular(16),
+                          topRight: Radius.circular(4),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 6,
+                            offset: const Offset(2, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.message,
+                            style: const TextStyle(
+                              color: Colors.black87,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: _handleClose,
+                            child: Text(
+                              // BURASI DEĞİŞTİ: 2. kezden sonra (yani 3. gösterimde) "Git artık" yazar
+                              _dismissCount >= 2 ? "Git artık" : "Tamam",
+                              style: const TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Yeşil Karakter (Mevcut widget'ı kullanıyoruz)
+              GestureDetector(
+                onTap: _handleClose, // Karaktere basınca da kapansın
+                child: const GreenEyesCharacter(
+                  size: 80, // Daha küçük boyut
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

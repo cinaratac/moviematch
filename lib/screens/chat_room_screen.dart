@@ -9,6 +9,8 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/watchlist_wheel.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:fluttergirdi/widgets/green_characters.dart';
 
 // ---- Local (device) profile films model & storage (no Firebase) ----
 class LocalFilm {
@@ -81,6 +83,7 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
+  final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
   final _svc = ChatService();
   final _ctrl = TextEditingController();
   StreamSubscription? _latestSub;
@@ -111,8 +114,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     // İlk girişte de okundu bas
     _svc.markAsRead(widget.chatId, myUid);
+    _checkAndShowGuide();
   }
+  Future<void> _checkAndShowGuide() async {
+    // Ekranın tamamen yüklenmesi için kısa bir süre bekle
+    await Future.delayed(const Duration(seconds: 1));
+    if (!mounted) return;
 
+    try {
+      final sp = await SharedPreferences.getInstance();
+      // 'seen_watchlist_guide' anahtarı daha önce true yapılmış mı?
+      final bool seen = sp.getBool('seen_watchlist_guide') ?? false;
+
+      if (!seen) {
+        // Gösterilmediyse şimdi göster
+        _showGuideNotifier.value = true;
+        // Ve bir daha göstermemek için kaydet
+        await sp.setBool('seen_watchlist_guide', true);
+      }
+    } catch (e) {
+      debugPrint('Rehber hatası: $e');
+    }
+  }
   @override
   void dispose() {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
@@ -122,6 +145,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
     _latestSub?.cancel();
     _ctrl.dispose();
+    _showGuideNotifier.dispose();
     super.dispose();
   }
 
@@ -386,241 +410,268 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           initialTitle: widget.otherTitle,
         ),
       ),
-      body: Column(
+      // BURASI DEĞİŞTİ: Column yerine Stack kullanıyoruz
+      body: Stack(
         children: [
-          // Mesajlar
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance
-                  .collection('chats')
-                  .doc(widget.chatId)
-                  .collection('messages')
-                  .orderBy('createdAt', descending: true)
-                  .limit(60)
-                  .snapshots(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final docs = snap.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return const Center(child: Text('Henüz mesaj yok.'));
-                }
-                return ListView.builder(
-                  reverse: true,
-                  cacheExtent: 800,
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  itemCount: docs.length,
-                  itemBuilder: (context, i) {
-                    final m = docs[i].data();
-                    final author = (m['authorId'] ?? m['from'] ?? '') as String;
-                    final mine = author == myUid;
-                    final text = (m['text'] ?? '') as String;
-                    final ts = (m['createdAt'] as Timestamp?);
-                    final dt = ts?.toDate();
+          // 1. KATMAN: Sohbet Arayüzü (Senin yazdığın Column kodu)
+          Column(
+            children: [
+              // Mesajlar
+              Expanded(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('chats')
+                      .doc(widget.chatId)
+                      .collection('messages')
+                      .orderBy('createdAt', descending: true)
+                      .limit(60)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final docs = snap.data?.docs ?? [];
+                    if (docs.isEmpty) {
+                      return const Center(child: Text('Henüz mesaj yok.'));
+                    }
+                    return ListView.builder(
+                      reverse: true,
+                      cacheExtent: 800,
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      itemCount: docs.length,
+                      itemBuilder: (context, i) {
+                        final m = docs[i].data();
+                        final author =
+                            (m['authorId'] ?? m['from'] ?? '') as String;
+                        final mine = author == myUid;
+                        final text = (m['text'] ?? '') as String;
+                        final ts = (m['createdAt'] as Timestamp?);
+                        final dt = ts?.toDate();
 
-                    return Align(
-                      alignment: mine
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 320),
+                        return Align(
+                          alignment: mine
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 320),
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: mine
+                                    ? Colors.blueAccent
+                                    : Colors.grey.shade800,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: const Radius.circular(12),
+                                  topRight: const Radius.circular(12),
+                                  bottomLeft: Radius.circular(
+                                    mine ? 12 : 4,
+                                  ), // kuyruk
+                                  bottomRight: Radius.circular(
+                                    mine ? 4 : 12,
+                                  ), // kuyruk
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: mine
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                children: [
+                                  if (text.isNotEmpty)
+                                    Text(
+                                      text,
+                                      style:
+                                          const TextStyle(color: Colors.white),
+                                    ),
+                                  // Show movie poster if available
+                                  Builder(
+                                    builder: (_) {
+                                      String posterUrl = '';
+                                      final movie = m['movie'];
+                                      if (movie is Map) {
+                                        final mm =
+                                            Map<String, dynamic>.from(movie);
+                                        posterUrl = (mm['poster'] ?? '')
+                                                as String? ??
+                                            '';
+                                      }
+                                      if (posterUrl.isEmpty) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      return Padding(
+                                        padding:
+                                            const EdgeInsets.only(top: 8.0),
+                                        child: PosterImage(
+                                          posterUrl: posterUrl,
+                                          title: (m['movie'] is Map)
+                                              ? (Map<String, dynamic>.from(
+                                                        m['movie'],
+                                                      )['title'] as String? ??
+                                                  '')
+                                              : '',
+                                          width: 220,
+                                          height: 330,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  if (dt != null) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _formatTime(dt),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.white
+                                            .withValues(alpha: 0.8),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+
+              // Girdi alanı
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
                         child: Container(
-                          margin: const EdgeInsets.symmetric(
+                          padding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 6,
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
                           decoration: BoxDecoration(
-                            color: mine
-                                ? Colors.blueAccent
-                                : Colors.grey.shade800,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(12),
-                              topRight: const Radius.circular(12),
-                              bottomLeft: Radius.circular(
-                                mine ? 12 : 4,
-                              ), // kuyruk
-                              bottomRight: Radius.circular(
-                                mine ? 4 : 12,
-                              ), // kuyruk
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: mine
-                                ? CrossAxisAlignment.end
-                                : CrossAxisAlignment.start,
-                            children: [
-                              if (text.isNotEmpty)
-                                Text(
-                                  text,
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              // Show movie poster if available
-                              Builder(
-                                builder: (_) {
-                                  String posterUrl = '';
-                                  final movie = m['movie'];
-                                  if (movie is Map) {
-                                    final mm = Map<String, dynamic>.from(movie);
-                                    posterUrl =
-                                        (mm['poster'] ?? '') as String? ?? '';
-                                  }
-                                  if (posterUrl.isEmpty)
-                                    return const SizedBox.shrink();
-                                  return Padding(
-                                    padding: const EdgeInsets.only(top: 8.0),
-                                    child: PosterImage(
-                                      posterUrl: posterUrl,
-                                      title: (m['movie'] is Map)
-                                          ? (Map<String, dynamic>.from(
-                                                      m['movie'],
-                                                    )['title']
-                                                    as String? ??
-                                                '')
-                                          : '',
-                                      width: 220,
-                                      height: 330,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  );
-                                },
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(24),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
                               ),
-                              if (dt != null) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  _formatTime(dt),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.white.withValues(alpha: 0.8),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 8),
+                              // Text input expands
+                              Expanded(
+                                child: TextField(
+                                  controller: _ctrl,
+                                  minLines: 1,
+                                  maxLines: 4,
+                                  textInputAction: TextInputAction.send,
+                                  onSubmitted: (_) => _send(),
+                                  decoration: const InputDecoration(
+                                    hintText: 'Mesaj',
+                                    isCollapsed: true,
+                                    border: InputBorder.none,
                                   ),
                                 ),
-                              ],
+                              ),
+                              // Right-side actions inside the field
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Film paylaş icon
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Film paylaş',
+                                    onPressed: _openFilmPicker,
+                                    icon: Icon(
+                                      Icons.local_movies_outlined,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // Seçim Çarkı (Ortak Watchlist)
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Watchlist Çarkı',
+                                    onPressed: () {
+                                      showModalBottomSheet(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        useSafeArea: true,
+                                        builder: (_) => _WatchlistWheelSheet(
+                                          chatId: widget.chatId,
+                                          myUid: FirebaseAuth
+                                              .instance.currentUser!.uid,
+                                          otherUid: widget.otherUid,
+                                        ),
+                                      );
+                                    },
+                                    icon: Icon(
+                                      Icons.donut_large,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                         ),
                       ),
-                    );
-                  },
-                );
-              },
-            ),
+                      const SizedBox(width: 8),
+                      // Optional small send button; keep for convenience
+                      CircleAvatar(
+                        radius: 22,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primary,
+                        child: IconButton(
+                          onPressed: _send,
+                          icon: const Icon(Icons.send, color: Colors.white),
+                          tooltip: 'Gönder',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
 
-          // Girdi alanı
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.08),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          const SizedBox(width: 8),
-                          // Text input expands
-                          Expanded(
-                            child: TextField(
-                              controller: _ctrl,
-                              minLines: 1,
-                              maxLines: 4,
-                              textInputAction: TextInputAction.send,
-                              onSubmitted: (_) => _send(),
-                              decoration: const InputDecoration(
-                                hintText: 'Mesaj',
-                                isCollapsed: true,
-                                border: InputBorder.none,
-                              ),
-                            ),
-                          ),
-                          // Right-side actions inside the field
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Film paylaş icon
-                              IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                tooltip: 'Film paylaş',
-                                onPressed: _openFilmPicker,
-                                icon: Icon(
-                                  Icons.local_movies_outlined,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              // Seçim Çarkı (Ortak Watchlist)
-                              IconButton(
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                tooltip: 'Watchlist Çarkı',
-                                onPressed: () {
-                                  showModalBottomSheet(
-                                    context: context,
-                                    isScrollControlled: true,
-                                    useSafeArea: true,
-                                    builder: (_) => _WatchlistWheelSheet(
-                                      chatId: widget.chatId,
-                                      myUid: FirebaseAuth
-                                          .instance
-                                          .currentUser!
-                                          .uid,
-                                      otherUid: widget.otherUid,
-                                    ),
-                                  );
-                                },
-                                icon: Icon(
-                                  Icons.donut_large,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Optional small send button; keep for convenience
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    child: IconButton(
-                      onPressed: _send,
-                      icon: const Icon(Icons.send, color: Colors.white),
-                      tooltip: 'Gönder',
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          // 2. KATMAN: REHBER KARAKTER (Burası eksikti, ekledim)
+          ValueListenableBuilder<bool>(
+            valueListenable: _showGuideNotifier,
+            builder: (context, isVisible, child) {
+              if (!isVisible) return const SizedBox.shrink();
+
+              return GuideCharacterOverlay(
+                message:
+                    "Beraber film izlemek için watchlist çarkını deneyebilirsin",
+                isVisible: isVisible,
+                onClose: () {
+                  _showGuideNotifier.value = false;
+                },
+              );
+            },
           ),
         ],
       ),
-      // floatingActionButton removed
     );
   }
 }

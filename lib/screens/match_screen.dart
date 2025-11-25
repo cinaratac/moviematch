@@ -11,6 +11,7 @@ import 'package:fluttergirdi/screens/likes_page.dart';
 import 'package:fluttergirdi/screens/passes_page.dart';
 import 'package:swipe_cards/swipe_cards.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/widgets/green_characters.dart';
 
 // Simple in-memory cache to persist match list within app session
 class _MatchListSessionCache {
@@ -33,10 +34,19 @@ class _MatchListScreenState extends State<MatchListScreen> {
   bool _finished = false;
   static final PageStorageBucket _bucket = PageStorageBucket();
 
+  // 1. Karakterin görünürlüğünü yönetecek Notifier
+  final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
+
   @override
   void initState() {
     super.initState();
     _loadMatches();
+  }
+
+  @override
+  void dispose() {
+    _showGuideNotifier.dispose(); // Bellek sızıntısını önlemek için dispose ediyoruz
+    super.dispose();
   }
 
   Future<void> _loadMatches() async {
@@ -62,7 +72,8 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
     // 2) Servisten çekme
     try {
-      final results = await global_match.MatchService.instance.findMatches(me.uid);
+      final results =
+          await global_match.MatchService.instance.findMatches(me.uid);
       if (!mounted) return;
 
       _all = results;
@@ -75,12 +86,26 @@ class _MatchListScreenState extends State<MatchListScreen> {
         _matchEngine = MatchEngine(swipeItems: _swipeItems);
         _loading = false;
       });
+
+      // EĞER LİSTE BOŞSA KARAKTERİ TETİKLE
+      if (_swipeItems.isEmpty) {
+        // Küçük bir gecikme ekleyerek sayfa geçişinin bitmesini bekleyelim
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) _showGuideNotifier.value = true;
+        });
+      }
+
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _all = const [];
       });
+      // Hata durumunda da liste boş kalacağı için karakteri gösterebiliriz
+      Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) _showGuideNotifier.value = true;
+      });
+
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Eşleşmeler alınamadı: $e')));
     }
@@ -143,52 +168,78 @@ class _MatchListScreenState extends State<MatchListScreen> {
               ),
             ],
           ),
-          body: TabBarView(
-            physics: const NeverScrollableScrollPhysics(),
+          // BURASI GÜNCELLENDİ: TabBarView Stack içine alındı
+          body: Stack(
             children: [
-              // --- Tab 1: Geçilenler ---
-              const PassesListBody(),
+              // 1. KATMAN: Tab İçerikleri
+              TabBarView(
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  // --- Tab 1: Geçilenler ---
+                  const PassesListBody(),
 
-              // --- Tab 2: Eşleşme Kartları ---
-              _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : (_swipeItems.isEmpty || _finished
-                      ? const _NoMatchesCharacter()
-                      : Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                          child: SwipeCards(
-                            matchEngine: _matchEngine,
-                            itemBuilder: (context, index) {
-                              final m = _swipeItems[index].content
-                                  as global_match.MatchResult;
-                              return _MatchCard(
-                                key: ValueKey(m.uid),
-                                result: m,
-                                onOpen: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => MatchScreen(result: m),
-                                    ),
+                  // --- Tab 2: Eşleşme Kartları ---
+                  _loading
+                      ? const Center(child: CircularProgressIndicator())
+                      : (_swipeItems.isEmpty || _finished
+                          ? const _NoMatchesCharacter()
+                          : Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                              child: SwipeCards(
+                                matchEngine: _matchEngine,
+                                itemBuilder: (context, index) {
+                                  final m = _swipeItems[index].content
+                                      as global_match.MatchResult;
+                                  return _MatchCard(
+                                    key: ValueKey(m.uid),
+                                    result: m,
+                                    onOpen: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              MatchScreen(result: m),
+                                        ),
+                                      );
+                                    },
+                                    onLike: () {
+                                      _matchEngine.currentItem?.like();
+                                    },
+                                    onPass: () {
+                                      _matchEngine.currentItem?.nope();
+                                    },
                                   );
                                 },
-                                onLike: () {
-                                  _matchEngine.currentItem?.like();
+                                onStackFinished: () {
+                                  setState(() => _finished = true);
+                                  // KARTLAR BİTİNCE KARAKTERİ TETİKLE
+                                  _showGuideNotifier.value = true;
                                 },
-                                onPass: () {
-                                  _matchEngine.currentItem?.nope();
-                                },
-                              );
-                            },
-                            onStackFinished: () {
-                              setState(() => _finished = true);
-                            },
-                            upSwipeAllowed: false,
-                            fillSpace: true,
-                          ),
-                        )),
+                                upSwipeAllowed: false,
+                                fillSpace: true,
+                              ),
+                            )),
 
-              // --- Tab 3: Beğenilenler ---
-              const LikesListBody(),
+                  // --- Tab 3: Beğenilenler ---
+                  const LikesListBody(),
+                ],
+              ),
+
+              // 2. KATMAN: REHBER KARAKTER
+              ValueListenableBuilder<bool>(
+                valueListenable: _showGuideNotifier,
+                builder: (context, isVisible, child) {
+                  if (!isVisible) return const SizedBox.shrink();
+
+                  return GuideCharacterOverlay(
+                    message: "Daha fazla film izlemelisin",
+                    isVisible: isVisible,
+                    onClose: () {
+                      _showGuideNotifier.value = false;
+                    },
+                  );
+                },
+              ),
             ],
           ),
         ),
