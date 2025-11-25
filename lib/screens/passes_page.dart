@@ -4,7 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 
-// --- Data Models ---
+// --- Data Models (Poster Fallback için) ---
+
+class _PosterData {
+  final String posterUrl;
+  final String? title;
+  final int? tmdbId;
+  const _PosterData({required this.posterUrl, this.title, this.tmdbId});
+}
+
 class _UserLite {
   final String title;
   final String photoURL;
@@ -18,7 +26,37 @@ class _PassRow {
   const _PassRow({required this.otherUid, this.when});
 }
 
+class _CardData {
+  final int? age;
+  final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
+  
+  // Zengin poster verisi (Fallback destekli)
+  final List<_PosterData> fivePosters;
+  final List<_PosterData> favPosters;
+  final List<_PosterData> watchPosters;
+  
+  final int? commonFiveCount;
+  final int? commonFavCount;
+  final int? commonWatchCount;
+
+  _CardData({
+    this.age,
+    this.genres = const [],
+    this.directors = const [],
+    this.actors = const [],
+    this.fivePosters = const [],
+    this.favPosters = const [],
+    this.watchPosters = const [],
+    this.commonFiveCount,
+    this.commonFavCount,
+    this.commonWatchCount,
+  });
+}
+
 // --- Main Page ---
+
 class PassesPage extends StatelessWidget {
   const PassesPage({super.key});
 
@@ -52,6 +90,10 @@ class _PassesListBodyState extends State<PassesListBody>
   late final Future<List<_PassRow>> _itemsFuture;
   late final Future<Map<String, dynamic>> _myTasteFuture;
   final Map<String, _UserLite> _userCache = <String, _UserLite>{};
+  
+  // Kart verileri için önbellek
+  final Map<String, Future<_CardData>> _cardCache = {};
+  
   final PageStorageKey _listKey = const PageStorageKey('passes_list');
 
   @override
@@ -61,6 +103,10 @@ class _PassesListBodyState extends State<PassesListBody>
     _fs = FirebaseFirestore.instance;
     _itemsFuture = _loadPassRows();
     _myTasteFuture = _loadMyTasteOnce();
+  }
+  
+  Future<_CardData> _getCardData(String otherUid, Map<String, dynamic> myTaste, int? age) {
+    return _cardCache[otherUid] ??= _loadCardData(otherUid, myTaste, precomputedAge: age);
   }
 
   @override
@@ -93,19 +139,21 @@ class _PassesListBodyState extends State<PassesListBody>
             final myTaste = tasteSnap.data ?? const <String, dynamic>{};
             return ListView.separated(
               key: _listKey,
+              // cacheExtent kaldırıldı, KeepAlive kullanılıyor.
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               itemCount: items.length,
               separatorBuilder: (ctx, index) => const SizedBox(height: 16),
               itemBuilder: (context, i) {
                 final row = items[i];
                 final lite = _userCache[row.otherUid];
+                
+                // Stateful KeepAlive Kart
                 return _PassDetailCard(
                   otherUid: row.otherUid,
                   when: row.when,
                   title: lite?.title,
                   photoURL: lite?.photoURL,
-                  precomputedAge: lite?.age,
-                  myTaste: myTaste,
+                  cardDataFuture: _getCardData(row.otherUid, myTaste, lite?.age),
                 );
               },
             );
@@ -178,14 +226,12 @@ class _PassesListBodyState extends State<PassesListBody>
       }
     }
 
-    // Sort by updatedAt desc
     items.sort((x, y) {
       final dx = x.when ?? DateTime.fromMillisecondsSinceEpoch(0);
       final dy = y.when ?? DateTime.fromMillisecondsSinceEpoch(0);
       return dy.compareTo(dx);
     });
 
-    // Batch fetch users
     if (needUserIds.isNotEmpty) {
       final ids = needUserIds.toList();
       const chunk = 10;
@@ -233,30 +279,41 @@ class _PassesListBodyState extends State<PassesListBody>
   }
 }
 
-class _PassDetailCard extends StatelessWidget {
+// --- Stateful Card with KeepAlive (Scroll Sorunu Çözümü) ---
+
+class _PassDetailCard extends StatefulWidget {
   final String otherUid;
   final DateTime? when;
   final String? title;
   final String? photoURL;
-  final int? precomputedAge;
-  final Map<String, dynamic> myTaste;
+  final Future<_CardData> cardDataFuture;
 
   const _PassDetailCard({
     required this.otherUid,
     this.when,
     this.title,
     this.photoURL,
-    this.precomputedAge,
-    required this.myTaste,
+    required this.cardDataFuture,
   });
 
   @override
+  State<_PassDetailCard> createState() => _PassDetailCardState();
+}
+
+class _PassDetailCardState extends State<_PassDetailCard> 
+    with AutomaticKeepAliveClientMixin {
+  
+  @override
+  bool get wantKeepAlive => true; // Kaydırınca hafızadan silinmez
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context); // KeepAlive için şart
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return FutureBuilder<_CardData>(
-      future: _loadCardData(otherUid, myTaste, precomputedAge: precomputedAge),
+      future: widget.cardDataFuture,
       builder: (context, snap) {
         final isLoading = snap.connectionState == ConnectionState.waiting;
         final cd = snap.data;
@@ -283,7 +340,7 @@ class _PassDetailCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
               onTap: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid)),
+                  MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: widget.otherUid)),
                 );
               },
               child: Padding(
@@ -300,7 +357,7 @@ class _PassDetailCard extends StatelessWidget {
   }
 
   Widget _buildLoadedContent(BuildContext context, _CardData cd, ThemeData theme) {
-    final displayTitle = (title == null || title!.isEmpty) ? otherUid : title!;
+    final displayTitle = (widget.title == null || widget.title!.isEmpty) ? widget.otherUid : widget.title!;
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -318,11 +375,11 @@ class _PassDetailCard extends StatelessWidget {
                   color: theme.colorScheme.surfaceContainerHighest, 
                   width: 2
                 ),
-                image: (photoURL != null && photoURL!.isNotEmpty)
-                    ? DecorationImage(image: NetworkImage(photoURL!), fit: BoxFit.cover)
+                image: (widget.photoURL != null && widget.photoURL!.isNotEmpty)
+                    ? DecorationImage(image: NetworkImage(widget.photoURL!), fit: BoxFit.cover)
                     : null,
               ),
-              child: (photoURL == null || photoURL!.isEmpty)
+              child: (widget.photoURL == null || widget.photoURL!.isEmpty)
                   ? Icon(Icons.person, size: 30, color: theme.colorScheme.onSurfaceVariant)
                   : null,
             ),
@@ -361,7 +418,7 @@ class _PassDetailCard extends StatelessWidget {
 
         const SizedBox(height: 16),
 
-        // --- Stats (Common Interests) ---
+        // --- Stats ---
         if ((cd.commonFiveCount != null && cd.commonFiveCount! > 0) ||
             (cd.commonFavCount != null && cd.commonFavCount! > 0))
           Padding(
@@ -404,7 +461,7 @@ class _PassDetailCard extends StatelessWidget {
            ),
            const SizedBox(height: 10),
            _PosterStrip(
-             urls: cd.fivePosters.isNotEmpty ? cd.fivePosters : 
+             data: cd.fivePosters.isNotEmpty ? cd.fivePosters : 
                    (cd.favPosters.isNotEmpty ? cd.favPosters : cd.watchPosters)
            ),
         ] else ...[
@@ -500,24 +557,29 @@ class _SectionHeader extends StatelessWidget {
 }
 
 class _PosterStrip extends StatelessWidget {
-  final List<String> urls;
-  const _PosterStrip({required this.urls});
+  final List<_PosterData> data;
+  const _PosterStrip({required this.data});
   @override
   Widget build(BuildContext context) {
-    if (urls.isEmpty) return const SizedBox.shrink();
+    if (data.isEmpty) return const SizedBox.shrink();
     return SizedBox(
       height: 120,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: urls.length,
+        itemCount: data.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (context, i) {
-          final u = urls[i];
+          final item = data[i];
           return ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: AspectRatio(
               aspectRatio: 2 / 3,
-              child: PosterImage(posterUrl: u, title: null, fit: BoxFit.cover),
+              child: PosterImage(
+                posterUrl: item.posterUrl,
+                title: item.title,      
+                tmdbId: item.tmdbId,   
+                fit: BoxFit.cover,
+              ),
             ),
           );
         },
@@ -572,33 +634,44 @@ class _SkeletonContent extends StatelessWidget {
   }
 }
 
-// --- Data Logic (Same logic, better formatting) ---
+// --- Data Logic (PosterData & Null Safety) ---
 
-class _CardData {
-  final int? age;
-  final List<String> genres;
-  final List<String> directors;
-  final List<String> actors;
-  final List<String> fivePosters;
-  final List<String> favPosters;
-  final List<String> watchPosters;
-  final int? commonFiveCount;
-  final int? commonFavCount;
-  final int? commonWatchCount;
+Future<List<_PosterData>> _fetchPosterDataByDocIds(List<String> ids) async {
+  if (ids.isEmpty) return const <_PosterData>[];
+  final postersData = <_PosterData>[];
+  const chunk = 10;
+  final targetIds = ids.take(chunk).toList(); 
+  final fs = FirebaseFirestore.instance;
 
-  _CardData({
-    this.age,
-    this.genres = const [],
-    this.directors = const [],
-    this.actors = const [],
-    this.fivePosters = const [],
-    this.favPosters = const [],
-    this.watchPosters = const [],
-    this.commonFiveCount,
-    this.commonFavCount,
-    this.commonWatchCount,
-  });
+  try {
+    QuerySnapshot qs;
+    qs = await fs.collection('catalog_films').where(FieldPath.documentId, whereIn: targetIds).get();
+    
+    if (qs.docs.isEmpty) {
+      qs = await fs.collection('catalog_films').where('key', whereIn: targetIds).get();
+    }
+
+    for (final d in qs.docs) {
+      // Null Safety Cast
+      final data = d.data();
+      final mapData = data as Map<String, dynamic>?; 
+      
+      final p = (mapData?['poster'] ?? mapData?['posterUrl'] ?? '').toString();
+      final title = (mapData?['title'] ?? mapData?['titleTr'] ?? mapData?['originalTitle'] ?? '') as String?;
+      final tmdbId = mapData?['tmdbId'] as int?;
+
+      if (p.isNotEmpty) {
+        postersData.add(_PosterData(
+          posterUrl: p,
+          title: title,
+          tmdbId: tmdbId,
+        ));
+      }
+    }
+  } catch (_) {}
+  return postersData;
 }
+
 
 Future<_CardData> _loadCardData(
   String otherUid,
@@ -626,7 +699,6 @@ Future<_CardData> _loadCardData(
     return out;
   }
 
-  // Basitleştirilmiş helper
   List<String> pickIds(Map<String, dynamic> map, List<String> keys) {
     for (final k in keys) {
       final ids = extractIds(map[k]);
@@ -638,29 +710,6 @@ Future<_CardData> _loadCardData(
   List<String> inter(List<String> a, List<String> b) {
     final bs = b.toSet();
     return a.where(bs.contains).toList();
-  }
-
-  Future<List<String>> fetchPostersByDocIds(List<String> ids) async {
-    if (ids.isEmpty) return const <String>[];
-    final posters = <String>[];
-    const chunk = 10;
-    final targetIds = ids.take(chunk).toList(); // Limit fetch
-
-    try {
-      // Try docId first
-      var qs = await fs.collection('catalog_films').where(FieldPath.documentId, whereIn: targetIds).get();
-      
-      // Fallback key
-      if (qs.docs.isEmpty) {
-        qs = await fs.collection('catalog_films').where('key', whereIn: targetIds).get();
-      }
-
-      for (final d in qs.docs) {
-        final p = (d.data()['poster'] ?? d.data()['posterUrl'] ?? '').toString();
-        if (p.isNotEmpty) posters.add(p);
-      }
-    } catch (_) {}
-    return posters;
   }
 
   final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
@@ -681,10 +730,10 @@ Future<_CardData> _loadCardData(
   final commonFavIds = inter(myFavIds, hisFavIds);
   final commonWatchIds = inter(myWatchIds, hisWatchIds);
 
-  // Fetch posters for commons
-  List<String> fivePosters = await fetchPostersByDocIds(commonFiveIds);
-  List<String> favPosters = await fetchPostersByDocIds(commonFavIds);
-  List<String> watchPosters = await fetchPostersByDocIds(commonWatchIds);
+  // Zengin Poster Verisi Çekimi
+  List<_PosterData> fivePosters = await _fetchPosterDataByDocIds(commonFiveIds);
+  List<_PosterData> favPosters = await _fetchPosterDataByDocIds(commonFavIds);
+  List<_PosterData> watchPosters = await _fetchPosterDataByDocIds(commonWatchIds);
 
   return _CardData(
     age: precomputedAge,

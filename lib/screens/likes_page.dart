@@ -5,6 +5,50 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart'
     show PublicProfileScreen;
 import 'package:fluttergirdi/widgets/poster_image.dart';
 
+// --- Data Models (Poster Fallback için Geri Getirildi) ---
+
+class _PosterData {
+  final String posterUrl;
+  final String? title;
+  final int? tmdbId;
+  const _PosterData({required this.posterUrl, this.title, this.tmdbId});
+}
+
+class _CardData {
+  final String? title;
+  final String? photoURL;
+  final int? age;
+  final List<String> genres;
+  final List<String> directors;
+  final List<String> actors;
+  
+  // String listesi yerine zengin veri modeli kullanıyoruz
+  final List<_PosterData> fivePosters;
+  final List<_PosterData> favPosters;
+  final List<_PosterData> watchPosters;
+  
+  final int? commonFiveCount;
+  final int? commonFavCount;
+  final int? commonWatchCount;
+
+  _CardData({
+    this.title,
+    this.photoURL,
+    this.age,
+    this.genres = const [],
+    this.directors = const [],
+    this.actors = const [],
+    this.fivePosters = const [],
+    this.favPosters = const [],
+    this.watchPosters = const [],
+    this.commonFiveCount,
+    this.commonFavCount,
+    this.commonWatchCount,
+  });
+}
+
+// --- Main Page ---
+
 class LikesPage extends StatelessWidget {
   const LikesPage({super.key});
 
@@ -28,7 +72,6 @@ class LikesPage extends StatelessWidget {
   }
 }
 
-/// Pair-doc şemasına göre (likes/{pairId}) beğenilenleri gösterir.
 class LikesListBody extends StatefulWidget {
   const LikesListBody({super.key});
 
@@ -43,7 +86,6 @@ class _LikesListBodyState extends State<LikesListBody>
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
   late final Future<Map<String, dynamic>> _myTasteFuture;
   
-  // Memoize per-user card data to avoid refetching on scroll
   final Map<String, Future<_CardData>> _cardCache = {};
   
   Future<_CardData> _getCardData(
@@ -59,7 +101,6 @@ class _LikesListBodyState extends State<LikesListBody>
     _uid = FirebaseAuth.instance.currentUser!.uid;
     _fs = FirebaseFirestore.instance;
     
-    // Stream only once
     _stream = _fs
         .collection('likes')
         .where('uids', arrayContains: _uid)
@@ -68,12 +109,10 @@ class _LikesListBodyState extends State<LikesListBody>
         
     _myTasteFuture = () async {
       final docRef = _fs.collection('userTasteProfiles').doc(_uid);
-      // Try cache first
       try {
         final cache = await docRef.get(const GetOptions(source: Source.cache));
         if (cache.exists && (cache.data() != null)) return cache.data()!;
       } catch (_) {}
-      // Then server
       try {
         final server = await docRef.get(const GetOptions(source: Source.server));
         if (server.exists && (server.data() != null)) return server.data()!;
@@ -102,9 +141,8 @@ class _LikesListBodyState extends State<LikesListBody>
         }
 
         final docs = snapshot.data?.docs ?? const [];
-
-        // Benim açımdan: like = true, pass = false ve MATCH değil → Beğenilenler
         final items = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+        
         for (final d in docs) {
           final data = d.data();
           final a = data['a'] as String?;
@@ -117,7 +155,6 @@ class _LikesListBodyState extends State<LikesListBody>
           final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
           final matched = myLike && otherLike;
 
-          // Eğer ben beğendiysem, henüz eşleşmediysek ve pas geçmediysem
           if (myLike && !matched && !myPass) {
             items.add(d);
           }
@@ -127,7 +164,6 @@ class _LikesListBodyState extends State<LikesListBody>
           return _buildEmptyState(context);
         }
 
-        // updatedAt (yoksa createdAt) ile yeni → eski sırala
         items.sort((a, b) {
           final ma = a.data();
           final mb = b.data();
@@ -148,6 +184,7 @@ class _LikesListBodyState extends State<LikesListBody>
             final myTaste = tasteSnap.data ?? const <String, dynamic>{};
             return ListView.separated(
               key: const PageStorageKey('likes_list'),
+              // SCROLL FIX: cacheExtent yerine KeepAlive kullanıyoruz.
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               itemCount: items.length,
               separatorBuilder: (ctx, index) => const SizedBox(height: 16),
@@ -160,6 +197,8 @@ class _LikesListBodyState extends State<LikesListBody>
                     (data['updatedAt'] ?? data['createdAt']) as Timestamp?;
                 final when = whenTs?.toDate().toLocal();
                 if (otherUid == null) return const SizedBox.shrink();
+                
+                // POSTER FIX + SCROLL FIX: Hem veri çekimi doğru hem de stateful widget.
                 return _LikesDetailCard(
                   otherUid: otherUid,
                   when: when,
@@ -199,7 +238,9 @@ class _LikesListBodyState extends State<LikesListBody>
   bool get wantKeepAlive => true;
 }
 
-class _LikesDetailCard extends StatelessWidget {
+// --- SCROLL FIX İÇİN STATEFUL WIDGET ---
+
+class _LikesDetailCard extends StatefulWidget {
   final String otherUid;
   final DateTime? when;
   final Future<_CardData> cardDataFuture;
@@ -211,21 +252,30 @@ class _LikesDetailCard extends StatelessWidget {
   });
 
   @override
+  State<_LikesDetailCard> createState() => _LikesDetailCardState();
+}
+
+class _LikesDetailCardState extends State<_LikesDetailCard>
+    with AutomaticKeepAliveClientMixin {
+  
+  @override
+  bool get wantKeepAlive => true; // Scroll sırasında widget'ı canlı tutar.
+
+  @override
   Widget build(BuildContext context) {
+    super.build(context); // KeepAlive için gerekli
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
     return FutureBuilder<_CardData>(
-      future: cardDataFuture,
+      future: widget.cardDataFuture,
       builder: (context, snap) {
         final isLoading = snap.connectionState == ConnectionState.waiting;
         final cd = snap.data;
         
-        // Eğer yükleniyorsa veya veri geldiyse kartı çiz
-        // Loading durumunda Skeleton göstereceğiz
         return Container(
           decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLow, // Flutter 3.22+ (veya surface)
+            color: colorScheme.surfaceContainerLow, 
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
@@ -246,7 +296,7 @@ class _LikesDetailCard extends StatelessWidget {
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                      builder: (_) => PublicProfileScreen(uid: otherUid)),
+                      builder: (_) => PublicProfileScreen(uid: widget.otherUid)),
                 );
               },
               child: Padding(
@@ -271,13 +321,12 @@ class _LikesDetailCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // --- HEADER (Avatar + İsim + Match Info) ---
+        // --- HEADER ---
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Avatar
             Hero(
-              tag: 'avatar_$otherUid',
+              tag: 'avatar_${widget.otherUid}',
               child: Container(
                 width: 60,
                 height: 60,
@@ -300,7 +349,6 @@ class _LikesDetailCard extends StatelessWidget {
             ),
             const SizedBox(width: 16),
             
-            // İsim ve Yaş
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -324,7 +372,6 @@ class _LikesDetailCard extends StatelessWidget {
               ),
             ),
             
-            // Detay Ok İkonu
             Icon(
               Icons.arrow_forward_ios_rounded,
               size: 16,
@@ -335,8 +382,7 @@ class _LikesDetailCard extends StatelessWidget {
 
         const SizedBox(height: 16),
 
-        // --- STATS ROW (Common 5 Stars etc.) ---
-        // Burayı biraz daha öne çıkaralım
+        // --- STATS ---
         if (cd.commonFiveCount != null && cd.commonFiveCount! > 0)
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -363,7 +409,7 @@ class _LikesDetailCard extends StatelessWidget {
         if (cd.commonFiveCount != null && cd.commonFiveCount! > 0)
            const SizedBox(height: 16),
 
-        // --- GENRES & TAGS ---
+        // --- GENRES ---
         if (cd.genres.isNotEmpty) ...[
           Wrap(
             spacing: 6,
@@ -373,8 +419,7 @@ class _LikesDetailCard extends StatelessWidget {
           const SizedBox(height: 16),
         ],
 
-        // --- POSTER STRIP (Movies) ---
-        // Öncelik: Ortak 5 Yıldızlar -> Favoriler -> Son eklenenler
+        // --- POSTER STRIP (POSTER FIX UYGULANDI) ---
         if (cd.fivePosters.isNotEmpty || cd.favPosters.isNotEmpty) ...[
           _SectionHeader(
               title: cd.fivePosters.isNotEmpty
@@ -382,14 +427,13 @@ class _LikesDetailCard extends StatelessWidget {
                   : 'Favori Filmleri'),
           const SizedBox(height: 10),
           _PosterStrip(
-            urls: cd.fivePosters.isNotEmpty ? cd.fivePosters : cd.favPosters,
+            data: cd.fivePosters.isNotEmpty ? cd.fivePosters : cd.favPosters,
           ),
         ] else if (cd.watchPosters.isNotEmpty) ...[
            _SectionHeader(title: 'İzleme Listesi'),
            const SizedBox(height: 10),
-           _PosterStrip(urls: cd.watchPosters),
+           _PosterStrip(data: cd.watchPosters),
         ] else ...[
-           // Hiç poster yoksa placeholder
            Container(
              height: 80,
              width: double.infinity,
@@ -409,12 +453,11 @@ class _LikesDetailCard extends StatelessWidget {
   }
 }
 
-// --- Modern UI Components ---
+// --- UI Components ---
 
 class _ModernChip extends StatelessWidget {
   final String label;
   const _ModernChip({required this.label});
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -452,27 +495,29 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
+// POSTER FIX: List<_PosterData> kabul ediyor ve PosterImage'a detay gönderiyor.
 class _PosterStrip extends StatelessWidget {
-  final List<String> urls;
-  const _PosterStrip({required this.urls});
+  final List<_PosterData> data;
+  const _PosterStrip({required this.data});
   @override
   Widget build(BuildContext context) {
-    if (urls.isEmpty) return const SizedBox.shrink();
+    if (data.isEmpty) return const SizedBox.shrink();
     return SizedBox(
-      height: 130, // Biraz daha uzun
+      height: 130, 
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        itemCount: urls.length,
+        itemCount: data.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (context, i) {
-          final u = urls[i];
+          final item = data[i];
           return ClipRRect(
-            borderRadius: BorderRadius.circular(10), // Köşeleri yuvarlat
+            borderRadius: BorderRadius.circular(10),
             child: AspectRatio(
               aspectRatio: 2 / 3,
               child: PosterImage(
-                posterUrl: u, 
-                title: null, 
+                posterUrl: item.posterUrl, 
+                title: item.title,      // Title gönderiyoruz
+                tmdbId: item.tmdbId,    // ID gönderiyoruz
                 fit: BoxFit.cover
               ),
             ),
@@ -487,7 +532,6 @@ class _PosterStrip extends StatelessWidget {
 
 class _SkeletonContent extends StatelessWidget {
   const _SkeletonContent();
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -508,7 +552,7 @@ class _SkeletonContent extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        const _SkeletonBox(width: double.infinity, height: 40), // Stats bar
+        const _SkeletonBox(width: double.infinity, height: 40), 
         const SizedBox(height: 16),
         Row(
           children: const [
@@ -540,7 +584,6 @@ class _SkeletonBox extends StatelessWidget {
   final double height;
   final bool isCircle;
   const _SkeletonBox({required this.width, required this.height, this.isCircle = false});
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -555,37 +598,7 @@ class _SkeletonBox extends StatelessWidget {
   }
 }
 
-// --- DATA LOGIC (Changed slightly to be cleaner, logic kept same) ---
-
-class _CardData {
-  final String? title;
-  final String? photoURL;
-  final int? age;
-  final List<String> genres;
-  final List<String> directors;
-  final List<String> actors;
-  final List<String> fivePosters;
-  final List<String> favPosters;
-  final List<String> watchPosters;
-  final int? commonFiveCount;
-  final int? commonFavCount;
-  final int? commonWatchCount;
-
-  _CardData({
-    this.title,
-    this.photoURL,
-    this.age,
-    this.genres = const [],
-    this.directors = const [],
-    this.actors = const [],
-    this.fivePosters = const [],
-    this.favPosters = const [],
-    this.watchPosters = const [],
-    this.commonFiveCount,
-    this.commonFavCount,
-    this.commonWatchCount,
-  });
-}
+// --- DATA LOGIC (POSTER FIX ve NULL SAFETY) ---
 
 Future<_CardData> _loadCardData(
   String otherUid,
@@ -593,7 +606,6 @@ Future<_CardData> _loadCardData(
 ) async {
   final fs = FirebaseFirestore.instance;
 
-  // Helper func
   List<String> ls(dynamic x) {
     if (x is List) return x.map((e) => e.toString()).toList();
     return const <String>[];
@@ -613,20 +625,6 @@ Future<_CardData> _loadCardData(
     return out;
   }
 
-  // Basitleştirilmiş fetch logic (kod tekrarını azaltmak için)
-  // Not: Orijinal logic'in aynısı korunmuştur, sadece UI için veri toplar.
-  
-  final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
-  final his = hisTaste.data() ?? const <String, dynamic>{};
-
-  final hisGenres = ls(his['genres'] ?? his['favoriteGenres']);
-  final hisDirectors = ls(his['directors'] ?? his['favoriteDirectors']);
-  final hisActors = ls(his['actors'] ?? his['favoriteActors']);
-
-  // Poster & ID Logic
-  // (Buradaki logic orijinal kodun aynısıdır, sadece structure temizlendi)
-  // ... (ID extraction logic same as original) ...
-  
   List<String> pickIds(Map<String, dynamic> map, List<String> keys) {
     for (final k in keys) {
       final ids = extractIds(map[k]);
@@ -635,40 +633,72 @@ Future<_CardData> _loadCardData(
     return const <String>[];
   }
 
-  final myFiveIds = pickIds(my, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
-  final hisFiveIds = pickIds(his, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
-  
-  // Intersection
   List<String> inter(List<String> a, List<String> b) {
     final bs = b.toSet();
     return a.where(bs.contains).toList();
   }
   
-  final commonFiveIds = inter(myFiveIds, hisFiveIds);
-  
-  // Poster Fetching helper
-  Future<List<String>> fetchPosters(List<String> ids) async {
+  // POSTER FETCH: Hem Null-Safe, hem de Detaylı (Fallback destekli)
+  Future<List<_PosterData>> fetchPosters(List<String> ids) async {
     if (ids.isEmpty) return [];
-    // Basitçe ilk 10 tanesini çekelim (UI şişmesin diye)
+    final postersData = <_PosterData>[];
     final targetIds = ids.take(10).toList();
     try {
-      final qs = await fs.collection('catalog_films')
+      var qs = await fs.collection('catalog_films')
           .where(FieldPath.documentId, whereIn: targetIds)
           .get();
-      return qs.docs.map((d) => (d.data()['poster'] ?? d.data()['posterUrl'] ?? '').toString())
-          .where((s) => s.isNotEmpty).toList();
-    } catch (_) { return []; }
+          
+      if (qs.docs.isEmpty) {
+        qs = await fs.collection('catalog_films').where('key', whereIn: targetIds).get();
+      }
+      
+      for (final d in qs.docs) {
+         // NULL SAFETY
+         final data = d.data() as Map<String, dynamic>?;
+         
+         final p = (data?['poster'] ?? data?['posterUrl'] ?? '').toString();
+         final title = (data?['title'] ?? data?['titleTr'] ?? data?['originalTitle'] ?? '') as String?;
+         final tmdbId = data?['tmdbId'] as int?;
+
+         if (p.isNotEmpty) {
+           postersData.add(_PosterData(
+             posterUrl: p,
+             title: title,
+             tmdbId: tmdbId,
+           ));
+         }
+      }
+    } catch (_) { }
+    return postersData;
   }
 
-  List<String> fivePosters = [];
-  if (commonFiveIds.isNotEmpty) {
-    fivePosters = await fetchPosters(commonFiveIds);
-  } else {
-    // ID yoksa direkt URL listesinden (eski yöntem) almayı dene
-    // (Burası kısaltıldı, orijinal kodun fallback yapısı eklenebilir)
-  }
+  final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
+  final his = hisTaste.data() ?? const <String, dynamic>{};
 
-  // User Profile Info
+  final hisGenres = ls(his['genres'] ?? his['favoriteGenres']);
+  final hisDirectors = ls(his['directors'] ?? his['favoriteDirectors']);
+  final hisActors = ls(his['actors'] ?? his['favoriteActors']);
+
+  final myFiveIds = pickIds(my, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
+  final hisFiveIds = pickIds(his, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
+  final myFavIds = pickIds(my, ['favIds', 'favoriteFilmIds', 'favorites']);
+  final hisFavIds = pickIds(his, ['favIds', 'favoriteFilmIds', 'favorites']);
+  final myWatchIds = pickIds(my, ['watchIds', 'watchlist']);
+  final hisWatchIds = pickIds(his, ['watchIds', 'watchlist']);
+  
+  final commonFiveIds = inter(myFiveIds, hisFiveIds);
+  final commonFavIds = inter(myFavIds, hisFavIds);
+  final commonWatchIds = inter(myWatchIds, hisWatchIds);
+  
+  // Zengin poster verilerini çekiyoruz
+  List<_PosterData> fivePosters = [];
+  List<_PosterData> favPosters = [];
+  List<_PosterData> watchPosters = [];
+
+  if (commonFiveIds.isNotEmpty) fivePosters = await fetchPosters(commonFiveIds);
+  if (commonFavIds.isNotEmpty) favPosters = await fetchPosters(commonFavIds);
+  if (commonWatchIds.isNotEmpty) watchPosters = await fetchPosters(commonWatchIds);
+
   String? title;
   String? photoURL;
   int? age;
@@ -700,7 +730,10 @@ Future<_CardData> _loadCardData(
     directors: hisDirectors,
     actors: hisActors,
     fivePosters: fivePosters,
+    favPosters: favPosters,
+    watchPosters: watchPosters,
     commonFiveCount: commonFiveIds.length,
-    // Diğer alanlar opsiyonel veya boş bırakıldı, ihtiyaca göre eklenebilir
+    commonFavCount: commonFavIds.length,
+    commonWatchCount: commonWatchIds.length,
   );
 }
