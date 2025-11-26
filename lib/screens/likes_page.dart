@@ -181,6 +181,9 @@ class _LikesListBodyState extends State<LikesListBody>
         return FutureBuilder<Map<String, dynamic>>(
           future: _myTasteFuture,
           builder: (context, tasteSnap) {
+            if (tasteSnap.connectionState == ConnectionState.waiting || !tasteSnap.hasData) {
+      return const Center(child: CircularProgressIndicator());
+    }
             final myTaste = tasteSnap.data ?? const <String, dynamic>{};
             return ListView.separated(
               key: const PageStorageKey('likes_list'),
@@ -423,7 +426,7 @@ class _LikesDetailCardState extends State<_LikesDetailCard>
         if (cd.fivePosters.isNotEmpty || cd.favPosters.isNotEmpty) ...[
           _SectionHeader(
               title: cd.fivePosters.isNotEmpty
-                  ? 'Ortak Favoriler'
+                  ? 'Ortak Sevilenler'
                   : 'Favori Filmleri'),
           const SizedBox(height: 10),
           _PosterStrip(
@@ -611,6 +614,8 @@ Future<_CardData> _loadCardData(
     return const <String>[];
   }
   
+
+
   List<String> extractIds(dynamic v) {
     final out = <String>[];
     if (v is List) {
@@ -624,7 +629,7 @@ Future<_CardData> _loadCardData(
     }
     return out;
   }
-
+  
   List<String> pickIds(Map<String, dynamic> map, List<String> keys) {
     for (final k in keys) {
       final ids = extractIds(map[k]);
@@ -632,6 +637,7 @@ Future<_CardData> _loadCardData(
     }
     return const <String>[];
   }
+  
 
   List<String> inter(List<String> a, List<String> b) {
     final bs = b.toSet();
@@ -671,7 +677,7 @@ Future<_CardData> _loadCardData(
     } catch (_) { }
     return postersData;
   }
-
+  
   final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
   final his = hisTaste.data() ?? const <String, dynamic>{};
 
@@ -679,8 +685,8 @@ Future<_CardData> _loadCardData(
   final hisDirectors = ls(his['directors'] ?? his['favoriteDirectors']);
   final hisActors = ls(his['actors'] ?? his['favoriteActors']);
 
-  final myFiveIds = pickIds(my, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
-  final hisFiveIds = pickIds(his, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
+final myFiveIds = pickIds(my, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
+final hisFiveIds = pickIds(his, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
   final myFavIds = pickIds(my, ['favIds', 'favoriteFilmIds', 'favorites']);
   final hisFavIds = pickIds(his, ['favIds', 'favoriteFilmIds', 'favorites']);
   final myWatchIds = pickIds(my, ['watchIds', 'watchlist']);
@@ -721,7 +727,7 @@ Future<_CardData> _loadCardData(
       }
     }
   } catch (_) {}
-
+  
   return _CardData(
     title: title,
     photoURL: photoURL,

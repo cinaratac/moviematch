@@ -439,8 +439,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         ],
                       ),
 
-                      const SizedBox(height: 24),
-
+                      const SizedBox(height: 5),
                       // Kaydol Butonu
                       SizedBox(
                         width: double.infinity,

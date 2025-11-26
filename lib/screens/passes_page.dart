@@ -188,6 +188,9 @@ class _PassesListBodyState extends State<PassesListBody>
         return FutureBuilder<Map<String, dynamic>>(
           future: _myTasteFuture,
           builder: (context, tasteSnap) {
+            if (tasteSnap.connectionState == ConnectionState.waiting || !tasteSnap.hasData) {
+      return const Center(child: CircularProgressIndicator());
+    }
             final myTaste = tasteSnap.data ?? const <String, dynamic>{};
             
             return ListView.separated(
@@ -740,8 +743,8 @@ Future<_CardData> _loadCardData(
   final hisDirectors = ls(his['directors'] ?? his['favoriteDirectors']);
   final hisActors = ls(his['actors'] ?? his['favoriteActors']);
 
-  final myFiveIds = pickIds(my, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
-  final hisFiveIds = pickIds(his, ['fiveIds', 'fiveFilmIds', 'fiveStars']);
+final myFiveIds = pickIds(my, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
+final hisFiveIds = pickIds(his, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
   final myFavIds = pickIds(my, ['favIds', 'favoriteFilmIds', 'favorites']);
   final hisFavIds = pickIds(his, ['favIds', 'favoriteFilmIds', 'favorites']);
   final myWatchIds = pickIds(my, ['watchIds', 'watchlist']);

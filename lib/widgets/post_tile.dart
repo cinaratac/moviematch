@@ -980,10 +980,20 @@ class _ReplySheetState extends State<_ReplySheet> {
                               },
                             ),
                           )),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.all(12),
+                        ),
+                            const Divider(height: 1),
+                        Padding(
+                          padding: EdgeInsets.only(
+                          left: 16, 
+                            right: 16, 
+                            top: 10,
+    // Burada 2 şeyi kontrol edip topluyoruz:
+    // 1. viewInsets.bottom -> Klavye yüksekliği (Klavye kapalıysa 0 gelir)
+    // 2. padding.bottom -> Telefonun kendi alt çubuğu (Bar yoksa 0 gelir)
+    // + 10 -> Ekstra estetik boşluk
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 
+                  MediaQuery.of(context).padding.bottom + 10
+                    ),
               child: Row(
                 children: [
                   Expanded(

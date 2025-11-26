@@ -110,6 +110,19 @@ class _MatchListScreenState extends State<MatchListScreen> {
           .showSnackBar(SnackBar(content: Text('Eşleşmeler alınamadı: $e')));
     }
   }
+  // [YENİ] Kart kaydırılınca o kişiyi hafızadan silen fonksiyon
+  void _removeUserFromLocalCache(String otherUid) {
+    // 1. Ekrandaki geçici listeden sil (Hot Reload yapınca gelmesin diye)
+    if (_MatchListSessionCache.results != null) {
+      _MatchListSessionCache.results!.removeWhere((m) => m.uid == otherUid);
+    }
+    
+    // 2. Arka plandaki Servis Cache'inden sil (5 dk süresi dolmadan gelmesin diye)
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    if (me != null) {
+      global_match.MatchService.instance.removeUserFromCache(me, otherUid);
+    }
+  }
 
   void _buildSwipeItems() {
     _swipeItems.clear();
@@ -117,14 +130,20 @@ class _MatchListScreenState extends State<MatchListScreen> {
       _swipeItems.add(SwipeItem(
         content: m,
         likeAction: () async {
+          // Firebase'e gönder
           await LikeService.instance.likeUser(
             m.uid,
             commonFavoritesCount: m.commonFavCount,
             commonFiveStarsCount: m.commonFiveCount,
           );
+          // [GÜNCELLEME] Hafızadan sil
+          _removeUserFromLocalCache(m.uid);
         },
         nopeAction: () async {
+          // Firebase'e gönder
           await LikeService.instance.passUser(m.uid);
+          // [GÜNCELLEME] Hafızadan sil
+          _removeUserFromLocalCache(m.uid);
         },
       ));
     }
@@ -951,17 +970,71 @@ class _IncomingLikeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Simple Tile Implementation
-    return ListTile(
-      tileColor: item.wasUnseen ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2) : null,
-      leading: const CircleAvatar(child: Icon(Icons.person)), 
-      title: Text(item.otherUid, overflow: TextOverflow.ellipsis), // Replace with real user fetch if needed
-      subtitle: Text(item.when.toString().substring(0,16)),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: item.otherUid)));
+    // UID yerine gerçek kullanıcı verisini çekiyoruz
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      future: FirebaseFirestore.instance.collection('users').doc(item.otherUid).get(),
+      builder: (context, snapshot) {
+        // Veri yüklenirken basit bir görünüm
+        if (!snapshot.hasData) {
+          return ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.person, color: Colors.grey)),
+            title: Text('Yükleniyor...', style: TextStyle(color: Colors.grey[600])),
+          );
+        }
+
+        final data = snapshot.data!.data();
+        final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
+        final photo = data?['photoURL'] as String?;
+        final lbUsername = data?['letterboxdUsername'] as String?;
+        
+        // Eğer isim yoksa Letterboxd adını, o da yoksa 'Kullanıcı'yı göster
+        final displayName = (name != null && name.isNotEmpty) 
+            ? name 
+            : (lbUsername != null ? '@$lbUsername' : 'Kullanıcı');
+
+        return ListTile(
+          tileColor: item.wasUnseen 
+              ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2) 
+              : null,
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.grey.shade300),
+              image: (photo != null && photo.isNotEmpty)
+                  ? DecorationImage(image: NetworkImage(photo), fit: BoxFit.cover)
+                  : null,
+            ),
+            child: (photo == null || photo.isEmpty)
+                ? const Icon(Icons.person, size: 20)
+                : null,
+          ),
+          title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: Text(
+            _formatDate(item.when),
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+          trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+          onTap: () {
+            Navigator.push(
+              context, 
+              MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: item.otherUid))
+            );
+          },
+        );
       },
     );
+  }
+
+  // Tarihi daha okunaklı gösteren yardımcı metod
+  String _formatDate(DateTime d) {
+    final now = DateTime.now();
+    final diff = now.difference(d);
+    
+    if (diff.inMinutes < 60) return '${diff.inMinutes}dk önce';
+    if (diff.inHours < 24) return '${diff.inHours}sa önce';
+    return '${d.day}.${d.month}.${d.year}';
   }
 }
 
@@ -988,10 +1061,45 @@ class _NoMatchesCharacter extends StatelessWidget {
 class _LikesIndicatorHeart extends StatelessWidget {
   final VoidCallback onPressed;
   const _LikesIndicatorHeart({required this.onPressed});
+
   @override
   Widget build(BuildContext context) {
-    // Simplified logic for icon state
-    return IconButton(icon: const Icon(Icons.favorite_border), onPressed: onPressed);
+    // LikeService üzerinden okunmamış beğeni sayısını dinliyoruz
+    return StreamBuilder<int>(
+      stream: LikeService.instance.incomingLikesUnreadCount(),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        final hasUnread = count > 0;
+
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            IconButton(
+              onPressed: onPressed,
+              icon: Icon(
+                hasUnread ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: hasUnread ? Colors.red : null, // Okunmamış varsa Kırmızı
+              ),
+            ),
+            // Opsiyonel: Kırmızı nokta (Badge) eklemek isterseniz
+            if (hasUnread)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                  ),
+                ),
+              )
+          ],
+        );
+      },
+    );
   }
 }
 
