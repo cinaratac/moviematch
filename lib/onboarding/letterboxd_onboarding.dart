@@ -442,7 +442,7 @@ String? _validator(String? v) {
           nonFatalErrorShown = true;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Profil verileri daha sonra senkronize edilecek.'),
+              content: Text('Profil verilerinin senkronize edilmesi biraz sürebilir.'),
             ),
           );
         }

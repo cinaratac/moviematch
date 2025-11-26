@@ -91,7 +91,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _favActorCtrl.text = '';
 
     final age = data['age'];
-    if (age is int && age > 0) {
+    if (age is int && age > 15) {
       _ageCtrl.text = age.toString();
     } else if (age is num && age.toInt() > 0) {
       _ageCtrl.text = age.toInt().toString();
@@ -583,7 +583,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               validator: (v) {
                 if (v == null || v.isEmpty) return null;
                 final n = int.tryParse(v);
-                if (n == null || n <= 0 || n > 120) return 'Geçersiz yaş';
+                if (n == null || n <= 15 || n > 120) return 'Geçersiz yaş';
                 return null;
               },
             ),

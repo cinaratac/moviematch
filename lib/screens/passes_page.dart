@@ -55,7 +55,7 @@ class _CardData {
   });
 }
 
-// --- Main Page ---
+// --- Main Page (Opsiyonel, tek başına kullanılırsa diye) ---
 
 class PassesPage extends StatelessWidget {
   const PassesPage({super.key});
@@ -76,6 +76,8 @@ class PassesPage extends StatelessWidget {
   }
 }
 
+// --- List Body (Match Screen tarafından kullanılan kısım) ---
+
 class PassesListBody extends StatefulWidget {
   const PassesListBody({super.key});
 
@@ -87,26 +89,43 @@ class _PassesListBodyState extends State<PassesListBody>
     with AutomaticKeepAliveClientMixin {
   late final String _uid;
   late final FirebaseFirestore _fs;
-  late final Future<List<_PassRow>> _itemsFuture;
+  
+  // Future yerine Stream kullanıyoruz (Anlık güncelleme için)
+  late final Stream<QuerySnapshot> _likesStream;
   late final Future<Map<String, dynamic>> _myTasteFuture;
-  final Map<String, _UserLite> _userCache = <String, _UserLite>{};
   
   // Kart verileri için önbellek
   final Map<String, Future<_CardData>> _cardCache = {};
+  // Kullanıcı temel bilgileri için önbellek (Future olarak saklıyoruz)
+  final Map<String, Future<_UserLite>> _userLiteCache = {};
   
   final PageStorageKey _listKey = const PageStorageKey('passes_list');
 
   @override
   void initState() {
     super.initState();
-    _uid = FirebaseAuth.instance.currentUser!.uid;
-    _fs = FirebaseFirestore.instance;
-    _itemsFuture = _loadPassRows();
-    _myTasteFuture = _loadMyTasteOnce();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _uid = user.uid;
+      _fs = FirebaseFirestore.instance;
+      
+      // Stream tanımlıyoruz: 'likes' koleksiyonunu dinle
+      _likesStream = _fs
+          .collection('likes')
+          .where('uids', arrayContains: _uid)
+          .snapshots(); // <-- Anlık dinleme
+
+      _myTasteFuture = _loadMyTasteOnce();
+    }
   }
   
   Future<_CardData> _getCardData(String otherUid, Map<String, dynamic> myTaste, int? age) {
     return _cardCache[otherUid] ??= _loadCardData(otherUid, myTaste, precomputedAge: age);
+  }
+
+  // Kullanıcı adı/fotoğrafı gibi temel bilgileri çeken yardımcı fonksiyon
+  Future<_UserLite> _getUserLite(String uid) {
+    return _userLiteCache[uid] ??= _fetchUserLiteFromDb(uid);
   }
 
   @override
@@ -115,19 +134,52 @@ class _PassesListBodyState extends State<PassesListBody>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return FutureBuilder<List<_PassRow>>(
-      future: _itemsFuture,
-      builder: (context, listSnap) {
-        if (listSnap.connectionState == ConnectionState.waiting) {
+    if (FirebaseAuth.instance.currentUser == null) return const SizedBox();
+
+    // StreamBuilder ile sarmaladık
+    return StreamBuilder<QuerySnapshot>(
+      stream: _likesStream,
+      builder: (context, streamSnap) {
+        if (streamSnap.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (listSnap.hasError) {
+        if (streamSnap.hasError) {
           return Center(
             child: Text('Bir hata oluştu', 
               style: TextStyle(color: Theme.of(context).colorScheme.error)),
           );
         }
-        final items = listSnap.data ?? const <_PassRow>[];
+
+        final docs = streamSnap.data?.docs ?? [];
+        final items = <_PassRow>[];
+
+        // Gelen verileri işle ve sadece PAS geçilenleri filtrele
+        for (final d in docs) {
+          final data = d.data() as Map<String, dynamic>;
+          final a = data['a'] as String?;
+          final b = data['b'] as String?;
+          if (a == null || b == null) continue;
+          
+          final meIsA = (_uid == a);
+          final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
+          // Eğer eşleşme olduysa (iki taraf da beğendiyse) pas listesinde gösterme
+          final myLike = data[meIsA ? 'aLiked' : 'bLiked'] == true;
+          final otherLike = data[meIsA ? 'bLiked' : 'aLiked'] == true;
+          final matched = myLike && otherLike;
+
+          if (myPass && !matched) {
+            final otherUid = meIsA ? b : a;
+            final when = (data['updatedAt'] as Timestamp?)?.toDate().toLocal();
+            items.add(_PassRow(otherUid: otherUid, when: when));
+          }
+        }
+
+        // Tarihe göre sırala (En yeni en üstte)
+        items.sort((x, y) {
+          final dx = x.when ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final dy = y.when ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return dy.compareTo(dx);
+        });
         
         if (items.isEmpty) {
           return _buildEmptyState(context);
@@ -137,23 +189,31 @@ class _PassesListBodyState extends State<PassesListBody>
           future: _myTasteFuture,
           builder: (context, tasteSnap) {
             final myTaste = tasteSnap.data ?? const <String, dynamic>{};
+            
             return ListView.separated(
               key: _listKey,
-              // cacheExtent kaldırıldı, KeepAlive kullanılıyor.
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               itemCount: items.length,
               separatorBuilder: (ctx, index) => const SizedBox(height: 16),
               itemBuilder: (context, i) {
                 final row = items[i];
-                final lite = _userCache[row.otherUid];
                 
-                // Stateful KeepAlive Kart
-                return _PassDetailCard(
-                  otherUid: row.otherUid,
-                  when: row.when,
-                  title: lite?.title,
-                  photoURL: lite?.photoURL,
-                  cardDataFuture: _getCardData(row.otherUid, myTaste, lite?.age),
+                // Her satır için kullanıcı bilgisini (UserLite) asenkron çekiyoruz
+                return FutureBuilder<_UserLite>(
+                  future: _getUserLite(row.otherUid),
+                  builder: (context, userSnap) {
+                    final lite = userSnap.data;
+                    
+                    // Stateful KeepAlive Kart
+                    return _PassDetailCard(
+                      otherUid: row.otherUid,
+                      when: row.when,
+                      title: lite?.title, // Yüklenirken null olabilir
+                      photoURL: lite?.photoURL,
+                      // Kart detayları (Posterler vs.)
+                      cardDataFuture: _getCardData(row.otherUid, myTaste, lite?.age),
+                    );
+                  },
                 );
               },
             );
@@ -198,84 +258,42 @@ class _PassesListBodyState extends State<PassesListBody>
     return const <String, dynamic>{};
   }
 
-  Future<List<_PassRow>> _loadPassRows() async {
-    final qs = await _fs
-        .collection('likes')
-        .where('uids', arrayContains: _uid)
-        .get(const GetOptions(source: Source.server));
-
-    final items = <_PassRow>[];
-    final needUserIds = <String>{};
-
-    for (final d in qs.docs) {
-      final data = d.data();
-      final a = data['a'] as String?;
-      final b = data['b'] as String?;
-      if (a == null || b == null) continue;
-      final meIsA = (_uid == a);
-      final myPass = data[meIsA ? 'aPass' : 'bPass'] == true;
-      final myLike = data[meIsA ? 'aLiked' : 'bLiked'] == true;
-      final otherLike = data[meIsA ? 'bLiked' : 'aLiked'] == true;
-      final matched = myLike && otherLike;
-
-      if (myPass && !matched) {
-        final otherUid = meIsA ? b : a;
-        final when = (data['updatedAt'] as Timestamp?)?.toDate().toLocal();
-        items.add(_PassRow(otherUid: otherUid, when: when));
-        if (!_userCache.containsKey(otherUid)) needUserIds.add(otherUid);
+  // Tekil kullanıcı bilgisini çeken fonksiyon
+  Future<_UserLite> _fetchUserLiteFromDb(String uid) async {
+    try {
+      final doc = await _fs.collection('users').doc(uid).get();
+      if (!doc.exists) {
+        return _UserLite(title: 'Kullanıcı', photoURL: '');
       }
-    }
-
-    items.sort((x, y) {
-      final dx = x.when ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final dy = y.when ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return dy.compareTo(dx);
-    });
-
-    if (needUserIds.isNotEmpty) {
-      final ids = needUserIds.toList();
-      const chunk = 10;
-      for (var i = 0; i < ids.length; i += chunk) {
-        final part = ids.sublist(
-          i,
-          i + chunk > ids.length ? ids.length : i + chunk,
-        );
-        final qsUsers = await _fs
-            .collection('users')
-            .where(FieldPath.documentId, whereIn: part)
-            .get(const GetOptions(source: Source.server));
-        for (final d in qsUsers.docs) {
-          final m = d.data();
-          final username = (m['username'] ?? '') as String;
-          final displayName = (m['displayName'] ?? '') as String;
-          final lb = (m['letterboxdUsername'] ?? '') as String;
-          final photoURL = (m['photoURL'] ?? '') as String;
-          String title = username.isNotEmpty
-              ? username
-              : (displayName.isNotEmpty
-                    ? displayName
-                    : (lb.isNotEmpty ? '@$lb' : d.id));
-          int? age;
-          final bd = m['birthdate'];
-          if (bd is Timestamp) {
-            final dtt = bd.toDate();
-            final now = DateTime.now();
-            age = now.year - dtt.year;
-            if (DateTime(now.year, dtt.month, dtt.day).isAfter(now)) {
-              age -= 1;
-            }
-          } else if (m['age'] is int) {
-            age = m['age'] as int;
-          }
-          _userCache[d.id] = _UserLite(
-            title: title,
-            photoURL: photoURL,
-            age: age,
-          );
+      final m = doc.data()!;
+      final username = (m['username'] ?? '') as String;
+      final displayName = (m['displayName'] ?? '') as String;
+      final lb = (m['letterboxdUsername'] ?? '') as String;
+      final photoURL = (m['photoURL'] ?? '') as String;
+      
+      String title = username.isNotEmpty
+          ? username
+          : (displayName.isNotEmpty
+                ? displayName
+                : (lb.isNotEmpty ? '@$lb' : 'Kullanıcı'));
+      
+      int? age;
+      final bd = m['birthdate'];
+      if (bd is Timestamp) {
+        final dtt = bd.toDate();
+        final now = DateTime.now();
+        age = now.year - dtt.year;
+        if (DateTime(now.year, dtt.month, dtt.day).isAfter(now)) {
+          age -= 1;
         }
+      } else if (m['age'] is int) {
+        age = m['age'] as int;
       }
+      
+      return _UserLite(title: title, photoURL: photoURL, age: age);
+    } catch (_) {
+      return const _UserLite(title: 'Hata', photoURL: '');
     }
-    return items;
   }
 }
 
@@ -357,7 +375,10 @@ class _PassDetailCardState extends State<_PassDetailCard>
   }
 
   Widget _buildLoadedContent(BuildContext context, _CardData cd, ThemeData theme) {
-    final displayTitle = (widget.title == null || widget.title!.isEmpty) ? widget.otherUid : widget.title!;
+    // Başlık henüz yüklenmediyse UID göster veya '...'
+    final displayTitle = (widget.title == null || widget.title!.isEmpty) 
+        ? (widget.title == null ? '...' : widget.otherUid) 
+        : widget.title!;
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

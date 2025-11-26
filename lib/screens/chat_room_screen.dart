@@ -9,7 +9,6 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/watchlist_wheel.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 
 // ---- Local (device) profile films model & storage (no Firebase) ----
