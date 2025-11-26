@@ -20,6 +20,7 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
+  
   static const int _maxChars = 280;
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
@@ -347,26 +348,17 @@ class _FeedPageState extends State<FeedPage> {
           ),
           actions: [
             const NotificationsButton(),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) async {
-                if (value == 'settings') {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsPage()),
-                  );
-                }
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'settings',
-                  child: ListTile(
-                    leading: Icon(Icons.settings_outlined),
-                    title: Text('Ayarlar'),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            IconButton(
+    icon: const Icon(Icons.settings_outlined), // Direkt ayarlar ikonu
+    tooltip: 'Ayarlar',
+    onPressed: () {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const SettingsPage()),
+      );
+    },
+  ),
+],
+          
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(44),
             child: Column(
@@ -455,15 +447,9 @@ class _FeedPageState extends State<FeedPage> {
                           movieTitle: movieTitle.isEmpty ? null : movieTitle,
                           moviePoster: moviePoster.isEmpty ? null : moviePoster,
                           text: (m['text'] ?? '') as String,
-                          likeCount: (m['likeCount'] ?? 0) is int
-                              ? m['likeCount'] as int
-                              : ((m['likeCount'] ?? 0) as num).toInt(),
-                          replyCount: (m['replyCount'] ?? 0) is int
-                              ? m['replyCount'] as int
-                              : ((m['replyCount'] ?? 0) as num).toInt(),
-                          repostCount: (m['repostCount'] ?? 0) is int
-                              ? m['repostCount'] as int
-                              : ((m['repostCount'] ?? 0) as num).toInt(),
+                         likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+repostCount: ((m['repostCount'] ?? 0) as num).toInt(),
                           onToggleLike: _toggleLike,
                           onStartChat: (String _) async {},
                           onFollow: _follow,
@@ -978,15 +964,9 @@ class _FollowingFeedState extends State<_FollowingFeed> {
             movieTitle: movieTitle.isEmpty ? null : movieTitle,
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
             text: (m['text'] ?? '') as String,
-            likeCount: (m['likeCount'] ?? 0) is int
-                ? m['likeCount'] as int
-                : ((m['likeCount'] ?? 0) as num).toInt(),
-            replyCount: (m['replyCount'] ?? 0) is int
-                ? m['replyCount'] as int
-                : ((m['replyCount'] ?? 0) as num).toInt(),
-            repostCount: (m['repostCount'] ?? 0) is int
-                ? m['repostCount'] as int
-                : ((m['repostCount'] ?? 0) as num).toInt(),
+           likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+repostCount: ((m['repostCount'] ?? 0) as num).toInt(),
             onToggleLike: (postId, like) =>
                 FeedService().toggleLike(postId: postId, like: like),
             onStartChat: (String _) async {},

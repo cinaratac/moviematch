@@ -127,12 +127,14 @@ class _MessagesIcon extends StatelessWidget {
     );
 
     return StreamBuilder<int>(
-      stream: ChatService.instance.totalUnreadFor(uid),
+      // ESKİ KOD (Hatalı olabilir): stream: ChatService.instance.totalUnreadFor(uid),
+      // YENİ KOD (Doğru sayaç):
+      stream: ChatService.instance.totalUnreadMessagesFor(uid), 
       builder: (context, snap) {
         final count = snap.data ?? 0;
         if (count <= 0) return baseIcon;
         return Badge.count(
-          count: count > 9 ? 9 : count,
+          count: count > 9 ? 9 : count, // 9'dan büyükse 9+ mantığı için UI koruması (Badge widget'ı 9+ gösterimini destekler ama count sınırı iyidir)
           smallSize: 16,
           backgroundColor: Theme.of(context).colorScheme.primary,
           textColor: Colors.white,

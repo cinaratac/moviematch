@@ -1,4 +1,4 @@
-package com.example.fluttergirdi
+package com.kozmosoft.cinematch
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil yönlendirmesi için
 
 /// AppBar içinde kullan: NotificationsButton()
@@ -198,18 +199,35 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                         builder: (context, actorSnap) {
                           final actor = actorSnap.data;
                           return ListTile(
-                            onTap: () async {
-                              // Tıklandığında okundu işaretle ve ilgili profile git
-                              await docs[i].reference.update({'read': true});
-                              if (context.mounted && actorId.isNotEmpty) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => PublicProfileScreen(uid: actorId),
-                                  ),
-                                );
-                              }
-                            },
+                              onTap: () async {
+                                // 1. Okundu işaretle
+                                await docs[i].reference.update({'read': true});
+                                
+                                if (!context.mounted) return;
+
+                                // 2. Bildirim tipine göre yönlendirme yap
+                                final postId = (m['postId'] ?? '').toString();
+
+                                if (type == 'follow') {
+                                  // Takip bildirimiyse profile git
+                                  if (actorId.isNotEmpty) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => PublicProfileScreen(uid: actorId),
+                                      ),
+                                    );
+                                  }
+                                } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
+                                  // Like veya Yorum ise GÖNDERİYE git
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => PostDetailScreen(postId: postId),
+                                    ),
+                                  );
+                                }
+                              },
                             leading: _Avatar(url: actor?.photoURL),
                             title: Text(
                               actor?.displayName ?? title,
