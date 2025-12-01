@@ -18,7 +18,7 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
 
   @override
-  void initState() {
+  void initState() { 
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
@@ -29,9 +29,9 @@ class _HomeShellState extends State<HomeShell> {
   final List<Widget> _pages = [
     const FeedPage(),
     const MatchListScreen(),
-    const ProfilePage(),
     const MessagesPage(),
-    const SearchProfilesScreen(),
+    const ProfilePage(),
+   
   ];
 
   @override
@@ -95,15 +95,16 @@ class _HomeShellState extends State<HomeShell> {
                 selectedIcon: Icon(Icons.favorite),
                 label: 'Match',
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: 'Profile',
-              ),
+             
               NavigationDestination(
                 icon: _MessagesIcon(),
                 selectedIcon: _MessagesIcon(selected: true),
                 label: 'Messages',
+              ),
+               const NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: Icon(Icons.person),
+                label: 'Profile',
               ),
             ],
           ),

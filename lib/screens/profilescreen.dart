@@ -1712,50 +1712,47 @@ class _ProfilePageState extends State<ProfilePage> {
                         scrolledUnderElevation: 0,
                         surfaceTintColor: Colors.transparent,
                         automaticallyImplyLeading: false,
-                        actions: [
-                          IconButton(
-                            tooltip: 'Düzenle',
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => EditProfilePage(
-                                    initialUserData: _lastUserData,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          IconButton(
-                            tooltip: 'Yenile',
-                            icon: const Icon(Icons.refresh),
-                            onPressed: () async {
-                              await _refreshFavorites();
-                              await _loadActivities();
-                              await _bootstrapCounts();
-                            },
-                          ),
-                          PopupMenuButton<String>(
-                            onSelected: (value) async {
-                              if (value == 'settings') {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => const SettingsPage(),
-                                  ),
-                                );
-                              }
-                            },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
-                                value: 'settings',
-                                child: ListTile(
-                                  leading: Icon(Icons.settings_outlined),
-                                  title: Text('Ayarlar'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                        // SliverAppBar'ın actions listesini bununla değiştir:
+actions: [
+  // Düzenle Butonu
+  IconButton(
+    tooltip: 'Düzenle',
+    icon: const Icon(Icons.edit_outlined),
+    onPressed: () {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => EditProfilePage(
+            initialUserData: _lastUserData,
+          ),
+        ),
+      );
+    },
+  ),
+  
+  // Yenile Butonu
+  IconButton(
+    tooltip: 'Yenile',
+    icon: const Icon(Icons.refresh),
+    onPressed: () async {
+      await _refreshFavorites();
+      await _loadActivities();
+      await _bootstrapCounts();
+    },
+  ),
+  
+  // YENİ: Ayarlar Butonu (Menü yerine direkt buton)
+  IconButton(
+    tooltip: 'Ayarlar',
+    icon: const Icon(Icons.settings_outlined),
+    onPressed: () {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const SettingsPage(),
+        ),
+      );
+    },
+  ),
+],
                       ),
                       SliverToBoxAdapter(
                         child: Stack(
@@ -1808,7 +1805,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                     unselectedLabelStyle: Theme.of(context)
                                         .textTheme
                                         .titleSmall,
-                                    labelColor: Colors.white,
+                                    labelColor: Theme.of(context).colorScheme.onSurface,
                                     unselectedLabelColor: Colors.white70,
                                     tabs: const [
                                       Tab(text: 'Filmler'),
