@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class EditProfilePage extends StatefulWidget {
@@ -33,13 +34,33 @@ class _EditProfilePageState extends State<EditProfilePage> {
   bool _saving = false;
 
   void _applyInitial(Map<String, dynamic> data) {
-    _usernameCtrl.text = (data['username'] ?? '').toString();
+    // ---------------------------------------------------------
+    // 1. KULLANICI ADI (Firestore Öncelikli, Yoksa Auth)
+    // ---------------------------------------------------------
+    String val = (data['username'] ?? '').toString();
+
+    // Eğer Firestore'da 'username' alanı boşsa veya yoksa,
+    // FirebaseAuth (Google/Apple) profilindeki isme bak.
+    if (val.isEmpty) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user?.displayName != null && user!.displayName!.isNotEmpty) {
+        val = user.displayName!;
+      }
+    }
+    _usernameCtrl.text = val;
+
+    // ---------------------------------------------------------
+    // 2. LETTERBOXD KULLANICI ADI
+    // ---------------------------------------------------------
     _letterboxdCtrl.text = (data['letterboxdUsername'] ?? '').toString();
 
-    // Load directors list (array preferred)
+    // ---------------------------------------------------------
+    // 3. FAVORİ YÖNETMENLER (Liste veya String Desteği)
+    // ---------------------------------------------------------
     _favDirectors.clear();
     final dArr = data['favDirectors'];
     if (dArr is List) {
+      // Eğer veritabanında liste olarak kayıtlıysa (Yeni versiyon)
       _favDirectors.addAll(
         dArr
             .whereType<String>()
@@ -48,7 +69,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             .toList(),
       );
     } else {
-      // Fallback from single string fields
+      // Eğer veritabanında tek satır string ise (Eski versiyon fallback)
       final v1 = data['favoriteDirector'];
       final v2 = data['favDirector'];
       final s = (v1 is String && v1.trim().isNotEmpty)
@@ -60,8 +81,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
         );
       }
     }
+    // Ekleme kutusu boş başlasın
+    _favDirectorCtrl.text = '';
 
-    // Load actors list (array preferred)
+    // ---------------------------------------------------------
+    // 4. FAVORİ OYUNCULAR (Liste veya String Desteği)
+    // ---------------------------------------------------------
     _favActors.clear();
     final aArr = data['favActors'];
     if (aArr is List) {
@@ -73,7 +98,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             .toList(),
       );
     } else {
-      // Fallback from single string fields
+      // Fallback
       final v1 = data['favoriteActor'];
       final v2 = data['favActor'];
       final s = (v1 is String && v1.trim().isNotEmpty)
@@ -85,11 +110,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
         );
       }
     }
-
-    // Old single-line text fields become empty add-inputs now
-    _favDirectorCtrl.text = '';
+    // Ekleme kutusu boş başlasın
     _favActorCtrl.text = '';
 
+    // ---------------------------------------------------------
+    // 5. YAŞ BİLGİSİ
+    // ---------------------------------------------------------
     final age = data['age'];
     if (age is int && age > 15) {
       _ageCtrl.text = age.toString();
@@ -98,18 +124,26 @@ class _EditProfilePageState extends State<EditProfilePage> {
     } else {
       _ageCtrl.text = '';
     }
-    // keep originals for diff
+
+    // ---------------------------------------------------------
+    // 6. ORİJİNAL DEĞERLERİ SAKLA (Değişiklik Kontrolü ve Hint Text İçin)
+    // ---------------------------------------------------------
+    
+    // Kullanıcı adı hint text'i için orijinal değeri sakla
     _origUsername = (_usernameCtrl.text).trim().isEmpty
         ? null
         : _usernameCtrl.text.trim();
+
+    // Letterboxd
     final lbStr = (_letterboxdCtrl.text).trim();
     _origLb = lbStr.isEmpty ? null : lbStr.toLowerCase();
-    _origFavDirector = (_favDirectorCtrl.text).trim().isEmpty
-        ? null
-        : _favDirectorCtrl.text.trim();
-    _origFavActor = (_favActorCtrl.text).trim().isEmpty
-        ? null
-        : _favActorCtrl.text.trim();
+
+    // Yönetmen/Oyuncu (Listeler üzerinden kontrol edildiği için text field orijinalleri boş kalabilir veya mantığına göre ayarlayabilirsin)
+    // Ancak değişiklik kontrolü (dirty check) için şimdilik null bırakıyoruz çünkü çiplerle yönetiliyor.
+    _origFavDirector = null; 
+    _origFavActor = null;
+
+    // Yaş
     if (_ageCtrl.text.trim().isNotEmpty) {
       _origAge = int.tryParse(_ageCtrl.text.trim());
     } else {
@@ -350,10 +384,24 @@ class _EditProfilePageState extends State<EditProfilePage> {
           payload['letterboxdUsername'] = currLb;
           payload['letterboxdUsername_lc'] = currLb; // normalized
           payload['lbUsername'] = currLb; // legacy compatibility
+          payload['favoritesKeys'] = FieldValue.delete();
+          payload['fiveStarKeys'] = FieldValue.delete();
+          payload['dislikedKeys'] = FieldValue.delete();
+          payload['watchlistKeys'] = FieldValue.delete();
+          payload['watchlist'] = FieldValue.delete();
+          payload['favorites'] = FieldValue.delete();
+          await UserProfileService.instance.clearTasteProfile(user.uid);
         } else {
+          payload['favoritesKeys'] = FieldValue.delete();
+          payload['fiveStarKeys'] = FieldValue.delete();
+          payload['dislikedKeys'] = FieldValue.delete();
+          payload['watchlistKeys'] = FieldValue.delete();
+          payload['watchlist'] = FieldValue.delete(); 
+          payload['favorites'] = FieldValue.delete();
           payload['letterboxdUsername'] = FieldValue.delete();
           payload['letterboxdUsername_lc'] = FieldValue.delete();
           payload['lbUsername'] = FieldValue.delete();
+          await UserProfileService.instance.clearTasteProfile(user.uid);
         }
       }
 
@@ -444,7 +492,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
             _Section(title: 'Profil'),
             TextFormField(
               controller: _usernameCtrl,
-              decoration: const InputDecoration(labelText: 'Kullanıcı adı'),
+              decoration: InputDecoration(
+                labelText: 'Kullanıcı adı',
+                hintText: _origUsername, // <-- MEVCUT KULLANICI ADI SİLİK YAZI OLARAK GÖRÜNÜR
+              ),
               textInputAction: TextInputAction.next,
               validator: (v) {
                 if (v == null || v.isEmpty) return null;
