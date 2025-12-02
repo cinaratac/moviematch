@@ -51,6 +51,7 @@ class FeedService {
   /// - `handle` opsiyoneldir (ör. '@lb'), verilmezse boş geçilir
   Future<void> createPost({
     required String text,
+    Map<String, dynamic>? movie,
     String? handle,
     String? displayName,
     String? photoURL,
@@ -66,6 +67,7 @@ class FeedService {
       'displayName': displayName ?? '',
       'handle': (handle ?? '').trim(),
       'photoURL': photoURL ?? '',
+      'movie': movie,
       'text': text.trim(),
       'likeCount': 0,
       'replyCount': 0,
