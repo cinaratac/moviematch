@@ -393,38 +393,65 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                           const TextStyle(color: Colors.white),
                                     ),
                                   // Show movie poster if available
-                                  Builder(
-                                    builder: (_) {
-                                      String posterUrl = '';
-                                      final movie = m['movie'];
-                                      if (movie is Map) {
-                                        final mm =
-                                            Map<String, dynamic>.from(movie);
-                                        posterUrl = (mm['poster'] ?? '')
-                                                as String? ??
-                                            '';
-                                      }
-                                      if (posterUrl.isEmpty) {
-                                        return const SizedBox.shrink();
-                                      }
-                                      return Padding(
-                                        padding:
-                                            const EdgeInsets.only(top: 8.0),
-                                        child: PosterImage(
-                                          posterUrl: posterUrl,
-                                          title: (m['movie'] is Map)
-                                              ? (Map<String, dynamic>.from(
-                                                        m['movie'],
-                                                      )['title'] as String? ??
-                                                  '')
-                                              : '',
-                                          width: 220,
-                                          height: 330,
-                                          fit: BoxFit.cover,
-                                        ),
-                                      );
-                                    },
-                                  ),
+                                    Builder(
+  builder: (_) {
+    String posterUrl = '';
+    String movieTitle = '';
+    final movie = m['movie'];
+
+    // Film verisini güvenli bir şekilde alıyoruz
+    if (movie is Map) {
+      final mm = Map<String, dynamic>.from(movie);
+      posterUrl = (mm['poster'] ?? '').toString();
+      movieTitle = (mm['title'] ?? '').toString();
+    } else {
+      // Eğer mesajda film verisi hiç yoksa gösterme
+      return const SizedBox.shrink();
+    }
+
+    // Poster varsa resmi, yoksa İsim Kartını gösteriyoruz
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: posterUrl.isNotEmpty
+          ? PosterImage( // Poster varsa bunu kullan
+              posterUrl: posterUrl,
+              title: movieTitle,
+              width: 220,
+              height: 330,
+              fit: BoxFit.cover,
+            )
+          : Container( // Poster YOKSA bu kutuyu göster (Manuel Filmler İçin)
+              width: 220,
+              height: 330,
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.movie_filter_outlined, size: 48, color: Colors.white54),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Text(
+                      movieTitle.isNotEmpty ? movieTitle : 'İsimsiz Film',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  },
+),
+                                   
                                   if (dt != null) ...[
                                     const SizedBox(height: 4),
                                     Text(
