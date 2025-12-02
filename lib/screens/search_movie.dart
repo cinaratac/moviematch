@@ -8,6 +8,7 @@ import '../models/shelf_target.dart';
 import '../secrets.dart';
 // PosterImage widget'ını kullanmak görsel bütünlük ve performans (cache) sağlar
 import '../widgets/poster_image.dart'; 
+import '../screens/profilescreen.dart';
 
 // Local fallback extension in case the model extension isn't present in build scope
 extension ShelfTargetXLocal on ShelfTarget {
@@ -339,6 +340,35 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                           'lowRatings': FieldValue.arrayUnion([primaryKey]),
                           'updatedAt': FieldValue.serverTimestamp(),
                         }, SetOptions(merge: true));
+                      }
+                      try {
+                        // 1. Yeni film verisini hazırla (String olduğundan emin oluyoruz)
+                        final Map<String, String> newLocalItem = {
+                          'title': title,
+                          'poster': posterUrl,
+                          'posterUrl': posterUrl,
+                        };
+
+                        // 2. Listenin "değiştirilebilir" (mutable) bir kopyasını oluştur ve elemanı ekle
+                        // Ardından eski listenin üzerine yaz (= operatörü ile)
+                        switch (widget.target) {
+                          case ShelfTarget.fiveStar:
+                            // Mevcut listenin kopyasını al -> Ekle -> Yerine koy
+                            UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)..add(newLocalItem);
+                            break;
+                          case ShelfTarget.favorites:
+                            UserShelfCache.favorites = List.from(UserShelfCache.favorites)..add(newLocalItem);
+                            break;
+                          case ShelfTarget.watchlist:
+                            UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)..add(newLocalItem);
+                            break;
+                          case ShelfTarget.disliked:
+                            UserShelfCache.disliked = List.from(UserShelfCache.disliked)..add(newLocalItem);
+                            break;
+                        }
+                      } catch (e) {
+                        // Eğer UserShelfCache henüz hazır değilse veya başka sorun varsa çökmemesi için
+                        debugPrint('Cache güncellenemedi: $e');
                       }
 
                       if (mounted) {

@@ -65,8 +65,6 @@ class ChatService {
       'authorId': fromUid,
       'from': fromUid,
       'text': trimmed,
-      'message': trimmed,
-      'content': trimmed,
       'createdAt': FieldValue.serverTimestamp(),
     });
     batch.set(chatRef, {
