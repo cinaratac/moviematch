@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'register_page.dart';
+import 'package:fluttergirdi/services/google_auth_service.dart';
+import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart'; 
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -244,6 +246,44 @@ class _LoginPageState extends State<LoginPage> {
                         style: TextStyle(color: cs.primary),
                       ),
                     ),
+                    const SizedBox(height: 20),
+OutlinedButton.icon(
+  onPressed: () async {
+    // 1. Google Giriş işlemini başlat
+    final user = await GoogleAuthService.signInWithGoogle(context);
+    
+    // 2. Eğer giriş başarılıysa kontrol et
+    if (user != null && context.mounted) {
+      // Veritabanını kontrol et: Letterboxd kullanıcı adı var mı?
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      final data = doc.data();
+      final hasLb = data != null && 
+                    data['letterboxdUsername'] != null && 
+                    data['letterboxdUsername'].toString().isNotEmpty;
+
+      // 3. Eğer Letterboxd bağlı değilse Onboarding'e gönder
+      if (!hasLb) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const LetterboxdOnboarding()),
+        );
+      } else {
+        // Zaten bağlıysa normal akış (AuthGate) devam eder, bir şey yapmaya gerek yok.
+        // Ancak AuthGate tetiklenmezse manuel yönlendirme yapabilirsin:
+        // Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  },
+  icon: const Icon(Icons.g_mobiledata, size: 28),
+  label: const Text('Google ile Devam Et'),
+  style: OutlinedButton.styleFrom(
+    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+    side: const BorderSide(color: Colors.grey),
+  ),
+),
                   ],
                 ),
               ),

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart'; // Bildirim kontrolü için eklendi
+import 'package:fluttergirdi/services/google_auth_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -819,7 +819,15 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _busy ? null : _clearLetterboxdSync,
           ),
           const Divider(height: 0),
-
+ListTile(
+  leading: const Icon(Icons.link),
+  title: const Text('Google Hesabını Bağla'),
+  subtitle: const Text('Giriş yapmayı kolaylaştırmak için bağla'),
+  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+  onTap: () async {
+    await GoogleAuthService.linkGoogleAccount(context);
+  },
+),
           // GÜNCELLEME: Bildirimleri açma/kapama Switch'i
           SwitchListTile(
             secondary: const Icon(Icons.notifications_outlined),
