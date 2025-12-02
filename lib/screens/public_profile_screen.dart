@@ -606,6 +606,23 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           () {
+            final bio = (data['bio'] ?? '').toString();
+            if (bio.isNotEmpty) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16.0),
+                child: Text(
+                  bio,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          height: 1.4,
+                        ),
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          }(),
+          // ---------------------------
+
+          () {
             final age = data['age'];
             final genres = List<String>.from(data['favGenres'] ?? const []);
             final directors = List<String>.from(

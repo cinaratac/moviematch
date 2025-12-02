@@ -17,6 +17,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final _formKey = GlobalKey<FormState>();
   final _usernameCtrl = TextEditingController();
   final _letterboxdCtrl = TextEditingController();
+  final _bioCtrl = TextEditingController();
   final _favDirectorCtrl = TextEditingController();
   final _favActorCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
@@ -25,6 +26,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final List<String> _favActors = [];
 
   String? _origUsername;
+  String? _origBio;
   String? _origLb;
   String? _origFavDirector;
   String? _origFavActor;
@@ -48,6 +50,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
     }
     _usernameCtrl.text = val;
+    // --- BİYOGRAFİ YÜKLEME ---
+    _bioCtrl.text = (data['bio'] ?? '').toString();
+    // -------------------------
+    _origUsername = (_usernameCtrl.text).trim().isEmpty ? null : _usernameCtrl.text.trim();
 
     // ---------------------------------------------------------
     // 2. LETTERBOXD KULLANICI ADI
@@ -149,6 +155,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
     } else {
       _origAge = null;
     }
+    // --- BİYOGRAFİ ORİJİNAL ---
+    _origBio = (_bioCtrl.text).trim().isEmpty ? null : _bioCtrl.text.trim();
+    // --------------------------
   }
 
   @override
@@ -323,6 +332,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   void dispose() {
     _usernameCtrl.dispose();
+    _bioCtrl.dispose();
     _letterboxdCtrl.dispose();
     _favDirectorCtrl.dispose();
     _favActorCtrl.dispose();
@@ -338,6 +348,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     setState(() => _saving = true);
     try {
       final username = _usernameCtrl.text.trim();
+      final bio = _bioCtrl.text.trim();
       final favDirector = _favDirectorCtrl.text.trim();
       final favActor = _favActorCtrl.text.trim();
       final ageStr = _ageCtrl.text.trim();
@@ -346,12 +357,22 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       Map<String, dynamic> payload = {};
 
+
       String? prevUsername = _origUsername;
       String? currUsername = username.isEmpty ? null : username;
       if (prevUsername != currUsername) {
         payload['username'] = (currUsername != null)
             ? currUsername
             : FieldValue.delete();
+      }
+
+
+      // --- BİYOGRAFİ DEĞİŞİKLİK KONTROLÜ ---
+      String? prevBio = _origBio;
+      String? currBio = bio.isEmpty ? null : bio;
+      if (prevBio != currBio) {
+        // Eğer boşsa veritabanından 'bio' alanını sil, doluysa güncelle
+        payload['bio'] = (currBio != null) ? currBio : FieldValue.delete();
       }
 
       String? prevFavDirector = _origFavDirector;
@@ -443,6 +464,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       // sync originals with the just-saved state
       _origUsername = currUsername;
+      _origBio = currBio;
       _origFavDirector = currFavDirector;
       _origFavActor = currFavActor;
       _origAge = currAge;
@@ -503,6 +525,20 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 if (!rx.hasMatch(v)) return '3-20 karakter, harf/rakam/_ . -';
                 return null;
               },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _bioCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Biyografi',
+                hintText: 'Kendinden veya film zevkinden bahset...',
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(),
+              ),
+              textInputAction: TextInputAction.newline,
+              keyboardType: TextInputType.multiline,
+              maxLines: 3,
+              maxLength: 150, // İsteğe bağlı karakter sınırı
             ),
             const SizedBox(height: 12),
             TextFormField(

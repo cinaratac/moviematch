@@ -1547,6 +1547,25 @@ class _ProfilePageState extends State<ProfilePage> {
           Builder(
             builder: (context) {
               final data = _lastUserData ?? const <String, dynamic>{};
+              final bio = (data['bio'] ?? '').toString();
+
+              if (bio.isNotEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: Text(
+                    bio,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      height: 1.4, // Okunabilirlik için satır aralığı
+                    ),
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+          Builder(
+            builder: (context) {
+              final data = _lastUserData ?? const <String, dynamic>{};
               final age = data['age'];
               final genres = List<String>.from(data['favGenres'] ?? const []);
               final directors = List<String>.from(
