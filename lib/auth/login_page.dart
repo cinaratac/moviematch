@@ -1,8 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
+import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
 import 'register_page.dart';
 import 'package:fluttergirdi/services/google_auth_service.dart';
-import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart'; 
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -68,6 +70,66 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) setState(() => _loading = false);
     }
   }
+  // Kullanıcıya sözleşme penceresini gösterir ve onay durumunu döndürür
+Future<bool> _showTermsDialogForGoogle() async {
+  bool agreed = false;
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    enableDrag: false,
+    useSafeArea: true,
+    backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+    builder: (context) {
+      return SizedBox(
+        height: MediaQuery.of(context).size.height * 0.9,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Kullanıcı Sözleşmesi",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: const PDF(
+                enableSwipe: true,
+                swipeHorizontal: false,
+                autoSpacing: false,
+                pageFling: false,
+              ).fromAsset(
+                'assets/docs/sozlesme.pdf',
+                errorWidget: (error) => Center(child: Text("Hata: $error")),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () {
+                    agreed = true; // Kabul edildi işaretle
+                    Navigator.pop(context); // Pencereyi kapat
+                  },
+                  child: const Text("Okudum ve Onaylıyorum"),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  return agreed;
+}
 
   Future<void> _onForgotPassword() async {
     if (_loading) return;
@@ -247,43 +309,65 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-OutlinedButton.icon(
-  onPressed: () async {
-    // 1. Google Giriş işlemini başlat
-    final user = await GoogleAuthService.signInWithGoogle(context);
-    
-    // 2. Eğer giriş başarılıysa kontrol et
-    if (user != null && context.mounted) {
-      // Veritabanını kontrol et: Letterboxd kullanıcı adı var mı?
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      
-      final data = doc.data();
-      final hasLb = data != null && 
-                    data['letterboxdUsername'] != null && 
-                    data['letterboxdUsername'].toString().isNotEmpty;
+                    // Butonu ortalamak ve genişliğini kısıtlamak için Align ve Padding kullanıyoruz
+Align(
+  alignment: Alignment.center,
+  child: Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 48.0), // Yanlardan boşluk vererek genişliği daraltıyoruz
+    child: OutlinedButton(
+      onPressed: () async {
+        // 1. Google Giriş
+        final user = await GoogleAuthService.signInWithGoogle(context);
+        
+        // 2. Kontrol ve Yönlendirme
+        if (user != null && context.mounted) {
+          final doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          
+          final data = doc.data();
+          final hasLb = data != null && 
+                        data['letterboxdUsername'] != null && 
+                        data['letterboxdUsername'].toString().isNotEmpty;
 
-      // 3. Eğer Letterboxd bağlı değilse Onboarding'e gönder
-      if (!hasLb) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const LetterboxdOnboarding()),
-        );
-      } else {
-        // Zaten bağlıysa normal akış (AuthGate) devam eder, bir şey yapmaya gerek yok.
-        // Ancak AuthGate tetiklenmezse manuel yönlendirme yapabilirsin:
-        // Navigator.of(context).popUntil((route) => route.isFirst);
-      }
-    }
-  },
-  icon: const Icon(Icons.g_mobiledata, size: 28),
-  label: const Text('Google ile Devam Et'),
-  style: OutlinedButton.styleFrom(
-    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-    side: const BorderSide(color: Colors.grey),
+          // Eğer Letterboxd bağlı değilse Onboarding'e gönder
+          if (!hasLb) {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const OnboardingLetterboxd()),
+            );
+          }
+        }
+      },
+      style: OutlinedButton.styleFrom(
+        // "Yuvarlakımsı" görünüm için StadiumBorder (Hap şekli)
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        // Kenarlık rengi
+        side: const BorderSide(color: Colors.grey),
+        // Arka plan rengi (isteğe bağlı, saydam olması için kaldırabilirsiniz)
+        backgroundColor: Theme.of(context).cardColor.withOpacity(0.3),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min, // İçeriği kadar yer kaplamaya çalışır
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Google İkonu
+          // NOT: Tam renkli "G" logosu istiyorsanız buraya Image.asset('assets/google_logo.png') eklemelisiniz.
+          Image.asset('assets/icon/google_logo.png', height: 24), 
+          const SizedBox(width: 8),
+          const Text(
+            'Google ile Devam Et',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600, // Yazıyı biraz kalınlaştırdık
+            ),
+          ),
+        ],
+      ),
+    ),
   ),
-),
+)
                   ],
                 ),
               ),

@@ -516,11 +516,23 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // Yardımcı: Oturum tazeleme (Re-authentication)
+ // Yardımcı: Oturum tazeleme (Hem Google hem E-posta destekli)
   Future<bool> _reauthenticateUser() async {
     final user = _user;
     if (user == null) return false;
 
+    // 1. KONTROL: Kullanıcı Google hesabı ile mi bağlı?
+    // providerData listesinde 'google.com' var mı diye bakarız.
+    bool isGoogleUser = user.providerData.any((userInfo) => userInfo.providerId == 'google.com');
+
+    if (isGoogleUser) {
+      // --- GOOGLE İSE ---
+      // Şifre sormak yerine Google penceresini açıp doğrulama iste
+      // NOT: Bu fonksiyonu GoogleAuthService dosyanıza eklediğinizden emin olun.
+      return await GoogleAuthService.reauthenticateWithGoogle(context);
+    } 
+
+    // 2. --- E-POSTA İSE --- (Mevcut kodunuzun aynısı)
     final email = user.email;
     if (email == null) return false;
 
@@ -532,7 +544,6 @@ class _SettingsPageState extends State<SettingsPage> {
     if (password == null || password.isEmpty) return false; // Vazgeçti
 
     try {
-      // E-posta/Şifre ile credential oluştur
       AuthCredential credential = EmailAuthProvider.credential(
         email: email,
         password: password,

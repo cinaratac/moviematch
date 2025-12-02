@@ -1,29 +1,24 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-// 'as gsi' diyerek pakete takma isim veriyoruz, böylece karışıklık önlenir.
 import 'package:google_sign_in/google_sign_in.dart' as gsi; 
 import 'package:flutter/material.dart';
 
 class GoogleAuthService {
-  // gsi.GoogleSignIn kullanarak paketten geldiğini belirtiyoruz
   static final gsi.GoogleSignIn _googleSignIn = gsi.GoogleSignIn();
 
-  /// Google ile Giriş Yap
+  /// 1. Google ile SADECE Giriş Yap (Veritabanı kaydı yapmaz)
   static Future<User?> signInWithGoogle(BuildContext context) async {
     try {
-      // 1. Google giriş penceresini aç
       final gsi.GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return null; // Kullanıcı iptal etti
+      if (googleUser == null) return null; // İptal edildi
 
-      // 2. Kimlik doğrulama detaylarını al
       final gsi.GoogleSignInAuthentication googleAuth = await googleUser.authentication;
 
-      // 3. Firebase için credential oluştur
       final AuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      // 4. Firebase'e giriş yap
       final UserCredential userCredential = 
           await FirebaseAuth.instance.signInWithCredential(credential);
       
@@ -38,14 +33,40 @@ class GoogleAuthService {
     }
   }
 
-  /// Google Hesabını Bağla
-  static Future<void> linkGoogleAccount(BuildContext context) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+  /// 2. Yeni Google Kullanıcısını Veritabanına Kaydet (Sözleşme onayından sonra çağrılır)
+  static Future<void> createGoogleUser(User user) async {
+    final userDocRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
+    final userDocSnapshot = await userDocRef.get();
 
+    if (!userDocSnapshot.exists) {
+      // Mailin başındaki kısmı kullanıcı adı yap
+      String derivedUsername = user.email!.split('@')[0];
+      // Görünen isim yoksa kullanıcı adını kullan
+      String displayName = user.displayName ?? derivedUsername;
+
+      await userDocRef.set({
+        'username': derivedUsername,
+        'username_lc': derivedUsername.toLowerCase(),
+        'email': user.email,
+        'displayName': displayName,
+        'displayName_lc': displayName.toLowerCase(),
+        'photoUrl': user.photoURL,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'isGoogleAccount': true,
+        'letterboxdUsername': '', // Henüz yok
+        // Sözleşme onaylandı olarak işaretliyoruz
+        'termsAccepted': true, 
+        'termsAcceptedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+  }
+
+  /// Hesap silme işlemi için tekrar doğrulama
+  static Future<bool> reauthenticateWithGoogle(BuildContext context) async {
+    try {
       final gsi.GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return;
+      if (googleUser == null) return false;
 
       final gsi.GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final AuthCredential credential = GoogleAuthProvider.credential(
@@ -53,30 +74,41 @@ class GoogleAuthService {
         idToken: googleAuth.idToken,
       );
 
-      await user.linkWithCredential(credential);
-      
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Google hesabı başarıyla bağlandı!')),
-        );
+      if (FirebaseAuth.instance.currentUser != null) {
+        await FirebaseAuth.instance.currentUser!.reauthenticateWithCredential(credential);
+        return true;
       }
-    } on FirebaseAuthException catch (e) {
-      String msg = 'Bağlama hatası oluştu.';
-      if (e.code == 'credential-already-in-use') {
-        msg = 'Bu Google hesabı zaten başka bir kullanıcıya bağlı.';
-      } else if (e.code == 'provider-already-linked') {
-        msg = 'Hesap zaten Google\'a bağlı.';
-      }
-      
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-      }
+      return false;
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Hata: $e')),
+          SnackBar(content: Text('Doğrulama hatası: $e')),
         );
       }
+      return false;
+    }
+  }
+
+  /// Hesabı Bağla
+  static Future<void> linkGoogleAccount(BuildContext context) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final gsi.GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return;
+      final gsi.GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      await user.linkWithCredential(credential);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Google hesabı bağlandı!')),
+        );
+      }
+    } catch (e) {
+      // Hata yönetimi...
     }
   }
 }
