@@ -9,6 +9,7 @@ import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
+import 'package:fluttergirdi/services/match_service.dart';
 
 const Map<String, String> _lbImageHeaders = {
   'Referer': 'https://letterboxd.com',
@@ -32,6 +33,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   StreamSubscription<FollowEvent>? _followSub;
   bool _isBlocked = false;
   bool _hasBlockedMe = false;
+  int? _matchScore;
 
   // Ekran titremesini önleyen Stream
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
@@ -380,6 +382,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         });
       }
     });
+    _calcScore();
+  }
+  Future<void> _calcScore() async {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    // Kendi profilimizse hesaplamaya gerek yok
+    if (myUid == null || myUid == widget.uid) return; 
+
+    final score = await MatchService.instance.calculateMatchScore(myUid, widget.uid);
+    if (mounted) {
+      setState(() {
+        _matchScore = score;
+      });
+    }
   }
 
   Future<void> _loadFollowing() async {
@@ -1223,69 +1238,93 @@ PopupMenuButton<String>(
                                     ).textTheme.bodyMedium,
                                   ),
                                 ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (!_isBlocked &&
-                                      !_hasBlockedMe &&
-                                      FirebaseAuth.instance.currentUser?.uid !=
-                                          widget.uid)
-                                    TextButton.icon(
-                                      onPressed: () async {
-                                        final myUid = FirebaseAuth
-                                            .instance
-                                            .currentUser
-                                            ?.uid;
-                                        if (myUid == null) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Giriş yapmalısın.',
-                                              ),
-                                            ),
-                                          );
-                                          return;
-                                        }
-                                        final chatId = await ChatService
-                                            .instance
-                                            .getOrCreateChat(myUid, widget.uid);
-                                        if (!context.mounted) return;
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => ChatRoomScreen(
-                                              chatId: chatId,
-                                              otherUid: widget.uid,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                      icon: const Icon(Icons.message),
-                                      label: const Text('Mesaj gönder'),
-                                    ),
-                                  if (FirebaseAuth.instance.currentUser?.uid !=
-                                          null &&
-                                      FirebaseAuth.instance.currentUser!.uid !=
-                                          widget.uid) ...[
-                                    const SizedBox(width: 3),
-                                    TextButton.icon(
-                                      onPressed: _followBusy
-                                          ? null
-                                          : _toggleFollow,
-                                      icon: _isFollowing == true
-                                          ? const Icon(Icons.check)
-                                          : const Icon(Icons.person_add_alt_1),
-                                      label: Text(
-                                        _isFollowing == true
-                                            ? 'Takiptesin'
-                                            : 'Takip et',
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
+                              // --- BUTONLARIN BAŞLANGICI ---
+Padding(
+  padding: const EdgeInsets.symmetric(vertical: 12.0),
+  child: Row(
+    children: [
+      // 1. MESAJ GÖNDER BUTONU (Varsa)
+      if (!_isBlocked &&
+          !_hasBlockedMe &&
+          FirebaseAuth.instance.currentUser?.uid != widget.uid) ...[
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: () async {
+              final myUid = FirebaseAuth.instance.currentUser?.uid;
+              if (myUid == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Giriş yapmalısın.')),
+                );
+                return;
+              }
+              final chatId =
+                  await ChatService.instance.getOrCreateChat(myUid, widget.uid);
+              if (!context.mounted) return;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChatRoomScreen(
+                    chatId: chatId,
+                    otherUid: widget.uid,
+                  ),
+                ),
+              );
+            },
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            icon: const Icon(Icons.message_rounded, size: 20),
+            label: const Text('Mesaj'),
+          ),
+        ),
+        // Eğer takip butonu da gösterilecekse araya boşluk koy
+        if (FirebaseAuth.instance.currentUser?.uid != null &&
+            FirebaseAuth.instance.currentUser!.uid != widget.uid)
+          const SizedBox(width: 10),
+      ],
+
+      // 2. TAKİP ET BUTONU (Varsa)
+      if (FirebaseAuth.instance.currentUser?.uid != null &&
+          FirebaseAuth.instance.currentUser!.uid != widget.uid)
+        Expanded(
+          child: FilledButton.icon(
+            onPressed: _followBusy ? null : _toggleFollow,
+            style: FilledButton.styleFrom(
+              // İstenilen YEŞİL renk ayarı:
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white, // Yazı ve ikon rengi
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            icon: _followBusy
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Icon(
+                    _isFollowing == true
+                        ? Icons.check
+                        : Icons.person_add_alt_1,
+                    size: 20,
+                  ),
+            label: Text(
+              _isFollowing == true ? 'Takiptesin' : 'Takip et',
+            ),
+          ),
+        ),
+    ],
+  ),
+),
+// --- BUTONLARIN BİTİŞİ ---
                               const SizedBox(height: 12),
                               TabBar(
                                 indicator: UnderlineTabIndicator(
@@ -1325,6 +1364,53 @@ PopupMenuButton<String>(
                             ],
                           ),
                         ),
+                        // --- YEŞİL UYUM DAİRESİ (AppBar'ın Altında, Sağ Üstte) ---
+      if (_matchScore != null && _matchScore! > 0)
+        Positioned(
+          // AppBar boyutu + Status bar + biraz boşluk (10px) kadar aşağıya itiyoruz
+          top: MediaQuery.of(context).padding.top + kToolbarHeight + 10,
+          right: 16, // Sağdan boşluk
+          child: Container(
+            width: 60, // Biraz daha belirgin olsun diye büyüttük
+            height: 60,
+            decoration: BoxDecoration(
+              color: Colors.green.shade600,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '%$_matchScore',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    height: 1.0,
+                  ),
+                ),
+                const Text(
+                  'UYUM',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w500,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
                       ],
                     ),
                   ),

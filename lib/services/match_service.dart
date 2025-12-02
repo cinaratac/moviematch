@@ -66,16 +66,12 @@ class MatchService {
   CollectionReference<Map<String, dynamic>> get _matches => _db.collection('matches');
   CollectionReference<Map<String, dynamic>> get _likes => _db.collection('likes');
 
-  // In-memory short-term cache (Oturum süresince geçici hafıza)
+  // In-memory short-term cache
   final Map<String, _FindCache> _findCache = {};
   static const Duration _findCacheTtl = Duration(minutes: 5);
 
-  /// Cache'i tamamen temizler (Logout olurken çağırılmalı)
-  void clearCache() {
-    _findCache.clear();
-  }
+  void clearCache() => _findCache.clear();
 
-  /// Belirli bir kullanıcıyla olan eşleşmeyi cache'den siler (Pas/Like sonrası)
   void removeUserFromCache(String myUid, String otherUid) {
     final cached = _findCache[myUid];
     if (cached != null) {
@@ -90,10 +86,7 @@ class MatchService {
 
   Set<String> _lcSet(Map<String, dynamic> src, String key) {
     final raw = (src[key] ?? const []) as List;
-    return raw
-        .map((e) => e.toString().trim().toLowerCase())
-        .where((e) => e.isNotEmpty)
-        .toSet();
+    return raw.map((e) => e.toString().trim().toLowerCase()).where((e) => e.isNotEmpty).toSet();
   }
 
   Set<String> _extractSet(Map<String, dynamic>? data, List<String> keys) {
@@ -101,10 +94,7 @@ class MatchService {
     for (final key in keys) {
       final val = data[key];
       if (val is List) {
-        final set = val
-            .map((e) => e.toString().trim())
-            .where((e) => e.isNotEmpty)
-            .toSet();
+        final set = val.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toSet();
         if (set.isNotEmpty) return set;
       }
     }
@@ -118,11 +108,112 @@ class MatchService {
     'photoURL': (u['photoURL'] ?? '') as String,
   };
 
+  // ---------------------------------------------------------------------------
+  // YENİ: MERKEZİ HESAPLAMA MOTORU (Daha Cömert Algoritma)
+  // Bu fonksiyon hem findMatches hem de calculateMatchScore tarafından kullanılır.
+  // ---------------------------------------------------------------------------
+  MatchResult? _computeMatch(String myUid, String otherUid, Map<String, dynamic> myData, Map<String, dynamic> theirData) {
+    // 1. Verileri Hazırla
+    final myFive = _extractSet(myData, ['fiveStarKeys', 'fiveIds', 'fiveStars']);
+    final myFavs = _extractSet(myData, ['favoritesKeys', 'favIds', 'favoriteFilmIds']);
+    final myWatch = _extractSet(myData, ['watchlistKeys', 'watchIds', 'watchlistIds']);
+    final myDis = _extractSet(myData, ['dislikedKeys', 'dislikes']);
+    
+    final myGenres = _lcSet(myData, 'favGenres');
+    final myDirectors = _lcSet(myData, 'favDirectors');
+    final myActors = _lcSet(myData, 'favActors');
+
+    final theirFive = _extractSet(theirData, ['fiveStarKeys', 'fiveIds']);
+    final theirFavs = _extractSet(theirData, ['favoritesKeys', 'favIds']);
+    final theirWatch = _extractSet(theirData, ['watchlistKeys', 'watchIds']);
+    final theirDis = _extractSet(theirData, ['dislikedKeys', 'dislikes']);
+    
+    final theirGenres = _lcSet(theirData, 'favGenres');
+    final theirDirectors = _lcSet(theirData, 'favDirectors');
+    final theirActors = _lcSet(theirData, 'favActors');
+
+    // 2. Kesişimleri Bul
+    final common5 = myFive.intersection(theirFive).toList()..sort();
+    final commonF = myFavs.intersection(theirFavs).toList()..sort();
+    final commonW = myWatch.intersection(theirWatch).toList()..sort();
+    final commonD = myDis.intersection(theirDis).toList()..sort();
+    
+    final commonG = myGenres.intersection(theirGenres).toList()..sort();
+    final commonDir = myDirectors.intersection(theirDirectors).toList()..sort();
+    final commonAct = myActors.intersection(theirActors).toList()..sort();
+
+    // Hiçbir ortak nokta yoksa null dön (Listede hiç çıkmasın)
+    if (common5.isEmpty && commonF.isEmpty && commonW.isEmpty &&
+        commonD.isEmpty && commonG.isEmpty && commonDir.isEmpty && commonAct.isEmpty) {
+      return null;
+    }
+
+    // 3. PUANLAMA ALGORİTMASI (Daha Cömert Versiyon)
+    
+    // Yardımcı: Doygunluk Fonksiyonu
+    // count: Ortak sayı
+    // weight: Bu kategorinin maksimum puanı
+    // k (saturation): Kaç tane ortak olunca puanın yarısını alsın? (Düşük k = Hızlı Puan)
+    double calcPart(int count, double weight, double k) {
+      if (count <= 0) return 0.0;
+      // Formül: weight * (count / (count + k))
+      return weight * (count / (count + k));
+    }
+
+    // Ağırlıklar (Toplamı ~100)
+    const w5 = 30.0;     
+    const wFav = 40.0;   
+    const wWatch = 10.0; 
+    const wG = 5.0;      
+    const wDir = 10.0;   
+    const wAct = 5.0;    
+
+    // --- CÖMERT AYARLAR ---
+    final score5 = calcPart(common5.length, w5, 2.0);      
+    final scoreFav = calcPart(commonF.length, wFav, 1.0);  // 1 ortak favori = 20 puan!
+    final scoreWatch = calcPart(commonW.length, wWatch, 3.0); 
+    
+    final scoreG = calcPart(commonG.length, wG, 1.0);
+    final scoreDir = calcPart(commonDir.length, wDir, 1.0);
+    final scoreAct = calcPart(commonAct.length, wAct, 1.0);
+
+    // Ham Toplam
+    double totalScore = score5 + scoreFav + scoreWatch + scoreG + scoreDir + scoreAct;
+
+    // Beğenilmeyenler Bonusu
+    if (commonD.isNotEmpty) totalScore += 3.0;
+
+    // --- BOOST (YÜKSELTME) ---
+    if (totalScore > 0) {
+      // 1. Taban puan ekle (Herhangi bir ortaklık varsa en az 15 puan cebe girsin)
+      totalScore += 15.0; 
+      
+      // 2. Düşük puanları yukarı çeken eğri uygula
+      totalScore = math.sqrt(totalScore) * 10.0;
+    }
+
+    // Son limit
+    final finalScore = math.min(100.0, totalScore);
+
+    return MatchResult(
+      uid: otherUid,
+      score: finalScore,
+      commonFiveStars: common5,
+      commonFavorites: commonF,
+      commonWatchlist: commonW,
+      commonDisliked: commonD,
+      commonGenres: commonG,
+      commonDirectors: commonDir,
+      commonActors: commonAct,
+      displayName: theirData['displayName'] as String?,
+      letterboxdUsername: theirData['letterboxdUsername'] as String?,
+      photoURL: theirData['photoURL'] as String?,
+    );
+  }
+
   /* ---------------------------------------------------------------------- */
-  /* 1) EŞLEŞME LİSTESİ HESAPLA (Algoritma)                                 */
+  /* 1) EŞLEŞME LİSTESİ HESAPLA (findMatches)                               */
   /* ---------------------------------------------------------------------- */
-  
-  /// Index hatasını önlemek için sıralama (orderBy) komutu kullanılmamıştır.
   Future<List<MatchResult>> findMatches(String myUid, {int candidateLimit = 100}) async {
     // 1. Cache Kontrolü
     final now = DateTime.now();
@@ -131,163 +222,83 @@ class MatchService {
       if (cached.results.isNotEmpty) return cached.results;
     }
 
-    // 2. Kendi profil verimi çek
+    // 2. Kendi verini çek
     final meDoc = await _users.doc(myUid).get();
     if (!meDoc.exists) return [];
     final myData = meDoc.data() ?? {};
 
-    // Kendi listelerim
-    final myFive = _extractSet(myData, ['fiveStarKeys', 'fiveIds', 'fiveStars']);
-    final myFavs = _extractSet(myData, ['favoritesKeys', 'favIds', 'favoriteFilmIds']);
-    final myWatch = _extractSet(myData, ['watchlistKeys', 'watchIds', 'watchlistIds']);
-    final myDis = _extractSet(myData, ['dislikedKeys', 'dislikes']);
-    
-    // Kendi türlerim
-    final myGenres = _lcSet(myData, 'favGenres');
-    final myDirectors = _lcSet(myData, 'favDirectors');
-    final myActors = _lcSet(myData, 'favActors');
-
-    if (myFive.isEmpty && myFavs.isEmpty && myWatch.isEmpty && myDis.isEmpty) {
-      return [];
-    }
-
-    // 3. Daha önce etkileşime geçtiğim (Like/Pass/Match) kişileri bul (Hata yönetimi eklendi)
-    final hiddenUids = <String>{myUid}; 
+    // 3. Etkileşime geçilenleri filtrele
+    final hiddenUids = <String>{myUid};
     try {
-      // Sadece 'uids' dizisini kontrol eden basit sorgu (Index hatası vermez)
       final likesQs = await _likes.where('uids', arrayContains: myUid).get();
-      
       for (final doc in likesQs.docs) {
         final m = doc.data();
         final a = m['a'] as String?;
         final b = m['b'] as String?;
         if (a == null || b == null) continue;
-        
         final meIsA = (myUid == a);
-        final otherUid = meIsA ? b : a;
-
         final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
         final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
         final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
-        final matched = myLiked && otherLiked;
-        
-        // Gizleme koşulları:
-        // 1. Ben beğendiysem (tek taraflı veya karşılıklı fark etmez)
-        // 2. Pas geçtiysem
-        if (myLiked || myPass || matched) {
-          hiddenUids.add(otherUid);
+        if (myLiked || myPass || (myLiked && otherLiked)) {
+          hiddenUids.add(meIsA ? b : a);
         }
       }
-    } catch (e) {
-      print('Hidden UIDs fetch error: $e');
-    }
+    } catch (_) {}
 
-    // 4. Adayları Getir (SIRALAMA YOK, Index hatası vermez)
-    Query<Map<String, dynamic>> query = _users;
-    
-    // Performans için limitli çekiyoruz
-    final allCandidates = await query.limit(candidateLimit).get();
+    // 4. Adayları Getir
+    final allCandidates = await _users.limit(candidateLimit).get();
     final List<MatchResult> out = [];
 
-    // 5. Skorlama Döngüsü
+    // 5. Her aday için _computeMatch çağır
     for (final d in allCandidates.docs) {
       final uid = d.id;
-      
-      // Zaten etkileşime geçilenler veya kendimse atla
       if (hiddenUids.contains(uid)) continue;
 
-      final data = d.data();
-
-      // Karşı tarafın listeleri
-      final theirFive = _extractSet(data, ['fiveStarKeys', 'fiveIds']);
-      final theirFavs = _extractSet(data, ['favoritesKeys', 'favIds']);
-      final theirWatch = _extractSet(data, ['watchlistKeys', 'watchIds']);
-      final theirDis = _extractSet(data, ['dislikedKeys', 'dislikes']);
-      
-      final theirGenres = _lcSet(data, 'favGenres');
-      final theirDirectors = _lcSet(data, 'favDirectors');
-      final theirActors = _lcSet(data, 'favActors');
-
-      // Kesişimler (Ortak Noktalar)
-      final common5 = myFive.intersection(theirFive).toList()..sort();
-      final commonF = myFavs.intersection(theirFavs).toList()..sort();
-      final commonW = myWatch.intersection(theirWatch).toList()..sort();
-      final commonD = myDis.intersection(theirDis).toList()..sort();
-
-      final commonG = myGenres.intersection(theirGenres).toList()..sort();
-      final commonDir = myDirectors.intersection(theirDirectors).toList()..sort();
-      final commonAct = myActors.intersection(theirActors).toList()..sort();
-
-      if (common5.isEmpty && commonF.isEmpty && commonW.isEmpty &&
-          commonD.isEmpty && commonG.isEmpty && commonDir.isEmpty && commonAct.isEmpty) {
-        continue;
+      final result = _computeMatch(myUid, uid, myData, d.data());
+      if (result != null) {
+        out.add(result);
       }
-
-      // Skor Hesaplama (Ağırlıklı) - Orijinal mantık korundu
-      double part(double common, double w) {
-        if (common <= 0) return 0.0;
-        final denom = common * 2; 
-        return w * (common / denom);
-      }
-
-      const w5 = 3.0, wFav = 4.0, wWatch = 1.6, wG = 1.5, wDir = 1.8, wAct = 1.2;
-      final maxScoreUnit = w5 + wFav + wWatch + wG + wDir + wAct;
-      
-      final unitScore =
-          part(common5.length.toDouble(), w5) +
-          part(commonF.length.toDouble(), wFav) +
-          part(commonW.length.toDouble(), wWatch) +
-          part(commonG.length.toDouble(), wG) +
-          part(commonDir.length.toDouble(), wDir) +
-          part(commonAct.length.toDouble(), wAct);
-
-      final raw = (unitScore / maxScoreUnit) * 100.0;
-      
-      const double gamma = 0.85;
-      const double lift = 33.0; 
-      final boosted = math.pow(raw / 100.0, gamma) * 100.0;
-      final finalScore = math.min(100.0, boosted + lift);
-
-      out.add(
-        MatchResult(
-          uid: uid,
-          score: finalScore,
-          commonFiveStars: common5,
-          commonFavorites: commonF,
-          commonWatchlist: commonW,
-          commonDisliked: commonD,
-          commonGenres: commonG,
-          commonDirectors: commonDir,
-          commonActors: commonAct,
-          displayName: data['displayName'] as String?,
-          letterboxdUsername: data['letterboxdUsername'] as String?,
-          photoURL: data['photoURL'] as String?,
-        ),
-      );
     }
 
-    // 6. Sıralama (Uygulama içinde skor ve ortak 5 yıldıza göre sıralanır)
+    // 6. Sırala
     out.sort((a, b) {
       final s = b.score.compareTo(a.score);
       if (s != 0) return s;
       return b.commonFiveCount.compareTo(a.commonFiveCount);
     });
 
-    // Cache güncelle
     _findCache[myUid] = _FindCache(out, DateTime.now());
     return out;
   }
 
   /* ---------------------------------------------------------------------- */
-  /* 2) OTOMATİK MATCH OLUŞTURMA                                            */
+  /* 2) TEKİL KULLANICI UYUMU HESAPLA (Profil Ekranı İçin)                  */
   /* ---------------------------------------------------------------------- */
-  
+  Future<int> calculateMatchScore(String myUid, String otherUid) async {
+    try {
+      final meDoc = await _users.doc(myUid).get();
+      final otherDoc = await _users.doc(otherUid).get();
+
+      if (!meDoc.exists || !otherDoc.exists) return 0;
+
+      final result = _computeMatch(myUid, otherUid, meDoc.data()!, otherDoc.data()!);
+      
+      return result != null ? result.score.round() : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* 3) AUTO MATCH                                                          */
+  /* ---------------------------------------------------------------------- */
   Future<int> autoCreateMatches(
     String myUid, {
     int minCommonFive = 1,
     int minCommonFav = 1,
     int minCommonDisliked = 1,
-    int limitCandidates = 50, // Performans için limit
+    int limitCandidates = 50,
   }) async {
     final meDoc = await _users.doc(myUid).get();
     if (!meDoc.exists) return 0;
@@ -298,14 +309,12 @@ class MatchService {
     final myWatch = _extractSet(myData, ['watchlistKeys']);
     final myDis = _extractSet(myData, ['dislikedKeys']);
 
-    // Sıralama kaldırıldı
     final all = await _users.limit(limitCandidates).get();
     int touched = 0;
 
     for (final d in all.docs) {
       final uid = d.id;
       if (uid == myUid) continue;
-
       final data = d.data();
 
       final theirFive = _extractSet(data, ['fiveStarKeys']);
@@ -339,23 +348,18 @@ class MatchService {
         'commonFavoritesCount': cf.length,
         'commonWatchlistCount': cw.length,
         'commonDislikedCount': cd.length,
-        'commonGenresCount': 0, 
-        'commonDirectorsCount': 0,
-        'commonActorsCount': 0,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'source': meetsB
-            ? 'auto:disliked'
-            : (meetsC ? 'auto:five+watch' : 'auto:five+fav'),
+        'source': meetsB ? 'auto:disliked' : (meetsC ? 'auto:five+watch' : 'auto:five+fav'),
       }, SetOptions(merge: true));
 
       touched++;
     }
     return touched;
   }
-  
+
   /* ---------------------------------------------------------------------- */
-  /* 3) OTOMATİK MATCH (SADECE 5★) - Index Hatası Önlemek İçin Güncellendi */
+  /* 4) AUTO MATCH FIVE ONLY                                                */
   /* ---------------------------------------------------------------------- */
   Future<int> autoCreateMatchesFiveOnly(
     String myUid, {
@@ -368,7 +372,6 @@ class MatchService {
     final myFive = _extractSet(meDoc.data(), ['fiveStarKeys']);
     if (myFive.isEmpty) return 0;
 
-    // Sıralama kaldırıldı
     final all = await _users.limit(candidateLimit).get();
     int touched = 0;
 
@@ -385,25 +388,14 @@ class MatchService {
       final pairId = pairIdOf(myUid, uid);
       final meIsA = myUid.compareTo(uid) < 0;
       
-      final aProfile = _profileSnippet(
-        meIsA ? (meDoc.data() ?? {}) : d.data(),
-        meIsA ? myUid : uid,
-      );
-      final bProfile = _profileSnippet(
-        meIsA ? d.data() : (meDoc.data() ?? {}),
-        meIsA ? uid : myUid,
-      );
+      final aProfile = _profileSnippet(meIsA ? (meDoc.data() ?? {}) : d.data(), meIsA ? myUid : uid);
+      final bProfile = _profileSnippet(meIsA ? d.data() : (meDoc.data() ?? {}), meIsA ? uid : myUid);
 
       await _matches.doc(pairId).set({
         'uids': meIsA ? [myUid, uid] : [uid, myUid],
         'aProfile': aProfile,
         'bProfile': bProfile,
         'commonFiveStarsCount': commonFive.length,
-        'commonFavoritesCount': 0,
-        'commonDislikedCount': 0,
-        'commonGenresCount': 0,
-        'commonDirectorsCount': 0,
-        'commonActorsCount': 0,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'source': 'auto:fiveOnly',
@@ -412,5 +404,24 @@ class MatchService {
       touched++;
     }
     return touched;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* 5) MATCHES STREAM                                                      */
+  /* ---------------------------------------------------------------------- */
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> matchesStream(String uid) {
+    return _matches.where('uids', arrayContains: uid).limit(50).snapshots().map(
+      (qs) {
+        final docs = [...qs.docs];
+        docs.sort((a, b) {
+          final ta = a.data()['updatedAt'] as Timestamp?;
+          final tb = b.data()['updatedAt'] as Timestamp?;
+          final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return db.compareTo(da); 
+        });
+        return docs;
+      },
+    );
   }
 }

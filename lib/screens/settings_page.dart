@@ -724,6 +724,40 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  void _showSupportDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Destek'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Görüş, öneri ve destek için bize mail atabilirsiniz:'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const SelectableText(
+                'cinematch.app.dev@gmail.com',
+                style: TextStyle(fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Tamam'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -794,7 +828,13 @@ class _SettingsPageState extends State<SettingsPage> {
             value: _notificationsEnabled,
             onChanged: _busy ? null : _toggleNotifications,
           ),
-
+          const Divider(height: 0),
+          ListTile(
+            leading: const Icon(Icons.support_agent_outlined),
+            title: const Text('Destek'),
+            subtitle: const Text('İletişime geçin'),
+            onTap: _busy ? null : _showSupportDialog,
+          ),
           const Divider(height: 0),
           ListTile(
             leading: const Icon(Icons.info_outline),

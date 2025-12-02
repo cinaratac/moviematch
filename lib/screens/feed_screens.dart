@@ -10,6 +10,7 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -24,12 +25,17 @@ class _FeedPageState extends State<FeedPage> {
   final FocusNode _focusNode = FocusNode();
   final ScrollController _listController = ScrollController();
 
-  static const int _pageSize = 15;
+  static const int _pageSize = 20;
   bool _initialLoading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
+  
   List<DocumentSnapshot<Map<String, dynamic>>> _posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
+  
+  // YENİ: Yazarların önbelleği (ID -> İsim, Foto, Handle)
+  final Map<String, Map<String, String>> _authorCache = {};
+
   Map<String, String>? _selectedMovie;
 
   @override
@@ -43,42 +49,103 @@ class _FeedPageState extends State<FeedPage> {
     if (_loadingMore || !_hasMore) return;
     if (!_listController.hasClients) return;
     final pos = _listController.position;
-    if (pos.pixels > pos.maxScrollExtent - (pos.viewportDimension * 1.5)) {
+    if (pos.pixels > pos.maxScrollExtent - (pos.viewportDimension * 2)) {
       _loadMore();
     }
   }
 
-  Future<void> _loadInitial() async {
-    if (_posts.isEmpty && mounted) {
-      setState(() {
-        _initialLoading = true;
-      });
-    }
+  // --- YENİ FONKSİYON: Yazarları Topluca Çek ---
+  Future<void> _fetchAuthorsForPosts(List<DocumentSnapshot> posts) async {
+    final uidsToFetch = <String>{};
     
-    _hasMore = true;
-    _lastDoc = null;
+    // 1. Önbellekte olmayan yazarları bul
+    for (var doc in posts) {
+      final data = doc.data() as Map<String, dynamic>?;
+      final uid = data?['authorId'] as String?;
+      if (uid != null && uid.isNotEmpty && !_authorCache.containsKey(uid)) {
+        uidsToFetch.add(uid);
+      }
+    }
+
+    if (uidsToFetch.isEmpty) return;
+
+    // 2. Firestore 'whereIn' limiti 10 olduğu için parçalara böl
+    final chunks = <List<String>>[];
+    final list = uidsToFetch.toList();
+    for (var i = 0; i < list.length; i += 10) {
+      chunks.add(list.sublist(i, i + 10 > list.length ? list.length : i + 10));
+    }
+
+    // 3. Her parça için verileri çek ve cache'e at
+    for (var chunk in chunks) {
+      try {
+        final qs = await FirebaseFirestore.instance
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get(const GetOptions(source: Source.serverAndCache));
+        
+        for (var uDoc in qs.docs) {
+          final d = uDoc.data();
+          final name = (d['displayName'] ?? '').toString();
+          final user = (d['username'] ?? '').toString();
+          final lb = (d['letterboxdUsername'] ?? '').toString();
+          final photo = (d['photoURL'] ?? '').toString();
+          
+          String handle = '';
+          if (user.isNotEmpty) handle = '@$user';
+          else if (lb.isNotEmpty) handle = '@$lb';
+
+          _authorCache[uDoc.id] = {
+            'displayName': name.isNotEmpty ? name : 'Kullanıcı',
+            'handle': handle,
+            'photoURL': photo,
+          };
+        }
+      } catch (e) {
+        debugPrint('Yazar verisi çekilemedi: $e');
+      }
+    }
+  }
+
+  Future<void> _loadInitial() async {
+    setState(() {
+      _initialLoading = true;
+      _hasMore = true;
+      _posts.clear();
+      _lastDoc = null;
+    });
 
     final base = FirebaseFirestore.instance
         .collection('posts')
         .orderBy('createdAt', descending: true)
         .limit(_pageSize);
 
+    // Cache'den hızlı yükleme
     try {
       final cacheQs = await base.get(const GetOptions(source: Source.cache));
       final cacheDocs = cacheQs.docs;
-      if (cacheDocs.isNotEmpty && mounted) {
+      if (cacheDocs.isNotEmpty) {
+        // Önce yazarları hazırla (Cache'ten gelse bile)
+        await _fetchAuthorsForPosts(cacheDocs);
+        
+        if (!mounted) return;
         setState(() {
           _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(cacheDocs);
-          _lastDoc = cacheDocs.last;
+          _lastDoc = cacheDocs.isNotEmpty ? cacheDocs.last : null;
           _hasMore = cacheDocs.length == _pageSize;
           _initialLoading = false;
         });
       }
     } catch (_) {}
 
+    // Sunucudan güncel yükleme
     try {
       final serverQs = await base.get(const GetOptions(source: Source.server));
       final serverDocs = serverQs.docs;
+      
+      // Yazarları hazırla
+      await _fetchAuthorsForPosts(serverDocs);
+
       if (!mounted) return;
       setState(() {
         _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(serverDocs);
@@ -101,14 +168,20 @@ class _FeedPageState extends State<FeedPage> {
           .orderBy('createdAt', descending: true)
           .startAfterDocument(_lastDoc!)
           .limit(_pageSize);
+      
       final qs = await q.get(const GetOptions(source: Source.server));
       final docs = qs.docs;
+
+      // Yeni gelenlerin yazarlarını hazırla
+      await _fetchAuthorsForPosts(docs);
+
       setState(() {
         _posts.addAll(docs);
         _lastDoc = docs.isNotEmpty ? docs.last : _lastDoc;
         _hasMore = docs.length == _pageSize;
       });
     } catch (_) {
+      // Hata olursa cache dene
       try {
         final q = FirebaseFirestore.instance
             .collection('posts')
@@ -118,6 +191,7 @@ class _FeedPageState extends State<FeedPage> {
         final qs = await q.get(const GetOptions(source: Source.cache));
         final docs = qs.docs;
         if (docs.isNotEmpty) {
+          await _fetchAuthorsForPosts(docs);
           setState(() {
             _posts.addAll(docs);
             _lastDoc = docs.last;
@@ -134,29 +208,10 @@ class _FeedPageState extends State<FeedPage> {
     await _loadInitial();
   }
 
+  // ... (Film seçme ve post atma fonksiyonları aynen kalıyor) ...
   Future<void> _pickMovie() async {
-    final merged = <Map<String, String>>[
-      ...UserShelfCache.fiveStar,
-      ...UserShelfCache.favorites,
-      ...UserShelfCache.watchlist,
-      ...UserShelfCache.disliked,
-    ];
-
-    final seen = <String>{};
-    final items = <Map<String, String>>[];
-    for (final m in merged) {
-      final t = (m['title'] ?? '').trim();
-      if (t.isEmpty) continue;
-      final key = t.toLowerCase();
-      if (seen.add(key)) {
-        items.add({
-          'title': t,
-          'poster': (m['poster'] ?? '').toString(),
-        });
-      }
-    }
-
-    if (!mounted) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
 
     final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
@@ -171,54 +226,53 @@ class _FeedPageState extends State<FeedPage> {
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  'Filmlerim',
-                  style: Theme.of(ctx).textTheme.titleLarge,
-                ),
+                child: Text('Filmlerim', style: Theme.of(ctx).textTheme.titleLarge),
               ),
               const SizedBox(height: 8),
               const Divider(height: 1),
               Expanded(
-                child: items.isEmpty
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(16),
-                          child: Text(
-                            'Listen boş. Profilinden senkronize et.',
-                          ),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (_, i) {
-                          final title = items[i]['title'] ?? '';
-                          final poster = items[i]['poster'] ?? '';
-                          return ListTile(
-                            leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: SizedBox(
-                                width: 40,
-                                height: 60,
-                                child: poster.isNotEmpty
-                                    ? PosterImage(
-                                        posterUrl: poster,
-                                        title: title,
-                                        fit: BoxFit.cover,
-                                      )
-                                    : const ColoredBox(
-                                        color: Colors.black12,
-                                        child: Center(child: Icon(Icons.movie)),
-                                      ),
-                              ),
+                child: Builder(
+                  builder: (context) {
+                    final merged = <Map<String, String>>[
+                      ...UserShelfCache.fiveStar,
+                      ...UserShelfCache.favorites,
+                      ...UserShelfCache.watchlist,
+                      ...UserShelfCache.disliked,
+                    ];
+                    final seen = <String>{};
+                    final items = <Map<String, String>>[];
+                    for (final m in merged) {
+                      final t = (m['title'] ?? '').trim();
+                      if (t.isEmpty) continue;
+                      final key = t.toLowerCase();
+                      if (seen.add(key)) items.add({'title': t, 'poster': (m['poster'] ?? '').toString()});
+                    }
+                    if (items.isEmpty) {
+                      return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('Listen boş.')));
+                    }
+                    return ListView.separated(
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final title = items[i]['title'] ?? '';
+                        final poster = items[i]['poster'] ?? '';
+                        return ListTile(
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: SizedBox(
+                              width: 40, height: 60,
+                              child: poster.isNotEmpty
+                                  ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover)
+                                  : const ColoredBox(color: Colors.black12, child: Center(child: Icon(Icons.movie))),
                             ),
-                            title: Text(title),
-                            onTap: () {
-                              Navigator.of(ctx).pop(items[i]);
-                            },
-                          );
-                        },
-                      ),
+                          ),
+                          title: Text(title),
+                          onTap: () => Navigator.of(context).pop(items[i]),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -227,34 +281,29 @@ class _FeedPageState extends State<FeedPage> {
     );
 
     if (result != null && mounted) {
-      setState(() {
-        _selectedMovie = result;
-      });
+      setState(() => _selectedMovie = result);
       final t = result['title'] ?? '';
       if (t.isNotEmpty) {
         final existing = _controller.text.trim();
         _controller.text = existing.isEmpty ? '🎬 $t' : existing;
-        _controller.selection = TextSelection.fromPosition(
-          TextPosition(offset: _controller.text.length),
-        );
+        _controller.selection = TextSelection.fromPosition(TextPosition(offset: _controller.text.length));
         _focusNode.requestFocus();
       }
     }
   }
 
   Future<void> _createPost(String text) async {
+    // FeedService kullanılarak post atılıyor (önceki düzeltme ile uyumlu)
     await FeedService.instance.createPost(
       text: text,
       movie: _selectedMovie,
     );
-
     if (mounted) {
-      setState(() {
-        _selectedMovie = null;
-      });
+      setState(() => _selectedMovie = null);
       _controller.clear();
       _focusNode.unfocus();
-      _refresh();
+      // Listeyi yenile ki yeni post en üstte görünsün
+      _refresh(); 
     }
   }
 
@@ -265,7 +314,8 @@ class _FeedPageState extends State<FeedPage> {
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
     if (diff.inHours < 24) return '${diff.inHours}h';
     if (diff.inDays < 7) return '${diff.inDays}g';
-    return '${diff.inDays ~/ 30}a';
+    final years = diff.inDays ~/ 365;
+    return '${years}y';
   }
 
   @override
@@ -285,11 +335,7 @@ class _FeedPageState extends State<FeedPage> {
               constraints: const BoxConstraints(maxWidth: 240),
               child: InkWell(
                 onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const SearchProfilesScreen(),
-                    ),
-                  );
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SearchProfilesScreen()));
                 },
                 borderRadius: BorderRadius.circular(24),
                 child: Container(
@@ -302,16 +348,9 @@ class _FeedPageState extends State<FeedPage> {
                   alignment: Alignment.centerLeft,
                   child: Row(
                     children: [
-                      Icon(Icons.search,
-                          size: 20,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      Icon(Icons.search, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       const SizedBox(width: 5),
-                      Text(
-                        'Kullanıcı Adı Ara',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                      ),
+                      Text('Kullanıcı Adı Ara', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     ],
                   ),
                 ),
@@ -322,12 +361,7 @@ class _FeedPageState extends State<FeedPage> {
             const NotificationsButton(),
             IconButton(
               icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Ayarlar',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsPage()),
-                );
-              },
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
             ),
           ],
           bottom: PreferredSize(
@@ -339,10 +373,7 @@ class _FeedPageState extends State<FeedPage> {
                   labelColor: Theme.of(context).colorScheme.onSurface,
                   unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
                   indicatorColor: Theme.of(context).colorScheme.primary,
-                  tabs: const [
-                    Tab(text: 'Popüler'),
-                    Tab(text: 'Takip Edilenler'),
-                  ],
+                  tabs: const [Tab(text: 'Popüler'), Tab(text: 'Takip Edilenler')],
                 ),
                 const Divider(height: 1),
               ],
@@ -351,42 +382,46 @@ class _FeedPageState extends State<FeedPage> {
         ),
         body: TabBarView(
           children: [
-            // 1) Popüler Akış
+            // 1) POPÜLER AKIŞ
             RefreshIndicator(
               onRefresh: _refresh,
               child: _initialLoading
                   ? const Center(child: CircularProgressIndicator())
                   : ListView.separated(
                       controller: _listController,
-                      cacheExtent: 500, 
-                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: _posts.length + (_loadingMore ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
                         if (_loadingMore && i == _posts.length) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Center(child: CircularProgressIndicator()),
-                          );
+                          return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
                         }
+                        
                         final d = _posts[i];
                         final m = d.data() ?? {};
+                        final authorId = (m['authorId'] ?? '') as String;
+
+                        // BURASI KRİTİK NOKTA:
+                        // Post verisindeki isim/resim yerine, Feed sayfasında topluca çektiğimiz güncel veriyi (Cache) kullan.
+                        // Eğer cache'de yoksa (çok nadir), postun içindekini kullan.
+                        final cachedUser = _authorCache[authorId];
                         
+                        final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
+                        final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
+                        final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
+
                         final createdAt = (m['createdAt'] as Timestamp?);
-                        final timeLabel = createdAt == null
-                            ? ''
-                            : _timeAgo(createdAt.toDate());
-                        
+                        final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
                         final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
                         final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
 
                         final postWidget = PostTile(
                           postId: d.id,
-                          authorId: (m['authorId'] ?? '') as String,
-                          displayName: (m['displayName'] ?? '') as String,
-                          handle: (m['handle'] ?? '') as String,
-                          photoURL: (m['photoURL'] ?? '') as String,
+                          authorId: authorId,
+                          // Artık dolu dolu veriyi gönderiyoruz:
+                          displayName: displayName, 
+                          handle: handle,
+                          photoURL: photoURL,
                           timeLabel: timeLabel,
                           movieTitle: movieTitle.isEmpty ? null : movieTitle,
                           moviePoster: moviePoster.isEmpty ? null : moviePoster,
@@ -409,10 +444,7 @@ class _FeedPageState extends State<FeedPage> {
                             children: [
                               postWidget,
                               const SizedBox(height: 12),
-                              const RecommendedUsers(
-                                title: 'Önerilen kullanıcılar',
-                                limit: 10,
-                              ),
+                              const RecommendedUsers(title: 'Önerilen kullanıcılar', limit: 10),
                             ],
                           );
                         }
@@ -421,12 +453,12 @@ class _FeedPageState extends State<FeedPage> {
                     ),
             ),
 
-            // 2) Takip Edilenler Akışı
+            // 2) TAKİP EDİLENLER
             const _FollowingFeed(),
           ],
         ),
         floatingActionButton: FloatingActionButton(
-          heroTag: 'feed_compose_fab', 
+          heroTag: 'feed_compose_fab',
           onPressed: () {
             Navigator.of(context).push(
               MaterialPageRoute(
@@ -461,6 +493,8 @@ class _FeedPageState extends State<FeedPage> {
   }
 }
 
+// --- FOLLOWING FEED ---
+// Benzer mantığı buraya da uyguluyoruz ki takip edilenler sekmesi de hızlı olsun
 class _FollowingFeed extends StatefulWidget {
   const _FollowingFeed({super.key});
 
@@ -471,6 +505,8 @@ class _FollowingFeed extends StatefulWidget {
 class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveClientMixin {
   bool _loading = true;
   List<DocumentSnapshot<Map<String, dynamic>>> _items = [];
+  // Burası için de ayrı cache veya global cache kullanılabilir, şimdilik yerel yapalım
+  final Map<String, Map<String, String>> _localAuthorCache = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -481,10 +517,37 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
     _load();
   }
 
-  Future<void> _load() async {
-    if (_items.isEmpty) {
-      setState(() => _loading = true);
+  // Yardımcı: Yazarları çek
+  Future<void> _fetchAuthors(List<DocumentSnapshot> posts) async {
+    final uids = <String>{};
+    for(var d in posts) {
+      final u = d.data() as Map<String, dynamic>?;
+      final id = u?['authorId'] as String?;
+      if(id != null && !_localAuthorCache.containsKey(id)) uids.add(id);
     }
+    if(uids.isEmpty) return;
+    
+    final list = uids.toList();
+    for(var i=0; i<list.length; i+=10) {
+      final chunk = list.sublist(i, i+10 > list.length ? list.length : i+10);
+      try {
+        final qs = await FirebaseFirestore.instance.collection('users').where(FieldPath.documentId, whereIn: chunk).get();
+        for(var ud in qs.docs) {
+          final d = ud.data();
+          final nm = (d['displayName'] ?? '').toString();
+          final ph = (d['photoURL'] ?? '').toString();
+          final usr = (d['username'] ?? '').toString();
+          final lb = (d['letterboxdUsername'] ?? '').toString();
+          String h = '';
+          if(usr.isNotEmpty) h='@$usr'; else if(lb.isNotEmpty) h='@$lb';
+          _localAuthorCache[ud.id] = {'displayName': nm.isNotEmpty?nm:'Kullanıcı', 'handle': h, 'photoURL': ph};
+        }
+      } catch(_){}
+    }
+  }
+
+  Future<void> _load() async {
+    if (_items.isEmpty) setState(() => _loading = true);
     
     try {
       final me = FirebaseAuth.instance.currentUser?.uid;
@@ -494,12 +557,8 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       }
 
       final followingQs = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(me)
-          .collection('following')
-          .orderBy('createdAt', descending: true)
-          .limit(30)
-          .get();
+          .collection('users').doc(me).collection('following')
+          .orderBy('createdAt', descending: true).limit(30).get();
       
       final uids = followingQs.docs.map((d) => d.id).toList();
 
@@ -512,28 +571,25 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       final processUids = uids.take(15).toList();
 
       for (var i = 0; i < processUids.length; i += 10) {
-        final chunk = processUids.sublist(
-          i,
-          i + 10 > processUids.length ? processUids.length : i + 10,
-        );
-        
+        final chunk = processUids.sublist(i, i + 10 > processUids.length ? processUids.length : i + 10);
         final qs = await FirebaseFirestore.instance
             .collection('posts')
             .where('authorId', whereIn: chunk)
             .orderBy('createdAt', descending: true)
             .limit(5)
             .get(const GetOptions(source: Source.server));
-            
         acc.addAll(qs.docs);
       }
 
       acc.sort((a, b) {
         final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
         final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
-        if (ta == null) return 1;
-        if (tb == null) return -1;
+        if (ta == null) return 1; if (tb == null) return -1;
         return tb.compareTo(ta);
       });
+
+      // Yazarları hazırla
+      await _fetchAuthors(acc);
 
       if (mounted) {
         setState(() {
@@ -550,9 +606,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   Widget build(BuildContext context) {
     super.build(context);
 
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading) return const Center(child: CircularProgressIndicator());
 
     if (_items.isEmpty) {
       return RefreshIndicator(
@@ -568,10 +622,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
                   children: [
                     const GreenEyesCharacter(size: 150),
                     const SizedBox(height: 16),
-                    Text(
-                      'Birilerini takip etmelisin',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
+                    Text('Birilerini takip etmelisin', style: Theme.of(context).textTheme.titleMedium),
                   ],
                 ),
               ),
@@ -585,25 +636,30 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       onRefresh: _load,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        cacheExtent: 500, 
         itemCount: _items.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, i) {
           final d = _items[i];
           final m = d.data() ?? {};
+          final authorId = (m['authorId'] ?? '') as String;
           
+          // Following feed için de cache kullanıyoruz
+          final cachedUser = _localAuthorCache[authorId];
+          final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
+          final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
+          final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
+
           final createdAt = (m['createdAt'] as Timestamp?);
           final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
-              
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
 
           return PostTile(
             postId: d.id,
-            authorId: (m['authorId'] ?? '') as String,
-            displayName: (m['displayName'] ?? '') as String,
-            handle: (m['handle'] ?? '') as String,
-            photoURL: (m['photoURL'] ?? '') as String,
+            authorId: authorId,
+            displayName: displayName,
+            handle: handle,
+            photoURL: photoURL,
             timeLabel: timeLabel,
             movieTitle: movieTitle.isEmpty ? null : movieTitle,
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
@@ -625,7 +681,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   }
 }
 
-// --- ESKİ TASARIM (GERİ GETİRİLDİ) ---
+// ... _Composer ve _ComposePostPage sınıfları aynen kalacak (değişiklik yok) ...
 class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
