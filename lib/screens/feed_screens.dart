@@ -496,7 +496,7 @@ class _FeedPageState extends State<FeedPage> {
 // --- FOLLOWING FEED ---
 // Benzer mantığı buraya da uyguluyoruz ki takip edilenler sekmesi de hızlı olsun
 class _FollowingFeed extends StatefulWidget {
-  const _FollowingFeed({super.key});
+  const _FollowingFeed({Key? key}) : super(key: key);
 
   @override
   State<_FollowingFeed> createState() => _FollowingFeedState();
@@ -693,7 +693,6 @@ class _Composer extends StatelessWidget {
   final VoidCallback onClearMovie;
 
   const _Composer({
-    Key? key,
     required this.controller,
     required this.focusNode,
     required this.maxChars,
@@ -701,7 +700,7 @@ class _Composer extends StatelessWidget {
     required this.onPickMovie,
     required this.onClearMovie,
     required this.onSend,
-  }): super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -834,7 +833,6 @@ class _ComposePostPage extends StatelessWidget {
   final void Function(String) onSend;
 
   const _ComposePostPage({
-    Key? key,
     required this.controller,
     required this.focusNode,
     required this.maxChars,
@@ -842,7 +840,7 @@ class _ComposePostPage extends StatelessWidget {
     required this.onPickMovie,
     required this.onClearMovie,
     required this.onSend,
-  }): super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
