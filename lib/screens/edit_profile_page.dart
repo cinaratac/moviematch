@@ -364,6 +364,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
         payload['username'] = (currUsername != null)
             ? currUsername
             : FieldValue.delete();
+            if (currUsername != null) {
+          payload['username_lc'] = currUsername.toLowerCase();
+        } else {
+          payload['username_lc'] = FieldValue.delete();
+        }
       }
 
 
