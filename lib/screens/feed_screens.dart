@@ -33,7 +33,7 @@ class _FeedPageState extends State<FeedPage> {
   List<DocumentSnapshot<Map<String, dynamic>>> _posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
   
-  // YENİ: Yazarların önbelleği (ID -> İsim, Foto, Handle)
+  // Yazarların önbelleği (ID -> İsim, Foto, Handle)
   final Map<String, Map<String, String>> _authorCache = {};
 
   Map<String, String>? _selectedMovie;
@@ -54,7 +54,7 @@ class _FeedPageState extends State<FeedPage> {
     }
   }
 
-  // --- YENİ FONKSİYON: Yazarları Topluca Çek ---
+  // --- Yazarları Topluca Çek ---
   Future<void> _fetchAuthorsForPosts(List<DocumentSnapshot> posts) async {
     final uidsToFetch = <String>{};
     
@@ -125,9 +125,7 @@ class _FeedPageState extends State<FeedPage> {
       final cacheQs = await base.get(const GetOptions(source: Source.cache));
       final cacheDocs = cacheQs.docs;
       if (cacheDocs.isNotEmpty) {
-        // Önce yazarları hazırla (Cache'ten gelse bile)
         await _fetchAuthorsForPosts(cacheDocs);
-        
         if (!mounted) return;
         setState(() {
           _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(cacheDocs);
@@ -142,8 +140,6 @@ class _FeedPageState extends State<FeedPage> {
     try {
       final serverQs = await base.get(const GetOptions(source: Source.server));
       final serverDocs = serverQs.docs;
-      
-      // Yazarları hazırla
       await _fetchAuthorsForPosts(serverDocs);
 
       if (!mounted) return;
@@ -172,7 +168,6 @@ class _FeedPageState extends State<FeedPage> {
       final qs = await q.get(const GetOptions(source: Source.server));
       final docs = qs.docs;
 
-      // Yeni gelenlerin yazarlarını hazırla
       await _fetchAuthorsForPosts(docs);
 
       setState(() {
@@ -181,7 +176,6 @@ class _FeedPageState extends State<FeedPage> {
         _hasMore = docs.length == _pageSize;
       });
     } catch (_) {
-      // Hata olursa cache dene
       try {
         final q = FirebaseFirestore.instance
             .collection('posts')
@@ -208,7 +202,6 @@ class _FeedPageState extends State<FeedPage> {
     await _loadInitial();
   }
 
-  // ... (Film seçme ve post atma fonksiyonları aynen kalıyor) ...
   Future<void> _pickMovie() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -293,7 +286,6 @@ class _FeedPageState extends State<FeedPage> {
   }
 
   Future<void> _createPost(String text) async {
-    // FeedService kullanılarak post atılıyor (önceki düzeltme ile uyumlu)
     await FeedService.instance.createPost(
       text: text,
       movie: _selectedMovie,
@@ -302,7 +294,6 @@ class _FeedPageState extends State<FeedPage> {
       setState(() => _selectedMovie = null);
       _controller.clear();
       _focusNode.unfocus();
-      // Listeyi yenile ki yeni post en üstte görünsün
       _refresh(); 
     }
   }
@@ -390,29 +381,28 @@ class _FeedPageState extends State<FeedPage> {
                   : ListView.separated(
                       controller: _listController,
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: _posts.length + (_loadingMore ? 1 : 0),
+                      // Öneri kartı için +1 ekliyoruz
+                      itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
-                         if (i > 0 && i % 5 == 0) {
-    return Column(
-      children: [
-        const RecommendationCard(), // Öneri kartı
-        const SizedBox(height: 12),
-        // Normal post...
-      ],
-    );
-  }
-                        if (_loadingMore && i == _posts.length) {
+                        // 0. index her zaman Öneri Kartı
+                        if (i == 0) {
+                          return const RecommendationCard();
+                        }
+                        
+                        // Post indexi (Header olduğu için 1 eksiltiyoruz)
+                        final postIndex = i - 1;
+
+                        // Yükleniyor göstergesi en sonda
+                        if (_loadingMore && postIndex == _posts.length) {
                           return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
                         }
                         
-                        final d = _posts[i];
+                        // Post verisini al
+                        final d = _posts[postIndex];
                         final m = d.data() ?? {};
                         final authorId = (m['authorId'] ?? '') as String;
 
-                        // BURASI KRİTİK NOKTA:
-                        // Post verisindeki isim/resim yerine, Feed sayfasında topluca çektiğimiz güncel veriyi (Cache) kullan.
-                        // Eğer cache'de yoksa (çok nadir), postun içindekini kullan.
                         final cachedUser = _authorCache[authorId];
                         
                         final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
@@ -427,7 +417,6 @@ class _FeedPageState extends State<FeedPage> {
                         final postWidget = PostTile(
                           postId: d.id,
                           authorId: authorId,
-                          // Artık dolu dolu veriyi gönderiyoruz:
                           displayName: displayName, 
                           handle: handle,
                           photoURL: photoURL,
@@ -447,7 +436,8 @@ class _FeedPageState extends State<FeedPage> {
                           onReport: (pid) => FeedService().reportPost(pid),
                         );
 
-                        if (i == 3) {
+                        // 3. Posttan sonra (Listede 4. sırada) kullanıcı önerileri
+                        if (postIndex == 3) {
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
@@ -502,8 +492,7 @@ class _FeedPageState extends State<FeedPage> {
   }
 }
 
-// --- FOLLOWING FEED ---
-// Benzer mantığı buraya da uyguluyoruz ki takip edilenler sekmesi de hızlı olsun
+// ... Geri kalan _FollowingFeed, _Composer, _ComposePostPage sınıfları aynı kalacak ...
 class _FollowingFeed extends StatefulWidget {
   const _FollowingFeed({Key? key}) : super(key: key);
 
@@ -514,7 +503,6 @@ class _FollowingFeed extends StatefulWidget {
 class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveClientMixin {
   bool _loading = true;
   List<DocumentSnapshot<Map<String, dynamic>>> _items = [];
-  // Burası için de ayrı cache veya global cache kullanılabilir, şimdilik yerel yapalım
   final Map<String, Map<String, String>> _localAuthorCache = {};
 
   @override
@@ -526,7 +514,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
     _load();
   }
 
-  // Yardımcı: Yazarları çek
   Future<void> _fetchAuthors(List<DocumentSnapshot> posts) async {
     final uids = <String>{};
     for(var d in posts) {
@@ -557,14 +544,12 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
 
   Future<void> _load() async {
     if (_items.isEmpty) setState(() => _loading = true);
-    
     try {
       final me = FirebaseAuth.instance.currentUser?.uid;
       if (me == null) {
         if(mounted) setState(() { _items = []; _loading = false; });
         return;
       }
-
       final followingQs = await FirebaseFirestore.instance
           .collection('users').doc(me).collection('following')
           .orderBy('createdAt', descending: true).limit(30).get();
@@ -596,8 +581,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         if (ta == null) return 1; if (tb == null) return -1;
         return tb.compareTo(ta);
       });
-
-      // Yazarları hazırla
       await _fetchAuthors(acc);
 
       if (mounted) {
@@ -614,9 +597,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   @override
   Widget build(BuildContext context) {
     super.build(context);
-
     if (_loading) return const Center(child: CircularProgressIndicator());
-
     if (_items.isEmpty) {
       return RefreshIndicator(
         onRefresh: _load,
@@ -651,13 +632,10 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final d = _items[i];
           final m = d.data() ?? {};
           final authorId = (m['authorId'] ?? '') as String;
-          
-          // Following feed için de cache kullanıyoruz
           final cachedUser = _localAuthorCache[authorId];
           final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
           final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
           final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
-
           final createdAt = (m['createdAt'] as Timestamp?);
           final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
@@ -690,9 +668,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   }
 }
 
-// ... _Composer ve _ComposePostPage sınıfları aynen kalacak (değişiklik yok) ...
 class _Composer extends StatelessWidget {
-
   final TextEditingController controller;
   final FocusNode focusNode;
   final int maxChars;
@@ -715,14 +691,12 @@ class _Composer extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (context, value, _) {
         final text = value.text;
         final remaining = maxChars - text.characters.length;
         final isEmpty = text.trim().isEmpty;
-
         return Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Row(
