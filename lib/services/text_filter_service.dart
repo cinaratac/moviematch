@@ -41,7 +41,6 @@ class TextFilterService {
     // (Örn: 'Ş' -> 's', 'İ' -> 'i' gibi)
     String cleanText = text.toLowerCase()
         .replaceAll('ş', 's')
-        .replaceAll('ı', 'i')
         .replaceAll('ğ', 'g')
         .replaceAll('ü', 'u')
         .replaceAll('ö', 'o')

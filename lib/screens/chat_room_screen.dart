@@ -364,7 +364,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                   maxLines: 4,
                                   textInputAction: TextInputAction.send,
                                   onSubmitted: (_) => _send(),
-                                  style: const TextStyle(color: Colors.white),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontFamily: null, // Özel fontu devre dışı bırakıp sistem fontunu kullanır
+                                    ),
                                   decoration: const InputDecoration(
                                     hintText: 'Mesaj...',
                                     hintStyle: TextStyle(color: Colors.white38),
