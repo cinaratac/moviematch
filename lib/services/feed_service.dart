@@ -164,13 +164,15 @@ class FeedService {
   Future<void> reportPost(String postId) async {
     final me = _auth.currentUser?.uid;
     if (me == null) return;
-    final docId = '${postId}_$me';
-    await _fs.collection('reports').doc(docId).set({
+    
+    // .add() kullanarak her seferinde yeni belge oluşturuyoruz.
+    // Bu, güvenlik kurallarınızdaki "allow create" izniyle tam uyumludur.
+    await _fs.collection('reports').add({
       'type': 'post',
       'postId': postId,
       'by': me,
       'createdAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    });
   }
 
   /// Yorum bildirimi göndermek için harici çağrı.

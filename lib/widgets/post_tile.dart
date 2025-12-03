@@ -464,10 +464,14 @@ class _PostTileState extends State<PostTile> {
                 ),
                 
                 // Sağ Taraf: Share
+                // Sağ Taraf: Share
                 IconButton(
                   icon: Icon(Icons.share_outlined, size: 20, color: cs.onSurfaceVariant),
                   onPressed: () {
-                    // Paylaşılacak metni hazırla
+                    // Site olmadan çalışacak Özel Link:
+                    // cinematch://app/post?id=POST_ID
+                    final String appLink = 'cinematch://app/post?id=${widget.postId}';
+                    
                     final String content = widget.text.isNotEmpty 
                         ? widget.text 
                         : (widget.movieTitle ?? 'Bir gönderi');
@@ -476,9 +480,8 @@ class _PostTileState extends State<PostTile> {
                         '${widget.displayName} (@${widget.handle.replaceAll('@', '')}) MovieMatch\'te paylaştı:\n\n'
                         '$content\n\n'
                         '${widget.movieTitle != null ? "🎬 İzliyor: ${widget.movieTitle}\n" : ""}'
-                        '#MovieMatch';
+                        'Uygulamada aç: $appLink';
 
-                    // Paylaşım pencresini aç
                     Share.share(shareText);
                   },
                   visualDensity: VisualDensity.compact,

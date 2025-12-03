@@ -1,11 +1,14 @@
+import 'dart:async'; // StreamSubscription için gerekli
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:app_links/app_links.dart'; // <-- Deep Link paketi
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/feed_screens.dart';
 import 'package:fluttergirdi/screens/match_screen.dart';
 import 'package:fluttergirdi/screens/messagesscreen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
+import 'package:fluttergirdi/screens/post_detail_screen.dart'; // <-- Detay sayfası
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -15,22 +18,76 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
+  int _index = 0;
+  late final AppLinks _appLinks; // <-- Link yakalayıcı
+  StreamSubscription<Uri>? _linkSubscription;
 
   @override
-  void initState() { 
+  void initState() {
     super.initState();
+    
+    // Duyuru kontrolü
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
     });
+
+    // --- DEEP LINK BAŞLATMA ---
+    _initDeepLinks();
   }
-  int _index = 0;
+
+  @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    super.dispose();
+  }
+
+  // Linkleri dinleyen fonksiyon
+  Future<void> _initDeepLinks() async {
+    _appLinks = AppLinks();
+
+    // 1. Uygulama kapalıyken linke tıklandıysa (Cold Start)
+    try {
+      final Uri? initialUri = await _appLinks.getInitialLink();
+      if (initialUri != null) {
+        _handleDeepLink(initialUri);
+      }
+    } catch (e) {
+      debugPrint('Link hatası: $e');
+    }
+
+    // 2. Uygulama arkaplandayken linke tıklandıysa (Background/Foreground)
+    _linkSubscription = _appLinks.uriLinkStream.listen((Uri? uri) {
+      if (uri != null) {
+        _handleDeepLink(uri);
+      }
+    });
+  }
+
+  // Linki analiz edip sayfayı açan fonksiyon
+  void _handleDeepLink(Uri uri) {
+    // Link formatı: cinematch://app/post?id=POST_ID
+    // Veya: https://cinematch.web.app/post?id=POST_ID
+    if (uri.path.contains('/post')) {
+      final String? postId = uri.queryParameters['id'];
+      
+      if (postId != null && mounted) {
+        debugPrint("Link yakalandı! Post ID: $postId");
+        
+        // İlgili posta git
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PostDetailScreen(postId: postId),
+          ),
+        );
+      }
+    }
+  }
 
   final List<Widget> _pages = [
     const FeedPage(),
     const MatchListScreen(),
     const MessagesPage(),
     const ProfilePage(),
-   
   ];
 
   @override
@@ -94,13 +151,12 @@ class _HomeShellState extends State<HomeShell> {
                 selectedIcon: Icon(Icons.favorite),
                 label: 'Match',
               ),
-             
               NavigationDestination(
                 icon: _MessagesIcon(),
                 selectedIcon: _MessagesIcon(selected: true),
                 label: 'Messages',
               ),
-               const NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.person_outline),
                 selectedIcon: Icon(Icons.person),
                 label: 'Profile',
@@ -112,8 +168,6 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 }
-
-
 
 class _MessagesIcon extends StatelessWidget {
   final bool selected;
@@ -127,14 +181,12 @@ class _MessagesIcon extends StatelessWidget {
     );
 
     return StreamBuilder<int>(
-      // ESKİ KOD (Hatalı olabilir): stream: ChatService.instance.totalUnreadFor(uid),
-      // YENİ KOD (Doğru sayaç):
       stream: ChatService.instance.totalUnreadMessagesFor(uid), 
       builder: (context, snap) {
         final count = snap.data ?? 0;
         if (count <= 0) return baseIcon;
         return Badge.count(
-          count: count > 9 ? 9 : count, // 9'dan büyükse 9+ mantığı için UI koruması (Badge widget'ı 9+ gösterimini destekler ama count sınırı iyidir)
+          count: count > 9 ? 9 : count, 
           smallSize: 16,
           backgroundColor: Theme.of(context).colorScheme.primary,
           textColor: Colors.white,

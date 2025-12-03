@@ -166,7 +166,7 @@ class ChatService {
       final counts = data['unreadCounts'];
       if (counts is Map) {
         final v = counts[myUid];
-        if (v is num) return v.toInt();
+        if (v is num && v > 0) return v.toInt();
       }
       return 0;
     });
@@ -183,18 +183,22 @@ class ChatService {
   /// YENİ OPTİMİZASYON: Hot Spot'u (totalUnreadCount) kaldırdığımız için,
   /// toplam okunmamış mesaj sayısını tüm ilgili sohbet dokümanlarını okuyarak hesaplar.
   Stream<int> totalUnreadMessagesFor(String myUid) {
+    // DÜZELTME: Sadece participants filtresi kullanıyoruz.
+    // 'unreadCounts.$myUid' filtresini BURADAN SİLMELİSİNİZ.
     final q = _fs
         .collection('chats')
-        .where('participants', arrayContains: myUid)
-        .where('unreadCounts.$myUid', isGreaterThan: 0); // Yalnızca okunmamış mesajı olanları sorgula
+        .where('participants', arrayContains: myUid);
         
     return q.snapshots().map((qs) {
       int totalUnread = 0;
       for (final doc in qs.docs) {
-        final counts = doc.data()['unreadCounts'];
+        final data = doc.data();
+        final counts = data['unreadCounts'];
         if (counts is Map) {
           final v = counts[myUid];
-          if (v is num) totalUnread += v.toInt();
+          if (v is num && v > 0) {
+             totalUnread += v.toInt();
+          }
         }
       }
       return math.max(0, totalUnread);
