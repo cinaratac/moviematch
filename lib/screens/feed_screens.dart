@@ -98,6 +98,7 @@ class _FeedPageState extends State<FeedPage> {
   }
 
   Future<void> _loadInitial() async {
+    _authorCache.clear();
     setState(() {
       _initialLoading = true;
       _hasMore = true;
@@ -465,6 +466,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   }
 
   Future<void> _load() async {
+    _localAuthorCache.clear();
     if (_items.isEmpty) setState(() => _loading = true);
     try {
       final me = FirebaseAuth.instance.currentUser?.uid;

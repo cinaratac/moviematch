@@ -766,18 +766,131 @@ class _MatchScreenState extends State<MatchScreen> {
           FutureBuilder<_Resolved>(
             future: _future,
             builder: (context, snap) {
+              // Yükleniyor durumu
               if (snap.connectionState == ConnectionState.waiting) {
-                return const SliverFillRemaining(child: Center(child: CircularProgressIndicator()));
+                return const SliverFillRemaining(
+                  child: Center(child: CircularProgressIndicator()),
+                );
               }
+              
               final data = snap.data ?? const _Resolved();
-              return SliverList(delegate: SliverChildListDelegate([
-                if(data.fiveStars.isNotEmpty) _SectionGrid(title: 'Ortak 5 Yıldız', films: data.fiveStars),
-                if(data.favorites.isNotEmpty) _SectionGrid(title: 'Ortak Favoriler', films: data.favorites),
-                if(data.watchlist.isNotEmpty) _SectionGrid(title: 'Ortak İzleme Listesi', films: data.watchlist),
-                const SizedBox(height: 40),
-              ]));
+
+              // SliverMainAxisGroup: Birden fazla Sliver'ı tek bir grup gibi döndürmemizi sağlar.
+              // Böylece "Header" (Başlık) ve "Grid" (Liste) birbirinden bağımsız ama sıralı çalışır.
+              return SliverMainAxisGroup(
+                slivers: [
+                  // 1. ORTAK 5 YILDIZ
+                  if (data.fiveStars.isNotEmpty) ...[
+                    const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
+                        child: Text('Ortak 5 Yıldız', 
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      sliver: SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3, 
+                          childAspectRatio: 0.64,
+                          crossAxisSpacing: 8, 
+                          mainAxisSpacing: 8,
+                        ),
+                        // Lazy Loading: Sadece ekranda görünenler oluşturulur
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) {
+                            final film = data.fiveStars[i];
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: PosterImage(
+                                posterUrl: film.posterUrl, 
+                                title: film.title
+                              ),
+                            );
+                          },
+                          childCount: data.fiveStars.length,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // 2. ORTAK FAVORİLER
+                  if (data.favorites.isNotEmpty) ...[
+                    const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
+                        child: Text('Ortak Favoriler', 
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      sliver: SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3, 
+                          childAspectRatio: 0.64,
+                          crossAxisSpacing: 8, 
+                          mainAxisSpacing: 8,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) {
+                            final film = data.favorites[i];
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: PosterImage(
+                                posterUrl: film.posterUrl, 
+                                title: film.title
+                              ),
+                            );
+                          },
+                          childCount: data.favorites.length,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // 3. ORTAK İZLEME LİSTESİ
+                  if (data.watchlist.isNotEmpty) ...[
+                    const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
+                        child: Text('Ortak İzleme Listesi', 
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      sliver: SliverGrid(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3, 
+                          childAspectRatio: 0.64,
+                          crossAxisSpacing: 8, 
+                          mainAxisSpacing: 8,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) {
+                            final film = data.watchlist[i];
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: PosterImage(
+                                posterUrl: film.posterUrl, 
+                                title: film.title
+                              ),
+                            );
+                          },
+                          childCount: data.watchlist.length,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // Alt boşluk
+                  const SliverToBoxAdapter(child: SizedBox(height: 40)),
+                ],
+              );
             },
-          )
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -841,6 +954,7 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
     const chunkSize = 10;
     
     for (var i = 0; i < cleanKeys.length; i += chunkSize) {
+      await Future.delayed(const Duration(milliseconds: 5));
       final chunk = cleanKeys.sublist(i, math.min(i + chunkSize, cleanKeys.length));
       
       // 1. Try by Doc ID
@@ -1101,37 +1215,4 @@ class _LikesIndicatorHeart extends StatelessWidget {
   }
 }
 
-// Grid section helper for detail screen
-class _SectionGrid extends StatelessWidget {
-  final String title;
-  final List<FilmItem> films;
-  const _SectionGrid({required this.title, required this.films});
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 12),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3, 
-              childAspectRatio: 0.64,
-              crossAxisSpacing: 8, 
-              mainAxisSpacing: 8
-            ),
-            itemCount: films.length,
-            itemBuilder: (_, i) => ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: PosterImage(posterUrl: films[i].posterUrl, title: films[i].title),
-            ),
-          )
-        ],
-      ),
-    );
-  }
-}
+

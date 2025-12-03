@@ -38,6 +38,7 @@ class _PosterImageState extends State<PosterImage> {
   String? _currentUrl;
   bool _isLoadingFallback = false;
   bool _failed = false;
+  int _retryCount = 0;
 
   @override
   void initState() {
@@ -60,6 +61,7 @@ class _PosterImageState extends State<PosterImage> {
         _currentUrl = widget.posterUrl;
         _failed = false;
         _isLoadingFallback = false;
+        _retryCount = 0;
       });
 
       if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
@@ -71,10 +73,17 @@ class _PosterImageState extends State<PosterImage> {
   bool _isEmpty(String? s) => s == null || s.trim().isEmpty;
 
   Future<void> _tryFallback() async {
-    if (_isLoadingFallback || _isEmpty(widget.title)) return;
+    // KORUMA 1: Eğer zaten yükleniyorsa, başlık yoksa veya 2 kereden fazla denendiyse dur.
+    if (_isLoadingFallback || _isEmpty(widget.title) || _retryCount >= 2) {
+      if (mounted && _retryCount >= 2) setState(() => _failed = true);
+      return;
+    }
     
     if (!mounted) return;
-    setState(() => _isLoadingFallback = true);
+    setState(() {
+      _isLoadingFallback = true;
+      _retryCount++; // Deneme sayısını artır
+    });
 
     try {
       final newUrl = await PosterFallbackService.instance.resolvePosterUrl(
@@ -84,14 +93,16 @@ class _PosterImageState extends State<PosterImage> {
       );
       
       if (mounted) {
-        // ÖNEMLİ DÜZELTME: Eğer yeni gelen URL, şu anki ile aynıysa veya yine null ise
-        // döngüye girmemek için işlemi başarısız sayıp durduruyoruz.
+        // KORUMA 2: Yeni URL geçerli mi ve eskisiyle farklı mı?
         if (newUrl != null && newUrl.isNotEmpty && newUrl != _currentUrl) {
           setState(() {
             _currentUrl = newUrl;
             _failed = false;
+            // Başarılı olursa sayacı sıfırlama, çünkü bu yeni resim de bozuk olabilir.
+            // Sayacı olduğu gibi bırakıyoruz ki sonsuz döngü olmasın.
           });
         } else {
+          // Eğer aynı URL geldiyse veya null ise başarısız say.
           setState(() => _failed = true);
         }
       }

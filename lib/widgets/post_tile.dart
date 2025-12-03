@@ -8,6 +8,7 @@ import '../screens/post_detail_screen.dart';
 import '../screens/chat_room_screen.dart';
 import '../services/chat_service.dart';
 import '../services/follow_system_service.dart'; 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 
 class PostTile extends StatefulWidget {
@@ -295,8 +296,12 @@ class _PostTileState extends State<PostTile> {
                   child: CircleAvatar(
                     radius: 20,
                     backgroundColor: cs.surfaceContainerHighest,
+                    // NetworkImage yerine CachedNetworkImageProvider kullanıyoruz
                     backgroundImage: widget.photoURL.isNotEmpty
-                        ? NetworkImage(widget.photoURL)
+                        ? CachedNetworkImageProvider(
+                            widget.photoURL,
+                            maxWidth: 150, // Avatar için 150px fazlasıyla yeterli
+                          )
                         : null,
                     child: widget.photoURL.isEmpty
                         ? Icon(Icons.person, color: cs.onSurfaceVariant)
@@ -358,37 +363,39 @@ class _PostTileState extends State<PostTile> {
             // 2. TEXT CONTENT (Tıklanınca Detaya Git)
             if (widget.text.isNotEmpty)
             if (widget.postImage != null && widget.postImage!.isNotEmpty)
-            GestureDetector(
-              onTap: _navigateToDetail, // Resme basınca da detaya gitsin
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    constraints: const BoxConstraints(maxHeight: 400), // Çok uzun resimler ekranı kaplamasın
-                    width: double.infinity,
-                    color: Colors.black12, // Yüklenirken arka plan
-                    child: Image.network(
-                      widget.postImage!,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return const Center(child: Padding(
-                          padding: EdgeInsets.all(20.0),
-                          child: CircularProgressIndicator(),
-                        ));
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return const SizedBox(
+              GestureDetector(
+                onTap: _navigateToDetail, 
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      constraints: const BoxConstraints(maxHeight: 500), // Max yükseklik
+                      width: double.infinity,
+                      color: Colors.black12, 
+                      // Image.network YERİNE CachedNetworkImage KULLANIYORUZ:
+                      child: CachedNetworkImage(
+                        imageUrl: widget.postImage!,
+                        // BU SATIR ÇOK ÖNEMLİ:
+                        // Resmi belleğe alırken genişliğini maksimum 1080 piksel (Full HD) olarak sınırla.
+                        // Bu, 12MB'lık bir kamerayla çekilmiş fotoyu bellekte 200-300KB'a düşürür.
+                        memCacheWidth: 1080, 
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => const SizedBox(
+                          height: 250,
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                        errorWidget: (context, url, error) => const SizedBox(
                           height: 150,
-                          child: Center(child: Icon(Icons.broken_image, size: 50, color: Colors.grey)),
-                        );
-                      },
+                          child: Center(
+                            child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
             GestureDetector(
               onTap: _navigateToDetail, // Sadece yazıya tıklayınca detay açılır
               child: Padding(

@@ -579,8 +579,8 @@ class LetterboxdService {
             }
             // DEBUG: Çıkan URL'leri konsola yazalım
             // Örn: LB fav: 12 Angry Men (1957) | https://a.ltrbxd.com/resized/...jpg?v=...
-            // ignore: avoid_print
-            print('LB fav: $title | $absPoster');
+      
+           
 
             films.add(
               LetterboxdFilm(title: title, url: absHref, posterUrl: absPoster),
@@ -693,9 +693,6 @@ class LetterboxdService {
       ...doc.querySelectorAll('ul.grid.-p70 li.griditem'),
       ...doc.querySelectorAll('ul.grid li.griditem'),
     ];
-    // DEBUG: Kaç aday bulundu?
-    // ignore: avoid_print
-    print('[LB][5★] candidate count: ${candidates.length}');
 
     final items = <LetterboxdFilm>[];
     final seenHref = <String>{};
@@ -779,10 +776,8 @@ class LetterboxdService {
       }
       if (poster == null || !_looksLikeImageUrl(poster)) continue;
 
-      // ignore: avoid_print
-      if (items.length < 5) {
-        print('[LB][5★] $title | $poster');
-      }
+    
+      
 
       items.add(LetterboxdFilm(title: title, url: href, posterUrl: poster));
     }
