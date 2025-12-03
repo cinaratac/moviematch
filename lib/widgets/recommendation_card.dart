@@ -25,7 +25,9 @@ class RecommendationCard extends StatefulWidget {
   State<RecommendationCard> createState() => _RecommendationCardState();
 }
 
-class _RecommendationCardState extends State<RecommendationCard> {
+class _RecommendationCardState extends State<RecommendationCard> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   List<MovieRecommendation>? _recommendations;
   bool _loading = true;
   int _currentIndex = 0;
@@ -37,13 +39,16 @@ class _RecommendationCardState extends State<RecommendationCard> {
     _loadRecommendations();
   }
 
-  Future<void> _loadRecommendations() async {
+  Future<void> _loadRecommendations({bool forceRefresh = false}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
     if (mounted) setState(() => _loading = true);
 
     try {
+      if (forceRefresh) {
+        RecommendationEngine.instance.clearMemoryCache();
+      }
       var recs = await RecommendationEngine.instance.getCachedRecommendations(uid);
       if (recs == null || recs.isEmpty) {
         recs = await RecommendationEngine.instance.generateRecommendations(uid);
@@ -60,6 +65,160 @@ class _RecommendationCardState extends State<RecommendationCard> {
     }
   }
 
+  void _showInfoDialog() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, // Arkaplanı şeffaf yapıyoruz ki kendi şeklimizi verelim
+        insetPadding: const EdgeInsets.all(20), // Ekran kenarlarından boşluk
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 360), // Çok geniş olmasın
+          decoration: BoxDecoration(
+            // Hafif bir gradyan ile derinlik katalım
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                cs.surfaceContainerHighest, // Üst taraf biraz daha açık
+                cs.surface,                 // Alt taraf koyu
+              ],
+            ),
+            borderRadius: BorderRadius.circular(24), // Daha yuvarlak köşeler
+            // İnce, şık bir kenarlık (border)
+            border: Border.all(
+              color: cs.outlineVariant.withOpacity(0.2),
+              width: 1,
+            ),
+            // Hafif gölge
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 1. ÜST İKON (Parlayan efektli)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: cs.primary.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: cs.primary.withOpacity(0.2),
+                      blurRadius: 20,
+                      spreadRadius: -5,
+                    ),
+                  ],
+                ),
+                child: Icon(Icons.auto_awesome, color: cs.primary, size: 32),
+              ),
+              
+              const SizedBox(height: 20),
+
+              // 2. BAŞLIK
+              Text(
+                'Sistem Nasıl Çalışıyor?',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              
+              const SizedBox(height: 24),
+
+              // 3. MADDELER (Yardımcı widget ile)
+              _buildFancyInfoItem(
+                context,
+                icon: Icons.person_search_rounded,
+                title: 'Sana Özel Analiz',
+                desc: 'Sevdiğin türler, yönetmenler ve izleme geçmişin yapay zeka ile analiz edilir.',
+              ),
+              const SizedBox(height: 16),
+              _buildFancyInfoItem(
+                context,
+                icon: Icons.calendar_month_rounded,
+                title: 'Haftalık Yenilenme',
+                desc: 'Her hafta listen sıfırlanır ve keşfetmen için yepyeni, taze öneriler getirilir.',
+              ),
+
+              const SizedBox(height: 28),
+
+              // 4. KAPAT BUTONU (Tam genişlik)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Süper, Anlaşıldı',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Maddeleri düzenli göstermek için küçük yardımcı widget
+  Widget _buildFancyInfoItem(BuildContext context, {required IconData icon, required String title, required String desc}) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 18, color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: cs.onSurface,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                desc,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
   void _nextRecommendation() {
     if (_recommendations == null || _recommendations!.isEmpty) return;
     setState(() {
@@ -281,11 +440,14 @@ class _RecommendationCardState extends State<RecommendationCard> {
   // --- Build Metodu (Mevcut tasarımın aynısı, sadece buton fonksiyonları bağlandı) ---
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
+  
     if (_loading) {
       return Container(
+        height: 200, // Yüklenirken de daha kısa görünsün
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -294,81 +456,83 @@ class _RecommendationCardState extends State<RecommendationCard> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16), // Radius biraz küçüldü
         ),
         child: const Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_recommendations == null || _recommendations!.isEmpty) {
-      return Container(
-         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-         padding: const EdgeInsets.all(20),
-         child: Center(child: Text("Şimdilik başka önerimiz yok!")),
-      );
+       return const SizedBox.shrink();
     }
 
     final recommendation = _recommendations![_currentIndex];
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), // Dikey margin azaldı
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [cs.primaryContainer, cs.secondaryContainer],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16), // Radius 20 -> 16
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min, // İçeriği kadar yer kaplasın
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Başlık
+          // --- Başlık Kısmı (Daha kompakt) ---
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), // Boşluklar sıkılaştırıldı
             child: Row(
               children: [
-                Icon(Icons.auto_awesome, color: cs.primary, size: 24),
+                Icon(Icons.auto_awesome, color: cs.primary, size: 20),
                 const SizedBox(width: 8),
                 Text(
-                  'Senin İçin Öneri',
-                  style: theme.textTheme.titleLarge?.copyWith(
+                  'Haftalık Keşif Listen',
+                  style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: cs.onPrimaryContainer,
                   ),
                 ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  tooltip: 'Yeni öneriler oluştur',
-                  onPressed: () async {
-                    setState(() => _loading = true);
-                    // Cache'i temizleyerek zorla yenileme yapılabilir ama şimdilik normal load
-                    await _loadRecommendations();
-                  },
+                const Spacer(), // Sağa yaslamak için boşluk
+                
+                // --- YENİ EKLENEN BİLGİ BUTONU ---
+                SizedBox(
+                  height: 32,
+                  width: 32,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 20,
+                    icon: Icon(Icons.info_outline, color: cs.onSurfaceVariant.withOpacity(0.7)),
+                    tooltip: 'Bu liste nasıl oluşuyor?',
+                    onPressed: _showInfoDialog, // Fonksiyonu çağırıyoruz
+                  ),
                 ),
               ],
             ),
           ),
 
-          // Film kartı
+          // --- Film İçeriği ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Poster (Küçültüldü: 120x180 -> 100x150)
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                   child: SizedBox(
-                    width: 120,
-                    height: 180,
+                    width: 100, 
+                    height: 150, 
                     child: PosterImage(
                       posterUrl: recommendation.posterUrl,
                       title: recommendation.title,
@@ -377,7 +541,9 @@ class _RecommendationCardState extends State<RecommendationCard> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
+                
+                // Bilgiler
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -386,18 +552,21 @@ class _RecommendationCardState extends State<RecommendationCard> {
                         recommendation.title,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
+                          fontSize: 16, // Font boyutu sabitlendi
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6), // 8 -> 6
+                      
+                      // Uyum Skoru
                       Row(
                         children: [
-                          Icon(Icons.favorite, size: 16, color: Colors.red),
+                          Icon(Icons.favorite, size: 14, color: Colors.red),
                           const SizedBox(width: 4),
                           Text(
                             '%${recommendation.matchScore.toInt()} Uyum',
-                            style: theme.textTheme.labelLarge?.copyWith(
+                            style: theme.textTheme.labelMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: cs.primary,
                             ),
@@ -405,23 +574,27 @@ class _RecommendationCardState extends State<RecommendationCard> {
                         ],
                       ),
                       const SizedBox(height: 4),
+                      
+                      // Sebep (Daha küçük kutu)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: cs.surface.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           recommendation.matchReason,
-                          style: theme.textTheme.labelSmall,
+                          style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
+                      
+                      // IMDB Puanı
                       Row(
                         children: [
-                          const Icon(Icons.star, size: 16, color: Colors.amber),
+                          const Icon(Icons.star, size: 14, color: Colors.amber),
                           const SizedBox(width: 4),
                           Text(
                             recommendation.voteAverage.toStringAsFixed(1),
@@ -430,20 +603,30 @@ class _RecommendationCardState extends State<RecommendationCard> {
                         ],
                       ),
                       const SizedBox(height: 4),
+                      
+                      // Türler (Daha kompakt wrap)
                       if (recommendation.genres.isNotEmpty)
-                        Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: recommendation.genres.take(3).map((genre) {
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: cs.surface.withOpacity(0.3),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(genre, style: theme.textTheme.labelSmall),
-                            );
-                          }).toList(),
+                        SizedBox(
+                          height: 20,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: recommendation.genres.take(3).length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 4),
+                            itemBuilder: (ctx, i) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: cs.surface.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  recommendation.genres[i], 
+                                  style: theme.textTheme.bodySmall?.copyWith(fontSize: 10)
+                                ),
+                              );
+                            },
+                          ),
                         ),
                     ],
                   ),
@@ -452,41 +635,60 @@ class _RecommendationCardState extends State<RecommendationCard> {
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12), // 16 -> 12
 
-          // Navigasyon ve Aksiyon Butonları
+          // --- Alt Butonlar ---
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), // Alt boşluk 12
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back_ios, size: 18),
-                      onPressed: _previousRecommendation,
-                    ),
-                    Text(
-                      '${_currentIndex + 1} / ${_recommendations!.length}',
-                      style: theme.textTheme.labelMedium,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.arrow_forward_ios, size: 18),
-                      onPressed: _nextRecommendation,
-                    ),
-                  ],
+                // Navigasyon (Önceki/Sonraki)
+                Container(
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: cs.surface.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32),
+                        onPressed: _previousRecommendation,
+                      ),
+                      Text(
+                        '${_currentIndex + 1}/${_recommendations!.length}',
+                        style: theme.textTheme.labelSmall,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32),
+                        onPressed: _nextRecommendation,
+                      ),
+                    ],
+                  ),
                 ),
-                FilledButton.icon(
-                  onPressed: _actionInProgress 
-                    ? null 
-                    : () => _showAddToShelfDialog(context, recommendation),
-                  icon: _actionInProgress 
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) 
-                    : const Icon(Icons.add, size: 18),
-                  label: const Text('Ekle'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: cs.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+
+                // Ekle Butonu
+                SizedBox(
+                  height: 36,
+                  child: FilledButton.icon(
+                    onPressed: _actionInProgress 
+                      ? null 
+                      : () => _showAddToShelfDialog(context, recommendation),
+                    icon: _actionInProgress 
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) 
+                      : const Icon(Icons.add, size: 18),
+                    label: const Text('Ekle'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: cs.primary,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      visualDensity: VisualDensity.compact, // Sıkılaştırılmış görünüm
+                    ),
                   ),
                 ),
               ],

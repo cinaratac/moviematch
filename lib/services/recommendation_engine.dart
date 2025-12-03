@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import '../secrets.dart';
+import 'dart:math';
 
 /// Film Öneri Modeli
 class MovieRecommendation {
@@ -91,11 +92,35 @@ class RecommendationEngine {
   final String _tmdbBearer = Secrets.tmdbAccessToken;
 
   // Cache süresi (1 saat)
-  static const Duration _cacheDuration = Duration(hours: 1);
+  static const Duration _cacheDuration = Duration(days: 7);
+  List<MovieRecommendation>? _memoryCache;
+  DateTime? _lastFetchTime;
 
   /// Ana öneri motoru - Kullanıcı için öneriler üretir
   Future<List<MovieRecommendation>> generateRecommendations(String uid) async {
     // 1. Kullanıcı profilini çek
+    if (_memoryCache != null && _memoryCache!.isNotEmpty && _lastFetchTime != null) {
+      if (DateTime.now().difference(_lastFetchTime!) < _cacheDuration) {
+        return _memoryCache!;
+      }
+    }
+    final Set<int> ignoreIds = {};
+    try {
+      // Sadece kullanıcının en son kaydedilen öneri dökümanını çekiyoruz
+      final lastRecDoc = await _db.collection('userRecommendations').doc(uid).get();
+      
+      if (lastRecDoc.exists) {
+        final data = lastRecDoc.data();
+        // 'recommendations' listesindeki filmleri al
+        final recs = data?['recommendations'] as List?;
+        if (recs != null) {
+          for (var r in recs) {
+            // Sadece geçen sefer önerilenleri engelle
+            ignoreIds.add(r['tmdbId']); 
+          }
+        }
+      }
+    } catch (_) {}
     final profile = await _fetchUserProfile(uid);
     
     // Geçici ham liste
@@ -135,7 +160,7 @@ class RecommendationEngine {
     var mergedList = uniqueMap.values.toList();
 
     // 4. Zaten bilinen filmleri filtrele
-    final filtered = _filterKnownMovies(mergedList, profile);
+    final filtered = _filterKnownMovies(mergedList, profile, ignoreIds: ignoreIds);
 
     // 5. Skorlarına göre sırala ve en iyi 30'u al
     filtered.sort((a, b) => b.matchScore.compareTo(a.matchScore));
@@ -144,13 +169,21 @@ class RecommendationEngine {
     // 6. Firestore'a kaydet (cache)
     if (top30.isNotEmpty) {
       await _saveRecommendationsToCache(uid, top30);
+      _memoryCache = top30;
+      _lastFetchTime = DateTime.now();
     }
 
     return top30;
   }
-
+  void clearMemoryCache() {
+    _memoryCache = null;
+    _lastFetchTime = null;
+  }
   /// Cache'den önerileri getir
   Future<List<MovieRecommendation>?> getCachedRecommendations(String uid) async {
+    if (_memoryCache != null && _memoryCache!.isNotEmpty) {
+       return _memoryCache;
+    }
     try {
       final doc = await _db.collection('userRecommendations').doc(uid).get();
       if (!doc.exists) return null;
@@ -165,12 +198,14 @@ class RecommendationEngine {
       final recommendationsData = data['recommendations'] as List?;
       if (recommendationsData == null) return null;
 
-      return recommendationsData
+      final list = recommendationsData
           .map((e) => MovieRecommendation.fromMap(e as Map<String, dynamic>))
           .toList();
+          _memoryCache = list;
+      _lastFetchTime = cachedAt ?? DateTime.now();
+      return list;
     } catch (e) {
-      return null;
-    }
+  }
   }
 
   // ... _fetchUserProfile ve _fetchTmdbIdsFromKeys metodları AYNI (değişiklik yok) ...
@@ -226,12 +261,13 @@ class RecommendationEngine {
       if (genreId == null) continue;
 
       try {
+        final randomPage = Random().nextInt(3) + 1;
         final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
           'with_genres': genreId.toString(),
           'sort_by': 'vote_average.desc',
           'vote_count.gte': '300', // Filtreyi biraz gevşettik
           'language': 'tr-TR',
-          'page': '1',
+          'page': randomPage.toString(),
         });
 
         final resp = await http.get(uri, headers: {
@@ -466,11 +502,13 @@ class RecommendationEngine {
 
   List<MovieRecommendation> _filterKnownMovies(
     List<MovieRecommendation> recommendations,
-    UserTasteProfile profile,
-  ) {
+    UserTasteProfile profile, {
+    Set<int>? ignoreIds,
+  }) {
     final knownIds = {
       ...profile.lovedMovieTmdbIds,
       ...profile.dislikedMovieTmdbIds,
+      ...?ignoreIds, 
     };
     return recommendations.where((rec) => !knownIds.contains(rec.tmdbId)).toList();
   }
