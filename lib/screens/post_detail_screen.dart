@@ -44,7 +44,6 @@ class PostDetailScreen extends StatelessWidget {
               moviePoster: m['moviePoster'] ?? m['movie']?['poster'],
               likeCount: (m['likeCount'] ?? 0) as int,
               replyCount: (m['replyCount'] ?? 0) as int,
-              repostCount: (m['repostCount'] ?? 0) as int,
               // Fonksiyonları FeedService'e bağlıyoruz
               onToggleLike: (pid, val) => FeedService().toggleLike(postId: pid, like: val),
               onStartChat: (uid) async { /* Chat başlatma kodu */ }, 

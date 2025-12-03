@@ -11,6 +11,7 @@ import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
+import '../widgets/compose_post_sheet.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -36,7 +37,6 @@ class _FeedPageState extends State<FeedPage> {
   // Yazarların önbelleği (ID -> İsim, Foto, Handle)
   final Map<String, Map<String, String>> _authorCache = {};
 
-  Map<String, String>? _selectedMovie;
 
   @override
   void initState() {
@@ -202,99 +202,14 @@ class _FeedPageState extends State<FeedPage> {
     await _loadInitial();
   }
 
-  Future<void> _pickMovie() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
 
-    final result = await showModalBottomSheet<Map<String, String>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (ctx) {
-        return SizedBox(
-          height: MediaQuery.of(ctx).size.height * 0.8,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('Filmlerim', style: Theme.of(ctx).textTheme.titleLarge),
-              ),
-              const SizedBox(height: 8),
-              const Divider(height: 1),
-              Expanded(
-                child: Builder(
-                  builder: (context) {
-                    final merged = <Map<String, String>>[
-                      ...UserShelfCache.fiveStar,
-                      ...UserShelfCache.favorites,
-                      ...UserShelfCache.watchlist,
-                      ...UserShelfCache.disliked,
-                    ];
-                    final seen = <String>{};
-                    final items = <Map<String, String>>[];
-                    for (final m in merged) {
-                      final t = (m['title'] ?? '').trim();
-                      if (t.isEmpty) continue;
-                      final key = t.toLowerCase();
-                      if (seen.add(key)) items.add({'title': t, 'poster': (m['poster'] ?? '').toString()});
-                    }
-                    if (items.isEmpty) {
-                      return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('Listen boş.')));
-                    }
-                    return ListView.separated(
-                      itemCount: items.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final title = items[i]['title'] ?? '';
-                        final poster = items[i]['poster'] ?? '';
-                        return ListTile(
-                          leading: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: SizedBox(
-                              width: 40, height: 60,
-                              child: poster.isNotEmpty
-                                  ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover)
-                                  : const ColoredBox(color: Colors.black12, child: Center(child: Icon(Icons.movie))),
-                            ),
-                          ),
-                          title: Text(title),
-                          onTap: () => Navigator.of(context).pop(items[i]),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (result != null && mounted) {
-      setState(() => _selectedMovie = result);
-      final t = result['title'] ?? '';
-      if (t.isNotEmpty) {
-        final existing = _controller.text.trim();
-        _controller.text = existing.isEmpty ? '🎬 $t' : existing;
-        _controller.selection = TextSelection.fromPosition(TextPosition(offset: _controller.text.length));
-        _focusNode.requestFocus();
-      }
-    }
-  }
-
-  Future<void> _createPost(String text) async {
+  Future<void> _createPost(String text, Map<String, String>? movie) async {
     await FeedService.instance.createPost(
       text: text,
-      movie: _selectedMovie,
+      movie: movie,
     );
     if (mounted) {
-      setState(() => _selectedMovie = null);
-      _controller.clear();
-      _focusNode.unfocus();
-      _refresh(); 
+      _refresh(); // Listeyi yenile
     }
   }
 
@@ -426,7 +341,6 @@ class _FeedPageState extends State<FeedPage> {
                           text: (m['text'] ?? '') as String,
                           likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
                           replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-                          repostCount: ((m['repostCount'] ?? 0) as num).toInt(),
                           onToggleLike: (pid, like) => FeedService().toggleLike(postId: pid, like: like),
                           onStartChat: (String _) async {},
                           onFollow: (uid) async {
@@ -459,18 +373,14 @@ class _FeedPageState extends State<FeedPage> {
         floatingActionButton: FloatingActionButton(
           heroTag: 'feed_compose_fab',
           onPressed: () {
+            // Tam ekran sayfa olarak açıyoruz (Scaffold içerdiği için)
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (ctx) => _ComposePostPage(
-                  controller: _controller,
-                  focusNode: _focusNode,
+                builder: (ctx) => ComposePostPage( // <-- Import edilen Widget
                   maxChars: _maxChars,
-                  selectedMovie: _selectedMovie,
-                  onPickMovie: _pickMovie,
-                  onClearMovie: () => setState(() => _selectedMovie = null),
-                  onSend: (text) async {
-                    await _createPost(text);
-                    if (mounted) Navigator.of(context).pop();
+                  onSend: (text, movie) async {
+                    await _createPost(text, movie);
+                    if (mounted) Navigator.of(context).pop(); // Sayfayı kapat
                   },
                 ),
               ),
@@ -653,7 +563,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
             replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-            repostCount: ((m['repostCount'] ?? 0) as num).toInt(),
             onToggleLike: (pid, like) => FeedService().toggleLike(postId: pid, like: like),
             onStartChat: (String _) async {},
             onFollow: (uid) async {

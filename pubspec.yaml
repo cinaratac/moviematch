@@ -49,6 +49,7 @@ dependencies:
   swipe_cards: ^2.0.0+1
   flutter_cached_pdfview: ^0.4.3
   firebase_analytics: ^12.0.4
+  share_plus: ^12.0.1
 
 dev_dependencies:
   flutter_test:
