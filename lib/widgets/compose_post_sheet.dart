@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart'; // Resim seçici
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
+import '../services/text_filter_service.dart';
 
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
@@ -302,7 +303,21 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               FilledButton(
                                 onPressed: !hasContent || remaining < 0
                                     ? null
-                                    : () => widget.onSend(text, _selectedMovie, _selectedImage),
+                                    : () {
+                                          // --- SANSÜR KONTROLÜ BAŞLANGIÇ ---
+                                          if (TextFilterService.hasProfanity(text)) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('Gönderiniz uygunsuz ifadeler içeriyor. Lütfen düzeltin.'),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                            return; // Göndermeyi iptal et
+                                          }
+                                          // --- SANSÜR KONTROLÜ BİTİŞ ---
+
+                                          widget.onSend(text, _selectedMovie, _selectedImage);
+                                        },
                                 child: const Text('Gönder'),
                               ),
                             ],

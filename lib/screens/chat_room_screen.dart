@@ -10,6 +10,7 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/watchlist_wheel.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/services/watchlist_service.dart';
+import '../services/text_filter_service.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String chatId;
@@ -90,6 +91,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _send() async {
     final txt = _ctrl.text.trim();
     if (txt.isEmpty) return;
+    if (TextFilterService.hasProfanity(txt)) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Mesajınız uygunsuz ifadeler içeriyor.'),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 2),
+      ),
+    );
+    return;
+  }
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
       _ctrl.clear();

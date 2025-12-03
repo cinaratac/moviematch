@@ -4,6 +4,7 @@ import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/gestures.dart'; // Tıklanabilir metin için
 import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart'; // PDF görüntüleyici
+import '../services/text_filter_service.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -50,6 +51,15 @@ class _RegisterPageState extends State<RegisterPage> {
       final email = _email.text.trim();
       final pass = _password.text.trim();
       final uname = _username.text.trim();
+      if (TextFilterService.hasProfanity(uname)) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Bu kullanıcı adı uygunsuz ifadeler içerdiği için kullanılamaz.'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+    }
 
       // 1) Kullanıcıyı Firebase Auth üzerinde oluştur
       await FirebaseAuth.instance.createUserWithEmailAndPassword(

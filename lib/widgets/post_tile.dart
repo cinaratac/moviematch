@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fluttergirdi/services/text_filter_service.dart';
 import '../widgets/poster_image.dart';
 import '../screens/public_profile_screen.dart';
 import '../screens/post_detail_screen.dart';
@@ -585,7 +586,16 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Future<void> _sendComment() async {
     final text = _commentCtrl.text.trim();
     if (text.isEmpty) return;
-
+    if (TextFilterService.hasProfanity(text)) {
+    // Kullanıcıya uyarı göster ve işlemi durdur
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Mesajınız uygunsuz ifadeler içeriyor. Lütfen düzeltin.'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return; // Firebase'e göndermeden fonksiyondan çık
+  }
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 

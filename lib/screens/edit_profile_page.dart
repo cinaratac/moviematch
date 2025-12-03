@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io'; // Dosya işlemleri için
 import 'package:image_picker/image_picker.dart'; // Galeriden resim seçmek için
 import 'package:firebase_storage/firebase_storage.dart'; // Seçilen resmi yüklemek için
+import '../services/text_filter_service.dart';
 
 class EditProfilePage extends StatefulWidget {
   final Map<String, dynamic>?
@@ -393,6 +394,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
       final username = _usernameCtrl.text.trim();
       final bio = _bioCtrl.text.trim();
+      if (TextFilterService.hasProfanity(username)) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Kullanıcı adı uygunsuz ifadeler içeriyor.')),
+    );
+    return;
+  }
+
+  if (TextFilterService.hasProfanity(bio)) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Biyografi uygunsuz ifadeler içeriyor.')),
+    );
+    return;
+  }
       final favDirector = _favDirectorCtrl.text.trim();
       final favActor = _favActorCtrl.text.trim();
       final ageStr = _ageCtrl.text.trim();
