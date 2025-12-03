@@ -49,7 +49,7 @@ class ChatService {
         .snapshots();
   }
 
-  /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki sayacı artırır.
+  /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki global sayacı artırma işlemi kaldırıldı (Hot Spot optimizasyonu).
   /// (imageUrl parametresi kaldırıldı, orijinal haline döndü)
   /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki sayacı artırır.
   /// YENİ: 'movie' parametresi eklendi.
@@ -93,41 +93,19 @@ class ChatService {
     // Chat içindeki sayaç
     batch.update(chatRef, {'unreadCounts.$otherUid': FieldValue.increment(1)});
     
-    // Alıcının global sayacını artır
-    batch.set(
-      _fs.collection('users').doc(otherUid),
-      {'totalUnreadCount': FieldValue.increment(1)},
-      SetOptions(merge: true),
-    );
+    // !!! HOT SPOT OPTİMİZASYONU: ALICININ GLOBAL SAYACINI ARTIRMA İŞLEMİ KALDIRILDI
 
     await batch.commit();
     unawaited(markMutualLikeSeen(fromUid, otherUid));
   }
 
+  /// OPTİMİZE EDİLDİ: Global sayaç (Hot Spot) güncelleme transaction'ı kaldırıldı.
   Future<void> markAsRead(String chatId, String uid) async {
     final chatRef = _fs.collection('chats').doc(chatId);
-    final userRef = _fs.collection('users').doc(uid);
+    // final userRef = _fs.collection('users').doc(uid); // Artık kullanılmıyor
 
-    await _fs.runTransaction((tx) async {
-      final chatSnap = await tx.get(chatRef);
-      if (!chatSnap.exists) return;
-
-      final data = chatSnap.data()!;
-      final counts = data['unreadCounts'];
-      int currentUnread = 0;
-      if (counts is Map) {
-        currentUnread = (counts[uid] as num?)?.toInt() ?? 0;
-      }
-
-      if (currentUnread > 0) {
-        tx.update(chatRef, {'unreadCounts.$uid': 0});
-        tx.set(
-          userRef, 
-          {'totalUnreadCount': FieldValue.increment(-currentUnread)},
-          SetOptions(merge: true),
-        );
-      }
-    });
+    // Önce chat içi sayacı temizle (Hot Spot transaction'ı kaldırıldı, bu direkt update yeterli)
+    await chatRef.update({'unreadCounts.$uid': 0});
 
     final lastMsgSnap = await chatRef
         .collection('messages')
@@ -194,17 +172,32 @@ class ChatService {
     });
   }
 
-  Stream<int> totalUnreadFor(String myUid) {
+  /// DÜZELTME: Bu fonksiyon sadece kullanıcının bulunduğu sohbet sayısını döndürdüğü için adı değiştirildi.
+  Stream<int> totalChatCount(String myUid) {
      final q = _fs
         .collection('chats')
         .where('participants', arrayContains: myUid);
     return q.snapshots().map((qs) => qs.docs.length);
   }
 
+  /// YENİ OPTİMİZASYON: Hot Spot'u (totalUnreadCount) kaldırdığımız için,
+  /// toplam okunmamış mesaj sayısını tüm ilgili sohbet dokümanlarını okuyarak hesaplar.
   Stream<int> totalUnreadMessagesFor(String myUid) {
-    return _fs.collection('users').doc(myUid).snapshots().map((snap) {
-      final val = (snap.data()?['totalUnreadCount'] as num?)?.toInt() ?? 0;
-      return math.max(0, val);
+    final q = _fs
+        .collection('chats')
+        .where('participants', arrayContains: myUid)
+        .where('unreadCounts.$myUid', isGreaterThan: 0); // Yalnızca okunmamış mesajı olanları sorgula
+        
+    return q.snapshots().map((qs) {
+      int totalUnread = 0;
+      for (final doc in qs.docs) {
+        final counts = doc.data()['unreadCounts'];
+        if (counts is Map) {
+          final v = counts[myUid];
+          if (v is num) totalUnread += v.toInt();
+        }
+      }
+      return math.max(0, totalUnread);
     });
   }
 

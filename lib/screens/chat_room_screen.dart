@@ -9,6 +9,7 @@ import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/watchlist_wheel.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
+import 'package:fluttergirdi/services/watchlist_service.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String chatId;
@@ -254,7 +255,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return Scaffold(
       appBar: AppBar(
         title: _ChatAppBarTitle(
-          chatId: widget.chatId,
           otherUid: widget.otherUid,
           initialTitle: widget.otherTitle,
         ),
@@ -602,173 +602,92 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 }
 
+// lib/screens/chat_room_screen.dart içindeki _ChatAppBarTitle revizyonu
+
 class _ChatAppBarTitle extends StatelessWidget {
-  final String chatId;
+  // chatId artık gerekmiyor
+  // final String chatId;
   final String otherUid;
   final String? initialTitle;
+  
   const _ChatAppBarTitle({
-    required this.chatId,
+    // required this.chatId, // KALDIRILDI
     required this.otherUid,
     this.initialTitle,
   });
 
   @override
   Widget build(BuildContext context) {
+    // SADECE users/{otherUid} dokümanını dinliyoruz.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      // Okuma Source.cache değil, real-time stream olduğu için StreamBuilder kullanıldı
       stream: FirebaseFirestore.instance
-          .collection('chats')
-          .doc(chatId)
+          .collection('users')
+          .doc(otherUid)
           .snapshots(),
-      builder: (context, snap) {
-        String titleFromChat = initialTitle ?? '';
-        String photoFromChat = '';
+      builder: (context, uSnap) {
+        String title = initialTitle ?? '';
+        String photo = '';
+        
+        // Match veya Chat dokümanına YAZMA işlemi tamamen kaldırıldı
+        if (uSnap.hasData && uSnap.data!.exists) {
+          final u = uSnap.data!.data()!;
+          final username = (u['username'] ?? '') as String;
+          final disp = (u['displayName'] ?? '') as String;
+          final lb = (u['letterboxdUsername'] ?? '') as String;
+          final purl = (u['photoURL'] ?? '') as String;
 
-        if (snap.hasData && snap.data!.exists) {
-          final d = snap.data!.data()!;
-          final m = d['participantsMeta'];
-          if (m is Map) {
-            final m2 = Map<String, dynamic>.from(m);
-            if (m2.containsKey(otherUid) && m2[otherUid] is Map) {
-              final meta = Map<String, dynamic>.from(m2[otherUid] as Map);
-              final username = (meta['username'] ?? '') as String;
-              final displayName = (meta['displayName'] ?? '') as String;
-              final lb =
-                  (meta['lb'] ?? meta['letterboxdUsername'] ?? '') as String;
-              final photo =
-                  (meta['photoURL'] ?? meta['avatar'] ?? '') as String? ?? '';
-              titleFromChat = titleFromChat.isNotEmpty
-                  ? titleFromChat
-                  : (username.isNotEmpty
-                      ? username
-                      : (displayName.isNotEmpty
-                          ? displayName
-                          : (lb.isNotEmpty ? '@$lb' : '')));
-              photoFromChat = photo;
-            }
-          }
+          // Veri varsa, en uygun başlığı ve fotoğrafı al
+          title = username.isNotEmpty
+              ? username
+              : (disp.isNotEmpty
+                  ? disp
+                  : (lb.isNotEmpty ? '@$lb' : initialTitle ?? 'Kullanıcı'));
+          photo = purl;
+        } else if (title.isEmpty) {
+          title = 'Kullanıcı';
         }
 
-        Widget makeTile(String title, String photoUrl) {
-          final showTitle = title.isNotEmpty ? title : 'Kullanıcı';
-          return InkWell(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PublicProfileScreen(uid: otherUid),
-                ),
-              );
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Colors.grey.shade800,
-                  backgroundImage: (photoUrl.isNotEmpty)
-                      ? NetworkImage(photoUrl)
-                      : null,
-                  child: (photoUrl.isEmpty)
-                      ? Text(showTitle.isNotEmpty ? showTitle[0] : '?',
-                          style: const TextStyle(color: Colors.white))
-                      : null,
-                ),
-                const SizedBox(width: 10),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 180),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        showTitle,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                      // Online durumu eklenebilir
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
+        final showTitle = title;
+        final photoUrl = photo;
 
-        if (titleFromChat.isNotEmpty || photoFromChat.isNotEmpty) {
-          return makeTile(titleFromChat, photoFromChat);
-        }
-
-        return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          future: FirebaseFirestore.instance
-              .collection('matches')
-              .doc(chatId)
-              .get(),
-          builder: (context, mSnap) {
-            String title = '';
-            String photo = '';
-            if (mSnap.hasData && mSnap.data!.exists) {
-              final md = mSnap.data!.data()!;
-              final aP = md['aProfile'] as Map<String, dynamic>?;
-              final bP = md['bProfile'] as Map<String, dynamic>?;
-              Map<String, dynamic>? otherP;
-              if (aP != null && aP['uid'] == otherUid) otherP = aP;
-              if (bP != null && bP['uid'] == otherUid) otherP = bP;
-              if (otherP != null) {
-                final username = (otherP['username'] ?? '') as String;
-                final disp = (otherP['displayName'] ?? '') as String;
-                final lb =
-                    (otherP['lb'] ?? otherP['letterboxdUsername'] ?? '')
-                        as String;
-                photo =
-                    (otherP['photoURL'] ?? otherP['avatar'] ?? '') as String? ??
-                        '';
-                title = username.isNotEmpty
-                    ? username
-                    : (disp.isNotEmpty ? disp : (lb.isNotEmpty ? '@$lb' : ''));
-                FirebaseFirestore.instance.collection('chats').doc(chatId).set({
-                  'participantsMeta': {
-                    otherUid: {
-                      'uid': otherUid,
-                      'username': username,
-                      'displayName': disp,
-                      'lb': lb,
-                      'photoURL': photo,
-                    },
-                  },
-                }, SetOptions(merge: true));
-              }
-            }
-
-            return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              future: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(otherUid)
-                  .get(),
-              builder: (context, uSnap) {
-                String uname = title;
-                String uphoto = photo;
-                if (uSnap.hasData && uSnap.data!.exists) {
-                  final u = uSnap.data!.data()!;
-                  final username = (u['username'] ?? '') as String;
-                  final disp = (u['displayName'] ?? '') as String;
-                  final lb = (u['letterboxdUsername'] ?? '') as String;
-                  final purl = (u['photoURL'] ?? '') as String;
-                  if (uname.isEmpty) {
-                    uname = username.isNotEmpty
-                        ? username
-                        : (disp.isNotEmpty
-                            ? disp
-                            : (lb.isNotEmpty ? '@$lb' : ''));
-                  }
-                  if (uphoto.isEmpty) uphoto = purl;
-                }
-                return makeTile(uname, uphoto);
-              },
+        // UI Bileşeni (Sadece gösterim, arka planda I/O işlemi yok)
+        return InkWell(
+          onTap: () {
+            // PublicProfileScreen'e navigasyon
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PublicProfileScreen(uid: otherUid),
+              ),
             );
           },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.grey.shade800,
+                backgroundImage: (photoUrl.isNotEmpty) ? NetworkImage(photoUrl) : null,
+                child: (photoUrl.isEmpty)
+                    ? Text(showTitle.isNotEmpty ? showTitle[0] : '?',
+                        style: const TextStyle(color: Colors.white))
+                    : null,
+              ),
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  showTitle,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -803,143 +722,26 @@ class _WatchlistWheelSheet extends StatefulWidget {
 }
 
 class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
-  final _fs = FirebaseFirestore.instance;
-  // DÜZELTME: _svc burada tanımlandı
-  final _svc = ChatService(); 
+  // final _fs = FirebaseFirestore.instance; // Artık serviste
+  final _chatSvc = ChatService(); // Chat servisi mesaj göndermek için
+  final _watchlistSvc = WatchlistService.instance; // Yeni watchlist servisi
+
   late Future<List<WatchlistMovie>> _loader;
 
   @override
   void initState() {
     super.initState();
-    _loader = _loadWheelItems();
+    // Veri yükleme mantığı servise taşındı
+    _loader = _watchlistSvc.loadSharedWatchlist(widget.myUid, widget.otherUid);
   }
 
-  Future<List<WatchlistMovie>> _loadWheelItems() async {
-    final a = await _fetchUserWatchlist(widget.myUid);
-    final b = await _fetchUserWatchlist(widget.otherUid);
-    final setB = b.map((m) => _norm((m['title'] ?? '').toString())).toSet();
-    final out = <WatchlistMovie>[];
-    for (final m in a) {
-      final t = (m['title'] ?? '').toString();
-      if (t.isEmpty) continue;
-      if (setB.contains(_norm(t))) {
-        out.add(
-          WatchlistMovie(
-            title: t,
-            posterUrl: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
-          ),
-        );
-      }
-    }
-    if (out.any((x) => (x.posterUrl ?? '').isEmpty)) {
-      final mapB = {
-        for (final m in b)
-          _norm((m['title'] ?? '').toString()):
-              (m['poster'] ?? m['posterUrl'] ?? '').toString(),
-      };
-      for (var i = 0; i < out.length; i++) {
-        final it = out[i];
-        if ((it.posterUrl ?? '').isEmpty) {
-          final p = mapB[_norm(it.title)] ?? '';
-          if (p.isNotEmpty) {
-            out[i] = WatchlistMovie(title: it.title, posterUrl: p);
-          }
-        }
-      }
-    }
-    if (out.isEmpty) {
-      return a
-          .map(
-            (m) => WatchlistMovie(
-              title: (m['title'] ?? '').toString(),
-              posterUrl: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
-            ),
-          )
-          .where((m) => m.title.isNotEmpty)
-          .toList();
-    }
-    return out;
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchUserWatchlist(String uid) async {
-    final res = <Map<String, dynamic>>[];
-    try {
-      final qs = await _fs
-          .collection('users')
-          .doc(uid)
-          .collection('watchlist')
-          .limit(500)
-          .get();
-      for (final d in qs.docs) {
-        final m = d.data();
-        final title = (m['title'] ?? m['name'] ?? '').toString();
-        final poster =
-            (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '').toString();
-        if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
-      }
-    } catch (_) {}
-    try {
-      final items = await _fs
-          .collection('users')
-          .doc(uid)
-          .collection('shelves')
-          .doc('watchlist')
-          .collection('items')
-          .limit(500)
-          .get();
-      for (final d in items.docs) {
-        final m = d.data();
-        final title = (m['title'] ?? m['name'] ?? '').toString();
-        final poster =
-            (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '').toString();
-        if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
-      }
-    } catch (_) {}
-    try {
-      final u = await _fs.collection('users').doc(uid).get();
-      if (u.exists) {
-        final data = u.data() ?? {};
-        final arr = data['watchlist'];
-        if (arr is List) {
-          for (final e in arr) {
-            if (e is Map) {
-              final title = (e['title'] ?? e['name'] ?? '').toString();
-              final poster =
-                  (e['poster'] ?? e['posterUrl'] ?? e['image'] ?? '')
-                      .toString();
-              if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
-            } else if (e is String) {
-              final title = e.trim();
-              if (title.isNotEmpty) res.add({'title': title, 'poster': ''});
-            }
-          }
-        }
-      }
-    } catch (_) {}
-    final byKey = <String, Map<String, dynamic>>{};
-    for (final m in res) {
-      final key = _norm((m['title'] ?? '').toString());
-      if (key.isEmpty) continue;
-      if (!byKey.containsKey(key)) {
-        byKey[key] = m;
-      } else {
-        final hasPoster = ((byKey[key]!['poster'] ?? '').toString()).isNotEmpty;
-        final newPoster = ((m['poster'] ?? '').toString()).isNotEmpty;
-        if (!hasPoster && newPoster) {
-          byKey[key] = m;
-        }
-      }
-    }
-    return byKey.values.toList();
-  }
-
-  static String _norm(String s) => s.toLowerCase().trim();
+  // YÜKLEME MANTIKLARI KALDIRILDI
 
   Future<void> _sendChosenToChat(WatchlistMovie m) async {
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
-      // Artık _svc tanımlı olduğu için hata vermeyecek
-      await _svc.send(
+      // Chat servisi kullanılarak mesaj gönderildi
+      await _chatSvc.send(
         widget.chatId,
         myUid,
         m.title.isNotEmpty ? '🎯 Çark seçimi: ${m.title}' : '🎯 Çark seçimi',
@@ -962,6 +764,7 @@ class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (build metodu aynı kalır, sadece _loader'ı kullanır)
     final cs = Theme.of(context).colorScheme;
     return DraggableScrollableSheet(
       expand: false,
