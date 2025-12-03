@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 class PostTile extends StatefulWidget {
   final String postId;
   final String authorId;
+  final String? postImage;
   final String displayName;
   final String handle;
   final String photoURL;
@@ -30,6 +31,7 @@ class PostTile extends StatefulWidget {
 
   const PostTile({
     super.key,
+    this.postImage,
     required this.postId,
     required this.authorId,
     required this.displayName,
@@ -350,10 +352,42 @@ class _PostTileState extends State<PostTile> {
                 ),
               ],
             ),
-          ),
+            ),
 
-          // 2. TEXT CONTENT (Tıklanınca Detaya Git)
-          if (widget.text.isNotEmpty)
+            // 2. TEXT CONTENT (Tıklanınca Detaya Git)
+            if (widget.text.isNotEmpty)
+            if (widget.postImage != null && widget.postImage!.isNotEmpty)
+            GestureDetector(
+              onTap: _navigateToDetail, // Resme basınca da detaya gitsin
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    constraints: const BoxConstraints(maxHeight: 400), // Çok uzun resimler ekranı kaplamasın
+                    width: double.infinity,
+                    color: Colors.black12, // Yüklenirken arka plan
+                    child: Image.network(
+                      widget.postImage!,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return const Center(child: Padding(
+                          padding: EdgeInsets.all(20.0),
+                          child: CircularProgressIndicator(),
+                        ));
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return const SizedBox(
+                          height: 150,
+                          child: Center(child: Icon(Icons.broken_image, size: 50, color: Colors.grey)),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
             GestureDetector(
               onTap: _navigateToDetail, // Sadece yazıya tıklayınca detay açılır
               child: Padding(
@@ -368,8 +402,8 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-          // 3. MOVIE CARD (Tıklanınca Detaya Git)
-          if (widget.movieTitle != null && widget.moviePoster != null)
+           // 3. MOVIE CARD (Tıklanınca Detaya Git)
+            if (widget.movieTitle != null && widget.moviePoster != null)
             GestureDetector(
               onTap: _navigateToDetail, // Filme tıklayınca detay açılır
               child: Padding(
@@ -438,8 +472,8 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-          // 4. ACTION BAR (Repost kaldırıldı)
-          Padding(
+            // 4. ACTION BAR (Repost kaldırıldı)
+           Padding(
             padding: const EdgeInsets.only(top: 4, left: 16, right: 16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,

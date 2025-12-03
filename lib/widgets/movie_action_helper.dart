@@ -1,8 +1,9 @@
+import 'dart:io'; // Dosya işlemleri için gerekli
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart'; // Storage için gerekli
 import 'package:fluttergirdi/services/chat_service.dart';
-import 'package:fluttergirdi/services/feed_service.dart';
 import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 
@@ -40,7 +41,7 @@ class _MovieActionSheet extends StatelessWidget {
         color: theme.scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      // YENİ: Alt kısma güvenli alan + 20px ekstra boşluk ekliyoruz
+      // Alt kısma güvenli alan + 20px ekstra boşluk ekliyoruz
       padding: EdgeInsets.fromLTRB(0, 20, 0, bottomPadding + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -102,11 +103,48 @@ class _MovieActionSheet extends StatelessWidget {
         builder: (_) => ComposePostPage(
           maxChars: 280,
           initialMovie: {'title': title, 'poster': posterUrl}, 
-          onSend: (text, movie) async {
-             await FeedService.instance.createPost(
-               text: text,
-               movie: movie,
-             );
+          // GÜNCELLENEN KISIM: onSend artık imageFile parametresi de alıyor
+          onSend: (text, movie, imageFile) async {
+             final user = FirebaseAuth.instance.currentUser;
+             if (user == null) return;
+
+             // 1. Resim Yükleme (Eğer seçildiyse)
+             String? postImageUrl;
+             if (imageFile != null) {
+               try {
+                 final fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                 final ref = FirebaseStorage.instance
+                     .ref()
+                     .child('post_images')
+                     .child(fileName);
+                 
+                 await ref.putFile(imageFile);
+                 postImageUrl = await ref.getDownloadURL();
+               } catch (e) {
+                 debugPrint('Resim yükleme hatası: $e');
+               }
+             }
+
+             // 2. Firestore'a Kaydetme
+             final doc = FirebaseFirestore.instance.collection('posts').doc();
+             final now = FieldValue.serverTimestamp();
+             
+             await doc.set({
+               'id': doc.id,
+               'authorId': user.uid,
+               'displayName': user.displayName ?? '',
+               'handle': user.email?.split('@')[0] ?? 'user',
+               'photoURL': user.photoURL ?? '',
+               'text': text.trim(),
+               'movie': movie,
+               // Eğer resim yüklendiyse URL'i kaydet
+               if (postImageUrl != null) 'postImage': postImageUrl,
+               'likeCount': 0,
+               'replyCount': 0,
+               'repostCount': 0,
+               'createdAt': now,
+               'updatedAt': now,
+             });
              
              if (context.mounted) {
                Navigator.pop(context); // Compose sayfasını kapat

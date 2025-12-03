@@ -1,11 +1,15 @@
+import 'dart:io'; // Dosya işlemleri için
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart'; // Resim seçici
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
-import 'package:fluttergirdi/screens/profilescreen.dart'; // UserShelfCache için
+import 'package:fluttergirdi/screens/profilescreen.dart';
 
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
   final Map<String, String>? initialMovie;
-  final Future<void> Function(String text, Map<String, String>? movie) onSend;
+  // onSend fonksiyonunun imzasını değiştiriyoruz: Artık File? image de alacak
+  final Future<void> Function(String text, Map<String, String>? movie, File? image) onSend;
 
   const ComposePostPage({
     super.key,
@@ -21,17 +25,37 @@ class ComposePostPage extends StatefulWidget {
 class _ComposePostPageState extends State<ComposePostPage> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
+  final ImagePicker _picker = ImagePicker(); // Picker tanımla
+  
   Map<String, String>? _selectedMovie;
+  File? _selectedImage; // Seçilen resmi tutacak değişken
 
   @override
   void initState() {
     super.initState();
-    // Eğer dışarıdan (örneğin profilden) bir film verisi geldiyse, onu seçili hale getir
     if (widget.initialMovie != null) {
       _selectedMovie = widget.initialMovie;
     }
   }
   
+  // Resim seçme fonksiyonu
+  Future<void> _pickImage() async {
+    try {
+      final XFile? picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1080, // Aşırı büyük olmaması için
+        imageQuality: 85,
+      );
+      if (picked != null) {
+        setState(() {
+          _selectedImage = File(picked.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('Resim seçilemedi: $e');
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -39,14 +63,16 @@ class _ComposePostPageState extends State<ComposePostPage> {
     super.dispose();
   }
 
+  // ... _pickMovie fonksiyonu aynen kalsın ...
   Future<void> _pickMovie() async {
-    // Film seçme menüsü
-    final result = await showModalBottomSheet<Map<String, String>>(
+     // (Mevcut kodunuzdaki _pickMovie içeriği buraya gelecek)
+     // ...
+     // Kısaca: Profildeki filmleri listeleme mantığınız aynı kalsın.
+      final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (ctx) {
-        // Profildeki filmleri al
         final merged = <Map<String, String>>[
           ...UserShelfCache.fiveStar,
           ...UserShelfCache.favorites,
@@ -54,7 +80,6 @@ class _ComposePostPageState extends State<ComposePostPage> {
           ...UserShelfCache.disliked,
         ];
         
-        // Tekrar edenleri temizle
         final seen = <String>{};
         final items = <Map<String, String>>[];
         for (final m in merged) {
@@ -116,10 +141,6 @@ class _ComposePostPageState extends State<ComposePostPage> {
       setState(() {
         _selectedMovie = result;
       });
-      // Filmi seçince otomatik başlığı metne ekle (opsiyonel)
-      if (_controller.text.isEmpty) {
-        _controller.text = '';
-      }
     }
   }
 
@@ -135,7 +156,8 @@ class _ComposePostPageState extends State<ComposePostPage> {
         builder: (context, value, _) {
           final text = value.text;
           final remaining = widget.maxChars - text.characters.length;
-          final isEmpty = text.trim().isEmpty;
+          // Resim varsa da gönderilebilir olsun
+          final hasContent = text.trim().isNotEmpty || _selectedImage != null || _selectedMovie != null;
 
           return ListView(
             padding: const EdgeInsets.only(bottom: 24),
@@ -145,7 +167,16 @@ class _ComposePostPageState extends State<ComposePostPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const CircleAvatar(radius: 20, child: Icon(Icons.person)),
+                    // Profil fotosu
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundImage: FirebaseAuth.instance.currentUser?.photoURL != null
+                          ? NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!)
+                          : null,
+                      child: FirebaseAuth.instance.currentUser?.photoURL == null
+                          ? const Icon(Icons.person)
+                          : null,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -161,9 +192,44 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               border: InputBorder.none,
                             ),
                           ),
-                          // --- FİLM KUTUCUĞU (ESKİ TASARIM) ---
+                          
+                          // --- 1. RESİM ÖNİZLEME ALANI ---
+                          if (_selectedImage != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12.0),
+                              child: Stack(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Image.file(
+                                      _selectedImage!,
+                                      width: double.infinity,
+                                      // Resmin çok uzamaması için maks yükseklik
+                                      height: 300, 
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: GestureDetector(
+                                      onTap: () => setState(() => _selectedImage = null),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.black54,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                          // --- 2. FİLM KUTUCUĞU ---
                           if (_selectedMovie != null) ...[
-                            const SizedBox(height: 8),
                             Container(
                               decoration: BoxDecoration(
                                 border: Border.all(color: cs.outlineVariant),
@@ -202,15 +268,20 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                 ],
                               ),
                             ),
+                            const SizedBox(height: 8),
                           ],
-                          const SizedBox(height: 8),
+                          
+                          // --- 3. ALT BUTONLAR ---
                           Row(
                             children: [
+                              // Resim Seçme Butonu
                               IconButton(
-                                onPressed: () {},
+                                onPressed: _pickImage,
                                 icon: const Icon(Icons.image_outlined),
+                                tooltip: 'Resim ekle',
                                 color: cs.onSurfaceVariant,
                               ),
+                              // Film Seçme Butonu
                               IconButton(
                                 onPressed: _pickMovie,
                                 icon: const Icon(Icons.movie),
@@ -229,9 +300,9 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                   ),
                                 ),
                               FilledButton(
-                                onPressed: isEmpty || remaining < 0
+                                onPressed: !hasContent || remaining < 0
                                     ? null
-                                    : () => widget.onSend(text, _selectedMovie),
+                                    : () => widget.onSend(text, _selectedMovie, _selectedImage),
                                 child: const Text('Gönder'),
                               ),
                             ],

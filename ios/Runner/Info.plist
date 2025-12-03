@@ -55,5 +55,9 @@
 	<true/>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Yeni mesajlar için bildirim gönderebilmek istiyoruz.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+<string>Profil fotoğrafı seçmek için galeriye erişim izni gereklidir.</string>
+<key>NSCameraUsageDescription</key>
+<string>Profil fotoğrafı çekmek için kameraya erişim izni gereklidir.</string>
 </dict>
 </plist>

@@ -1,12 +1,11 @@
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/search_profiles_screen.dart';
-import 'package:fluttergirdi/screens/profilescreen.dart'; // for UserShelfCache
 import 'package:fluttergirdi/services/feed_service.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
-import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
@@ -21,9 +20,6 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
-  static const int _maxChars = 280;
-  final TextEditingController _controller = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
   final ScrollController _listController = ScrollController();
 
   static const int _pageSize = 20;
@@ -34,9 +30,7 @@ class _FeedPageState extends State<FeedPage> {
   List<DocumentSnapshot<Map<String, dynamic>>> _posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
   
-  // Yazarların önbelleği (ID -> İsim, Foto, Handle)
   final Map<String, Map<String, String>> _authorCache = {};
-
 
   @override
   void initState() {
@@ -57,8 +51,6 @@ class _FeedPageState extends State<FeedPage> {
   // --- Yazarları Topluca Çek ---
   Future<void> _fetchAuthorsForPosts(List<DocumentSnapshot> posts) async {
     final uidsToFetch = <String>{};
-    
-    // 1. Önbellekte olmayan yazarları bul
     for (var doc in posts) {
       final data = doc.data() as Map<String, dynamic>?;
       final uid = data?['authorId'] as String?;
@@ -69,14 +61,12 @@ class _FeedPageState extends State<FeedPage> {
 
     if (uidsToFetch.isEmpty) return;
 
-    // 2. Firestore 'whereIn' limiti 10 olduğu için parçalara böl
     final chunks = <List<String>>[];
     final list = uidsToFetch.toList();
     for (var i = 0; i < list.length; i += 10) {
       chunks.add(list.sublist(i, i + 10 > list.length ? list.length : i + 10));
     }
 
-    // 3. Her parça için verileri çek ve cache'e at
     for (var chunk in chunks) {
       try {
         final qs = await FirebaseFirestore.instance
@@ -120,7 +110,6 @@ class _FeedPageState extends State<FeedPage> {
         .orderBy('createdAt', descending: true)
         .limit(_pageSize);
 
-    // Cache'den hızlı yükleme
     try {
       final cacheQs = await base.get(const GetOptions(source: Source.cache));
       final cacheDocs = cacheQs.docs;
@@ -136,7 +125,6 @@ class _FeedPageState extends State<FeedPage> {
       }
     } catch (_) {}
 
-    // Sunucudan güncel yükleme
     try {
       final serverQs = await base.get(const GetOptions(source: Source.server));
       final serverDocs = serverQs.docs;
@@ -176,23 +164,7 @@ class _FeedPageState extends State<FeedPage> {
         _hasMore = docs.length == _pageSize;
       });
     } catch (_) {
-      try {
-        final q = FirebaseFirestore.instance
-            .collection('posts')
-            .orderBy('createdAt', descending: true)
-            .startAfterDocument(_lastDoc!)
-            .limit(_pageSize);
-        final qs = await q.get(const GetOptions(source: Source.cache));
-        final docs = qs.docs;
-        if (docs.isNotEmpty) {
-          await _fetchAuthorsForPosts(docs);
-          setState(() {
-            _posts.addAll(docs);
-            _lastDoc = docs.last;
-            _hasMore = docs.length == _pageSize;
-          });
-        }
-      } catch (_) {}
+      // Hata durumunda cache veya sessiz geçiş
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -200,17 +172,6 @@ class _FeedPageState extends State<FeedPage> {
 
   Future<void> _refresh() async {
     await _loadInitial();
-  }
-
-
-  Future<void> _createPost(String text, Map<String, String>? movie) async {
-    await FeedService.instance.createPost(
-      text: text,
-      movie: movie,
-    );
-    if (mounted) {
-      _refresh(); // Listeyi yenile
-    }
   }
 
   static String _timeAgo(DateTime dt) {
@@ -296,30 +257,21 @@ class _FeedPageState extends State<FeedPage> {
                   : ListView.separated(
                       controller: _listController,
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      // Öneri kartı için +1 ekliyoruz
                       itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
-                        // 0. index her zaman Öneri Kartı
-                        if (i == 0) {
-                          return const RecommendationCard();
-                        }
+                        if (i == 0) return const RecommendationCard();
                         
-                        // Post indexi (Header olduğu için 1 eksiltiyoruz)
                         final postIndex = i - 1;
-
-                        // Yükleniyor göstergesi en sonda
                         if (_loadingMore && postIndex == _posts.length) {
                           return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
                         }
                         
-                        // Post verisini al
                         final d = _posts[postIndex];
                         final m = d.data() ?? {};
                         final authorId = (m['authorId'] ?? '') as String;
 
                         final cachedUser = _authorCache[authorId];
-                        
                         final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
                         final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
                         final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
@@ -328,6 +280,10 @@ class _FeedPageState extends State<FeedPage> {
                         final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
                         final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
                         final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
+                        
+                        // --- DÜZELTME: postImage ALINIYOR ---
+                        final postImage = (m['postImage'] ?? '') as String;
+                        // ------------------------------------
 
                         final postWidget = PostTile(
                           postId: d.id,
@@ -338,6 +294,9 @@ class _FeedPageState extends State<FeedPage> {
                           timeLabel: timeLabel,
                           movieTitle: movieTitle.isEmpty ? null : movieTitle,
                           moviePoster: moviePoster.isEmpty ? null : moviePoster,
+                          // --- DÜZELTME: postImage EKLENDİ ---
+                          postImage: postImage.isEmpty ? null : postImage,
+                          // -----------------------------------
                           text: (m['text'] ?? '') as String,
                           likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
                           replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
@@ -350,7 +309,6 @@ class _FeedPageState extends State<FeedPage> {
                           onReport: (pid) => FeedService().reportPost(pid),
                         );
 
-                        // 3. Posttan sonra (Listede 4. sırada) kullanıcı önerileri
                         if (postIndex == 3) {
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -370,19 +328,76 @@ class _FeedPageState extends State<FeedPage> {
             const _FollowingFeed(),
           ],
         ),
+        
+        // --- POST OLUŞTURMA BUTONU ---
         floatingActionButton: FloatingActionButton(
           heroTag: 'feed_compose_fab',
           onPressed: () {
-            // Tam ekran sayfa olarak açıyoruz (Scaffold içerdiği için)
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (ctx) => ComposePostPage( // <-- Import edilen Widget
-                  maxChars: _maxChars,
-                  onSend: (text, movie) async {
-                    await _createPost(text, movie);
-                    if (mounted) Navigator.of(context).pop(); // Sayfayı kapat
-                  },
-                ),
+            showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              useSafeArea: true,
+              builder: (_) => ComposePostPage(
+                maxChars: 280,
+                // onSend fonksiyonu artık imageFile da alıyor
+                onSend: (text, movie, imageFile) async {
+                  Navigator.pop(context);
+                  
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) return;
+
+                  try {
+                    String? imageUrl;
+
+                    // 1. Resim varsa yükle
+                    if (imageFile != null) {
+                      final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                      final ref = FirebaseStorage.instance
+                          .ref()
+                          .child('post_images')
+                          .child(fileName);
+
+                      await ref.putFile(imageFile);
+                      imageUrl = await ref.getDownloadURL();
+                    }
+
+                    // 2. Firestore'a kaydet
+                    await FirebaseFirestore.instance.collection('posts').add({
+                      'text': text,
+                      'authorId': user.uid,
+                      'displayName': user.displayName,
+                      'handle': user.email?.split('@')[0] ?? 'user',
+                      'photoURL': user.photoURL ?? '',
+                      
+                      if (movie != null) ...{
+                        'movieTitle': movie['title'],
+                        'moviePoster': movie['poster'],
+                      },
+
+                      // Resim URL'ini ekle
+                      if (imageUrl != null) 'postImage': imageUrl,
+
+                      'createdAt': FieldValue.serverTimestamp(),
+                      'likeCount': 0,
+                      'replyCount': 0,
+                    });
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Gönderildi!')),
+                      );
+                      // Listeyi yenile
+                      _refresh();
+                    }
+                  } catch (e) {
+                    debugPrint('Post gönderme hatası: $e');
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Hata oluştu.')),
+                      );
+                    }
+                  }
+                },
               ),
             );
           },
@@ -394,15 +409,12 @@ class _FeedPageState extends State<FeedPage> {
 
   @override
   void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
     _listController.removeListener(_onScroll);
     _listController.dispose();
     super.dispose();
   }
 }
 
-// ... Geri kalan _FollowingFeed, _Composer, _ComposePostPage sınıfları aynı kalacak ...
 class _FollowingFeed extends StatefulWidget {
   const _FollowingFeed({Key? key}) : super(key: key);
 
@@ -550,6 +562,10 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
+          
+          // --- DÜZELTME: Takip edilenler akışına da postImage eklendi ---
+          final postImage = (m['postImage'] ?? '') as String;
+          // -----------------------------------------------------------
 
           return PostTile(
             postId: d.id,
@@ -560,6 +576,8 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             timeLabel: timeLabel,
             movieTitle: movieTitle.isEmpty ? null : movieTitle,
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
+            // Resmi PostTile'a gönderiyoruz
+            postImage: postImage.isEmpty ? null : postImage,
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
             replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
@@ -572,186 +590,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             onReport: (pid) => FeedService().reportPost(pid),
           );
         },
-      ),
-    );
-  }
-}
-
-class _Composer extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final int maxChars;
-  final void Function(String)? onSend;
-  final Map<String, String>? selectedMovie;
-  final VoidCallback onPickMovie;
-  final VoidCallback onClearMovie;
-
-  const _Composer({
-    required this.controller,
-    required this.focusNode,
-    required this.maxChars,
-    required this.selectedMovie,
-    required this.onPickMovie,
-    required this.onClearMovie,
-    required this.onSend,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (context, value, _) {
-        final text = value.text;
-        final remaining = maxChars - text.characters.length;
-        final isEmpty = text.trim().isEmpty;
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const CircleAvatar(radius: 20, child: Icon(Icons.person)),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      maxLines: null,
-                      minLines: 1,
-                      decoration: const InputDecoration(
-                        hintText: 'Neler oluyor?',
-                        border: InputBorder.none,
-                      ),
-                    ),
-                    if (selectedMovie != null) ...[
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: cs.outlineVariant),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        child: Row(
-                          children: [
-                            if ((selectedMovie!['poster'] ?? '').isNotEmpty)
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: PosterImage(
-                                  posterUrl: selectedMovie!['poster']!,
-                                  title: selectedMovie!['title'],
-                                  width: 44,
-                                  height: 66,
-                                  fit: BoxFit.cover,
-                                ),
-                              )
-                            else
-                              const Icon(Icons.movie, size: 40),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                selectedMovie!['title'] ?? 'Seçili film',
-                                style: theme.textTheme.titleSmall,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: onClearMovie,
-                              icon: const Icon(Icons.close),
-                              tooltip: 'Kaldır',
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        IconButton(
-                          onPressed: () {},
-                          icon: const Icon(Icons.image_outlined),
-                          tooltip: 'Medya',
-                          color: cs.onSurfaceVariant,
-                        ),
-                        IconButton(
-                          onPressed: onPickMovie,
-                          icon: const Icon(Icons.movie),
-                          tooltip: 'Film seç',
-                          color: cs.onSurfaceVariant,
-                        ),
-                        const Spacer(),
-                        if (remaining <= 40)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 12),
-                            child: Text(
-                              remaining.toString(),
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: remaining < 0
-                                    ? cs.error
-                                    : cs.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        FilledButton(
-                          onPressed: isEmpty || remaining < 0
-                              ? null
-                              : () => onSend?.call(text),
-                          child: const Text('Gönder'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ComposePostPage extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final int maxChars;
-  final Map<String, String>? selectedMovie;
-  final VoidCallback onPickMovie;
-  final VoidCallback onClearMovie;
-  final void Function(String) onSend;
-
-  const _ComposePostPage({
-    required this.controller,
-    required this.focusNode,
-    required this.maxChars,
-    required this.selectedMovie,
-    required this.onPickMovie,
-    required this.onClearMovie,
-    required this.onSend,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Yeni Gönderi')),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
-          _Composer(
-            controller: controller,
-            focusNode: focusNode,
-            maxChars: maxChars,
-            selectedMovie: selectedMovie,
-            onPickMovie: onPickMovie,
-            onClearMovie: onClearMovie,
-            onSend: onSend,
-          ),
-          const Divider(height: 1),
-        ],
       ),
     );
   }

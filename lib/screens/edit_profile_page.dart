@@ -3,6 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io'; // Dosya işlemleri için
+import 'package:image_picker/image_picker.dart'; // Galeriden resim seçmek için
+import 'package:firebase_storage/firebase_storage.dart'; // Seçilen resmi yüklemek için
 
 class EditProfilePage extends StatefulWidget {
   final Map<String, dynamic>?
@@ -34,6 +37,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   bool _loading = true;
   bool _saving = false;
+  File? _selectedImage; // Seçilen yeni resim dosyasını tutar
+  final ImagePicker _picker = ImagePicker();
+
+  // Galeriden resim seçme fonksiyonu
+  Future<void> _pickImage() async {
+    try {
+      final XFile? picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800, // Performansı korumak için resmi küçültüyoruz
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      if (picked != null) {
+        setState(() {
+          _selectedImage = File(picked.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('Resim seçme hatası: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Resim seçilemedi.')),
+      );
+    }
+  }
 
   void _applyInitial(Map<String, dynamic> data) {
     // ---------------------------------------------------------
@@ -347,6 +374,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     setState(() => _saving = true);
     try {
+      String? uploadedPhotoUrl;
+      if (_selectedImage != null) {
+        // Dosya yolu: user_avatars/USER_UID.jpg
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('user_avatars')
+            .child('${user.uid}.jpg');
+
+        // Yükleme işlemi
+        await storageRef.putFile(_selectedImage!);
+        
+        // İndirme URL'sini al
+        uploadedPhotoUrl = await storageRef.getDownloadURL();
+
+        // 1. Firebase Auth profilindeki fotoğrafı güncelle
+        await user.updatePhotoURL(uploadedPhotoUrl);
+      }
       final username = _usernameCtrl.text.trim();
       final bio = _bioCtrl.text.trim();
       final favDirector = _favDirectorCtrl.text.trim();
@@ -356,6 +400,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final newLb = _letterboxdCtrl.text.trim().toLowerCase();
 
       Map<String, dynamic> payload = {};
+      if (uploadedPhotoUrl != null) {
+        payload['photoURL'] = uploadedPhotoUrl;
+      }
 
 
       String? prevUsername = _origUsername;
@@ -516,6 +563,47 @@ class _EditProfilePageState extends State<EditProfilePage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            Center(
+              child: GestureDetector(
+                onTap: _pickImage, // Tıklayınca galeri açılır
+                child: Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.grey.shade800,
+                      // Öncelik: 1. Yeni seçilen resim, 2. Mevcut profil fotosu, 3. Boş ikon
+                      backgroundImage: _selectedImage != null
+                          ? FileImage(_selectedImage!)
+                          : (FirebaseAuth.instance.currentUser?.photoURL != null
+                              ? NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!)
+                              : null) as ImageProvider?,
+                      child: (_selectedImage == null && 
+                              FirebaseAuth.instance.currentUser?.photoURL == null)
+                          ? const Icon(Icons.person, size: 50, color: Colors.white70)
+                          : null,
+                    ),
+                    // Kamera ikonu
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: const BoxDecoration(
+                          color: Colors.green, // Temanıza uygun bir renk seçebilirsiniz
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
             _Section(title: 'Profil'),
             TextFormField(
               controller: _usernameCtrl,
