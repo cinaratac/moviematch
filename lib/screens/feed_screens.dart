@@ -10,7 +10,7 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
-
+import 'package:fluttergirdi/widgets/recommendation_card.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -393,6 +393,15 @@ class _FeedPageState extends State<FeedPage> {
                       itemCount: _posts.length + (_loadingMore ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
+                         if (i > 0 && i % 5 == 0) {
+    return Column(
+      children: [
+        const RecommendationCard(), // Öneri kartı
+        const SizedBox(height: 12),
+        // Normal post...
+      ],
+    );
+  }
                         if (_loadingMore && i == _posts.length) {
                           return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
                         }
