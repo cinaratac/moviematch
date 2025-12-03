@@ -131,7 +131,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
       builder: (context) {
         return Padding(
           padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 60,
             left: 20,
             right: 20,
             top: 20,
