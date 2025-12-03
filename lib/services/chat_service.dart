@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
-import 'dart:math' as math; // EKLENDİ: math.max kullanmak için
+import 'dart:math' as math;
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -50,26 +50,41 @@ class ChatService {
   }
 
   /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki sayacı artırır.
+  /// (imageUrl parametresi kaldırıldı, orijinal haline döndü)
+  /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki sayacı artırır.
+  /// YENİ: 'movie' parametresi eklendi.
   Future<void> send(
     String chatId,
     String fromUid,
     String text, {
     required String otherUid,
+    Map<String, dynamic>? movie, // <-- YENİ PARAMETRE
   }) async {
     final chatRef = _fs.collection('chats').doc(chatId);
     final msgRef = chatRef.collection('messages').doc();
 
     final batch = _fs.batch();
     final trimmed = text.trim();
-    batch.set(msgRef, {
+
+    // Temel mesaj verisi
+    final Map<String, dynamic> msgData = {
       'authorId': fromUid,
       'from': fromUid,
       'text': trimmed,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    // Eğer film verisi varsa, tipini 'movie' yap ve veriyi ekle
+    if (movie != null) {
+      msgData['type'] = 'movie';
+      msgData['movie'] = movie;
+    }
+
+    batch.set(msgRef, msgData);
+
     batch.set(chatRef, {
       'participants': FieldValue.arrayUnion([fromUid, otherUid]),
-      'lastMessage': trimmed,
+      'lastMessage': trimmed.isEmpty && movie != null ? '🎬 Film paylaştı' : trimmed,
       'lastMessageAt': FieldValue.serverTimestamp(),
       'lastMessageAuthorId': fromUid,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -78,8 +93,7 @@ class ChatService {
     // Chat içindeki sayaç
     batch.update(chatRef, {'unreadCounts.$otherUid': FieldValue.increment(1)});
     
-    // YENİ: Alıcının global sayacını artır (users/{otherUid}/totalUnreadCount)
-    // SetOptions(merge: true) kullanarak doküman yoksa bile oluşturur.
+    // Alıcının global sayacını artır
     batch.set(
       _fs.collection('users').doc(otherUid),
       {'totalUnreadCount': FieldValue.increment(1)},
@@ -90,12 +104,10 @@ class ChatService {
     unawaited(markMutualLikeSeen(fromUid, otherUid));
   }
 
-  /// OPTİMİZE EDİLDİ: Okundu yaparken global sayaçtan düşer.
   Future<void> markAsRead(String chatId, String uid) async {
     final chatRef = _fs.collection('chats').doc(chatId);
     final userRef = _fs.collection('users').doc(uid);
 
-    // Transaction ile güvenli düşüm yapıyoruz
     await _fs.runTransaction((tx) async {
       final chatSnap = await tx.get(chatRef);
       if (!chatSnap.exists) return;
@@ -107,7 +119,6 @@ class ChatService {
         currentUnread = (counts[uid] as num?)?.toInt() ?? 0;
       }
 
-      // Eğer okunmamış mesaj varsa düş
       if (currentUnread > 0) {
         tx.update(chatRef, {'unreadCounts.$uid': 0});
         tx.set(
@@ -118,7 +129,6 @@ class ChatService {
       }
     });
 
-    // Son okunma zamanını güncelle (Eski mantık devam ediyor)
     final lastMsgSnap = await chatRef
         .collection('messages')
         .orderBy('createdAt', descending: true)
@@ -146,7 +156,6 @@ class ChatService {
   }
 
   Future<void> markMutualLikeSeen(String uidA, String uidB) async {
-    // ... (Mevcut kod aynen kalsın) ...
     try {
       final likes = _fs.collection('likes');
       var qs = await likes
@@ -172,7 +181,6 @@ class ChatService {
   }
 
   Stream<int> unreadCountForChat(String chatId, String myUid) {
-    // ... (Mevcut kod aynen kalsın) ...
     final chatRef = _fs.collection('chats').doc(chatId);
     return chatRef.snapshots().map((chatSnap) {
       final data = chatSnap.data();
@@ -187,19 +195,15 @@ class ChatService {
   }
 
   Stream<int> totalUnreadFor(String myUid) {
-    // Bu metod conversation sayısını döndürür, istenirse benzer mantıkla optimize edilebilir
-    // ancak şimdilik olduğu gibi bırakıyoruz çünkü genellikle mesaj sayısı (aşağıdaki) kullanılır.
      final q = _fs
         .collection('chats')
         .where('participants', arrayContains: myUid);
-    return q.snapshots().map((qs) => qs.docs.length); // Basitleştirildi
+    return q.snapshots().map((qs) => qs.docs.length);
   }
 
-  /// OPTİMİZE EDİLDİ: Artık N tane chat yerine tek bir user dokümanını dinliyor.
   Stream<int> totalUnreadMessagesFor(String myUid) {
     return _fs.collection('users').doc(myUid).snapshots().map((snap) {
       final val = (snap.data()?['totalUnreadCount'] as num?)?.toInt() ?? 0;
-      // Negatif olursa 0 göster (güvenlik için)
       return math.max(0, val);
     });
   }
@@ -213,7 +217,6 @@ class ChatService {
   }
 
   Future<void> deleteIfEmpty(String chatId) async {
-    // ... (Mevcut kod aynen kalsın) ...
      try {
       final chatRef = _fs.collection('chats').doc(chatId);
       final msgSnap = await chatRef.collection('messages').limit(1).get();

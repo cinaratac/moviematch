@@ -14,6 +14,7 @@ import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/widgets/movie_action_helper.dart';
 
 // --- In-memory shelf cache to avoid duplicate Firestore reads across screens ---
 class UserShelfCache {
@@ -987,7 +988,17 @@ class _ProfilePageState extends State<ProfilePage> {
                   (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
                       as String;
               final title = (film['title'] ?? '') as String;
-              return AspectRatio(
+             return GestureDetector(
+                onTap: () {
+                  if (title.isNotEmpty) {
+                    MovieActionHelper.show(
+                      context,
+                      title: title,
+                      posterUrl: poster,
+                    );
+                  }
+                },
+                child: AspectRatio(
                 aspectRatio: 2 / 3,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
@@ -1024,7 +1035,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                     ],
                   ),
-                ),
+                ),)
               );
             },
           ),
@@ -1161,7 +1172,17 @@ class _ProfilePageState extends State<ProfilePage> {
                   (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
                       as String;
               final title = (film['title'] ?? '') as String;
-              return AspectRatio(
+              return GestureDetector(
+                onTap: () {
+                  if (title.isNotEmpty) {
+                    MovieActionHelper.show(
+                      context,
+                      title: title,
+                      posterUrl: poster,
+                    );
+                  }
+                },
+                child: AspectRatio(
                 aspectRatio: 2 / 3,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
@@ -1199,6 +1220,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
                 ),
+                )
               );
             },
           ),

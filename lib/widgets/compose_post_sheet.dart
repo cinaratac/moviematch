@@ -4,11 +4,13 @@ import 'package:fluttergirdi/screens/profilescreen.dart'; // UserShelfCache içi
 
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
+  final Map<String, String>? initialMovie;
   final Future<void> Function(String text, Map<String, String>? movie) onSend;
 
   const ComposePostPage({
     super.key,
     required this.maxChars,
+    this.initialMovie,
     required this.onSend,
   });
 
@@ -21,6 +23,15 @@ class _ComposePostPageState extends State<ComposePostPage> {
   final FocusNode _focusNode = FocusNode();
   Map<String, String>? _selectedMovie;
 
+  @override
+  void initState() {
+    super.initState();
+    // Eğer dışarıdan (örneğin profilden) bir film verisi geldiyse, onu seçili hale getir
+    if (widget.initialMovie != null) {
+      _selectedMovie = widget.initialMovie;
+    }
+  }
+  
   @override
   void dispose() {
     _controller.dispose();
