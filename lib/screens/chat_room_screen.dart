@@ -229,7 +229,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     final title = (result['title'] ?? '').trim();
     final poster = (result['poster'] ?? '').trim();
-    final txt ="";
+    const txt ="";
        
 
     try {
@@ -259,7 +259,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           initialTitle: widget.otherTitle,
         ),
         elevation: 0,
-        backgroundColor: Colors.black, // App bar arka planı
+        // DEĞİŞİKLİK: AppBar arka planını tema ile uyumlu hale getir
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
       ),
       body: Stack(
         children: [
@@ -267,8 +268,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             children: [
               Expanded(
                 child: Container(
-                  // Arka plan için hafif bir doku veya renk (isteğe bağlı)
-                  color: Colors.black,
+                  // DEĞİŞİKLİK: Chat body arka planını tema ile uyumlu hale getir
+                  color: Theme.of(context).scaffoldBackgroundColor,
                   child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: FirebaseFirestore.instance
                         .collection('chats')
@@ -602,16 +603,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 }
 
-// lib/screens/chat_room_screen.dart içindeki _ChatAppBarTitle revizyonu
-
 class _ChatAppBarTitle extends StatelessWidget {
-  // chatId artık gerekmiyor
-  // final String chatId;
   final String otherUid;
   final String? initialTitle;
   
   const _ChatAppBarTitle({
-    // required this.chatId, // KALDIRILDI
     required this.otherUid,
     this.initialTitle,
   });
@@ -620,7 +616,6 @@ class _ChatAppBarTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     // SADECE users/{otherUid} dokümanını dinliyoruz.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      // Okuma Source.cache değil, real-time stream olduğu için StreamBuilder kullanıldı
       stream: FirebaseFirestore.instance
           .collection('users')
           .doc(otherUid)
@@ -629,7 +624,6 @@ class _ChatAppBarTitle extends StatelessWidget {
         String title = initialTitle ?? '';
         String photo = '';
         
-        // Match veya Chat dokümanına YAZMA işlemi tamamen kaldırıldı
         if (uSnap.hasData && uSnap.data!.exists) {
           final u = uSnap.data!.data()!;
           final username = (u['username'] ?? '') as String;
@@ -637,7 +631,6 @@ class _ChatAppBarTitle extends StatelessWidget {
           final lb = (u['letterboxdUsername'] ?? '') as String;
           final purl = (u['photoURL'] ?? '') as String;
 
-          // Veri varsa, en uygun başlığı ve fotoğrafı al
           title = username.isNotEmpty
               ? username
               : (disp.isNotEmpty
@@ -651,7 +644,7 @@ class _ChatAppBarTitle extends StatelessWidget {
         final showTitle = title;
         final photoUrl = photo;
 
-        // UI Bileşeni (Sadece gösterim, arka planda I/O işlemi yok)
+        // UI Bileşeni
         return InkWell(
           onTap: () {
             // PublicProfileScreen'e navigasyon
@@ -681,7 +674,7 @@ class _ChatAppBarTitle extends StatelessWidget {
                   showTitle,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
+                       
                         fontWeight: FontWeight.bold,
                       ),
                 ),
@@ -722,7 +715,6 @@ class _WatchlistWheelSheet extends StatefulWidget {
 }
 
 class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
-  // final _fs = FirebaseFirestore.instance; // Artık serviste
   final _chatSvc = ChatService(); // Chat servisi mesaj göndermek için
   final _watchlistSvc = WatchlistService.instance; // Yeni watchlist servisi
 
@@ -734,8 +726,6 @@ class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
     // Veri yükleme mantığı servise taşındı
     _loader = _watchlistSvc.loadSharedWatchlist(widget.myUid, widget.otherUid);
   }
-
-  // YÜKLEME MANTIKLARI KALDIRILDI
 
   Future<void> _sendChosenToChat(WatchlistMovie m) async {
     try {
@@ -764,7 +754,6 @@ class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (build metodu aynı kalır, sadece _loader'ı kullanır)
     final cs = Theme.of(context).colorScheme;
     return DraggableScrollableSheet(
       expand: false,
