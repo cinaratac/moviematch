@@ -5,7 +5,7 @@ import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
-import 'package:fluttergirdi/screens/clubs_tab.dart'; // Kulüpler sekmesi için import
+import 'package:fluttergirdi/screens/clubs_tab.dart'; 
 
 class MessagesPage extends StatelessWidget {
   const MessagesPage({super.key});
@@ -15,7 +15,7 @@ class MessagesPage extends StatelessWidget {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
     return DefaultTabController(
-      length: 2, // İki sekme: Sohbetler ve Kulüpler
+      length: 2, 
       child: Scaffold(
         appBar: AppBar(
           toolbarHeight: 40,
@@ -29,10 +29,7 @@ class MessagesPage extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            // 1. Sekme: Sohbetler (Eski kodunun refactor edilmiş hali)
             _ChatsView(uid: uid),
-            
-            // 2. Sekme: Kulüpler (Yeni özellik)
             const ClubsTab(),
           ],
         ),
@@ -41,7 +38,7 @@ class MessagesPage extends StatelessWidget {
   }
 }
 
-// --- ESKİ MESAJ EKRANI İÇERİĞİ (SOHBETLER SEKMESİ) ---
+// --- SOHBETLER SEKMESİ ---
 class _ChatsView extends StatelessWidget {
   final String uid;
   const _ChatsView({required this.uid});
@@ -50,14 +47,11 @@ class _ChatsView extends StatelessWidget {
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
     return Scaffold(
-      // FAB sadece Sohbetler sekmesinde görünsün diye buraya koyduk
       floatingActionButton: _TrashFab(currentUid: uid),
       body: Column(
         children: [
-          // Eşleşme Başlığı
           NewMatchHeader(currentUid: uid),
 
-          // Sohbet Listesi
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: fs
@@ -71,19 +65,26 @@ class _ChatsView extends StatelessWidget {
                 
                 final docs = s.data?.docs.toList() ?? [];
                 
-                // Sıralama (En yeniden eskiye)
+                // --- KRİTİK DÜZELTME BURADA ---
+                // 1. Grup (Kulüp) sohbetlerini listeden çıkar
+                docs.removeWhere((doc) {
+                   final data = doc.data();
+                   return data['isGroup'] == true; 
+                });
+
+                // 2. Gizli sohbetleri filtrele
+                docs.removeWhere((doc) {
+                    final vis = (doc.data()['visibleFor'] as Map?) ?? {};
+                    return vis[uid] == false;
+                });
+                
+                // 3. Sıralama (En yeniden eskiye)
                 docs.sort((a, b) {
                     final tA = (a.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
                     final tB = (b.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
                     return tB.compareTo(tA);
                 });
                 
-                // Gizli sohbetleri filtreleme
-                docs.removeWhere((doc) {
-                    final vis = (doc.data()['visibleFor'] as Map?) ?? {};
-                    return vis[uid] == false;
-                });
-
                 if (docs.isEmpty) return const _EmptyMessagesInteractive();
 
                 return ListView.separated(
@@ -107,7 +108,7 @@ class _ChatsView extends StatelessWidget {
   }
 }
 
-// --- AŞAĞIDAKİ SINIFLAR AYNEN KORUNDU ---
+// --- YARDIMCI SINIFLAR AYNEN KORUNDU ---
 
 class NewMatchHeader extends StatefulWidget {
   final String currentUid;
@@ -325,7 +326,6 @@ class ChatListTile extends StatelessWidget {
                 ),
               ),
             );
-            
             ChatService.instance.markAsRead(chatDoc.id, currentUid);
           },
           onLongPress: () => _showHideDialog(context, chatDoc.id),

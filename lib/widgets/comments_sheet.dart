@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/text_filter_service.dart';
+import 'package:fluttergirdi/services/feed_service.dart'; // FeedService Importu Şart
 
 class CommentsSheet extends StatefulWidget {
   final String postId;
@@ -21,18 +22,17 @@ class _CommentsSheetState extends State<CommentsSheet> {
   final TextEditingController _commentCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   
-  // Stream'i burada saklıyoruz ki her setState'de yeniden oluşmasın
   late final Stream<QuerySnapshot> _mainRepliesStream;
 
   String? _replyingToDocId; 
   String? _replyingToUserName;
+  String? _replyingToUid; // YENİ: Yanıt verilen kişinin ID'sini tutuyoruz
 
   bool _isSending = false;
 
   @override
   void initState() {
     super.initState();
-    // Stream'i sadece bir kez başlatıyoruz (Performans ayarı)
     _mainRepliesStream = FirebaseFirestore.instance
         .collection('posts')
         .doc(widget.postId)
@@ -103,6 +103,24 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
       await batch.commit();
 
+      // --- BİLDİRİM GÖNDERME KISMI (YENİ) ---
+      if (_replyingToDocId == null) {
+        // Post sahibine bildirim gönder
+        FeedService.instance.notifyComment(
+          postId: widget.postId,
+          postAuthorUid: widget.postAuthorId,
+          preview: text,
+        );
+      } else if (_replyingToUid != null) {
+        // Yanıt verilen kişiye bildirim gönder
+        FeedService.instance.notifyComment(
+          postId: widget.postId,
+          postAuthorUid: _replyingToUid!, // Yanıt verilen kişinin ID'si
+          preview: text,
+        );
+      }
+      // -------------------------------------
+
       _commentCtrl.clear();
       _cancelReply(); 
       FocusScope.of(context).unfocus();
@@ -114,10 +132,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
     }
   }
 
-  void _initiateReply(String docId, String userName) {
+  // GÜNCELLENDİ: Artık UID de alıyor
+  void _initiateReply(String docId, String userName, String uid) {
     setState(() {
       _replyingToDocId = docId;
       _replyingToUserName = userName;
+      _replyingToUid = uid; // ID'yi sakla
     });
     _focusNode.requestFocus(); 
   }
@@ -126,6 +146,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
     setState(() {
       _replyingToDocId = null;
       _replyingToUserName = null;
+      _replyingToUid = null;
     });
     _focusNode.unfocus();
   }
@@ -161,7 +182,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
           // --- LİSTE ---
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: _mainRepliesStream, // initState'te oluşturulan stream kullanılıyor
+              stream: _mainRepliesStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -259,7 +280,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
 class _CommentTile extends StatelessWidget {
   final String postId;
   final QueryDocumentSnapshot doc;
-  final Function(String docId, String userName) onReply;
+  // GÜNCELLENDİ: uid parametresi eklendi
+  final Function(String docId, String userName, String uid) onReply;
 
   const _CommentTile({
     required this.postId,
@@ -327,7 +349,8 @@ class _CommentTile extends StatelessWidget {
                         ),
                         const SizedBox(width: 16),
                         GestureDetector(
-                          onTap: () => onReply(doc.id, name),
+                          // GÜNCELLENDİ: authorId de gönderiliyor
+                          onTap: () => onReply(doc.id, name, authorId),
                           child: Text('Yanıtla', style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.bold)),
                         ),
                       ],
@@ -353,7 +376,7 @@ class _CommentTile extends StatelessWidget {
   }
 }
 
-// --- ALT YANITLAR LİSTESİ (STATEFUL YAPILDI - PERFORMANS İÇİN) ---
+// --- ALT YANITLAR LİSTESİ (STATEFUL) ---
 class _SubRepliesList extends StatefulWidget {
   final String postId;
   final String parentId;
@@ -370,7 +393,6 @@ class _SubRepliesListState extends State<_SubRepliesList> {
   @override
   void initState() {
     super.initState();
-    // Alt yanıtlar için stream'i burada başlatıyoruz, parent rebuild olsa bile stream kopmaz
     _subStream = FirebaseFirestore.instance
           .collection('posts')
           .doc(widget.postId)
@@ -410,7 +432,7 @@ class _SubRepliesListState extends State<_SubRepliesList> {
   }
 }
 
-// --- TEKİL ALT YANIT SATIRI (GÖRÜNÜM DÜZELTİLDİ) ---
+// --- TEKİL ALT YANIT SATIRI ---
 class _SubReplyTile extends StatelessWidget {
   final String postId;
   final String parentId;
@@ -453,7 +475,6 @@ class _SubReplyTile extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(
-                // DÜZELTME BURADA: Column kullanıldı
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -461,7 +482,7 @@ class _SubReplyTile extends StatelessWidget {
                       name, 
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)
                     ),
-                    const SizedBox(height: 2), // İsim ile mesaj arası boşluk
+                    const SizedBox(height: 2),
                     Text(
                       text, 
                       style: const TextStyle(fontSize: 13)
