@@ -11,7 +11,13 @@ import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
-import 'package:fluttergirdi/widgets/offline_banner.dart'; // YENİ
+import 'package:fluttergirdi/widgets/offline_banner.dart';
+
+// YENİ İMPORTLAR
+import 'package:fluttergirdi/screens/leaderboard_screen.dart';
+import 'package:fluttergirdi/screens/clubs_tab.dart';
+import 'package:fluttergirdi/screens/badges_progress_screen.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil resmi için
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -22,7 +28,6 @@ class FeedPage extends StatefulWidget {
 
 class _FeedPageState extends State<FeedPage> {
   final ScrollController _listController = ScrollController();
-
   static const int _pageSize = 20;
   bool _initialLoading = true;
   bool _loadingMore = false;
@@ -49,7 +54,6 @@ class _FeedPageState extends State<FeedPage> {
     }
   }
 
-  // --- Yazarları Topluca Çek ---
   Future<void> _fetchAuthorsForPosts(List<DocumentSnapshot> posts) async {
     final uidsToFetch = <String>{};
     for (var doc in posts) {
@@ -59,59 +63,44 @@ class _FeedPageState extends State<FeedPage> {
         uidsToFetch.add(uid);
       }
     }
-
     if (uidsToFetch.isEmpty) return;
-
     final chunks = <List<String>>[];
     final list = uidsToFetch.toList();
     for (var i = 0; i < list.length; i += 10) {
       chunks.add(list.sublist(i, i + 10 > list.length ? list.length : i + 10));
     }
-
     for (var chunk in chunks) {
       try {
         final qs = await FirebaseFirestore.instance
             .collection('users')
             .where(FieldPath.documentId, whereIn: chunk)
             .get(const GetOptions(source: Source.serverAndCache));
-        
         for (var uDoc in qs.docs) {
           final d = uDoc.data();
           final name = (d['displayName'] ?? '').toString();
           final user = (d['username'] ?? '').toString();
           final lb = (d['letterboxdUsername'] ?? '').toString();
           final photo = (d['photoURL'] ?? '').toString();
-          
           String handle = '';
           if (user.isNotEmpty) handle = '@$user';
           else if (lb.isNotEmpty) handle = '@$lb';
-
           _authorCache[uDoc.id] = {
             'displayName': name.isNotEmpty ? name : 'Kullanıcı',
             'handle': handle,
             'photoURL': photo,
           };
         }
-      } catch (e) {
-        debugPrint('Yazar verisi çekilemedi: $e');
-      }
+      } catch (e) { debugPrint('Yazar verisi çekilemedi: $e'); }
     }
   }
 
   Future<void> _loadInitial() async {
     _authorCache.clear();
-    setState(() {
-      _initialLoading = true;
-      _hasMore = true;
-      _posts.clear();
-      _lastDoc = null;
-    });
-
+    setState(() { _initialLoading = true; _hasMore = true; _posts.clear(); _lastDoc = null; });
     try {
       final serverQs = await FeedService.instance.fetchInitial(limit: _pageSize);
       final serverDocs = serverQs.docs;
       await _fetchAuthorsForPosts(serverDocs);
-
       if (!mounted) return;
       setState(() {
         _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(serverDocs);
@@ -119,9 +108,7 @@ class _FeedPageState extends State<FeedPage> {
         _hasMore = serverDocs.length == _pageSize;
         _initialLoading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _initialLoading = false);
-    }
+    } catch (_) { if (mounted) setState(() => _initialLoading = false); }
   }
 
   Future<void> _loadMore() async {
@@ -131,23 +118,17 @@ class _FeedPageState extends State<FeedPage> {
     try {
       final qs = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: _pageSize);
       final docs = qs.docs;
-
       await _fetchAuthorsForPosts(docs);
-
       setState(() {
         _posts.addAll(docs);
         _lastDoc = docs.isNotEmpty ? docs.last : _lastDoc;
         _hasMore = docs.length == _pageSize;
       });
     } catch (_) {
-    } finally {
-      if (mounted) setState(() => _loadingMore = false);
-    }
+    } finally { if (mounted) setState(() => _loadingMore = false); }
   }
 
-  Future<void> _refresh() async {
-    await _loadInitial();
-  }
+  Future<void> _refresh() async { await _loadInitial(); }
 
   static String _timeAgo(DateTime dt) {
     final now = DateTime.now();
@@ -165,16 +146,76 @@ class _FeedPageState extends State<FeedPage> {
     return DefaultTabController(
       length: 2,
       child: Scaffold(
+        // --- YENİ: DRAWER (YAN MENÜ) ---
+        drawer: Drawer(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          child: Column(
+            children: [
+              // HEADER
+              UserAccountsDrawerHeader(
+                decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest),
+                accountName: Text(FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
+                accountEmail: Text(FirebaseAuth.instance.currentUser?.email ?? '', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                currentAccountPicture: GestureDetector(
+                  onTap: () {
+                    // Profile git
+                    Navigator.pop(context);
+                    // Feed ekranında zaten profil sekmesi var mı? Ana kabuk (Shell) yapısına bağlı.
+                    // Şimdilik PublicProfile olarak açalım veya sadece görsel olsun.
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: FirebaseAuth.instance.currentUser!.uid)));
+                  },
+                  child: CircleAvatar(
+                    backgroundImage: FirebaseAuth.instance.currentUser?.photoURL != null 
+                        ? NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!) 
+                        : null,
+                    child: FirebaseAuth.instance.currentUser?.photoURL == null 
+                        ? const Icon(Icons.person) 
+                        : null,
+                  ),
+                ),
+              ),
+              
+              // MENU ITEMS
+              ListTile(
+                leading: const Icon(Icons.leaderboard, color: Colors.amber),
+                title: const Text('Liderlik Tablosu'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.groups, color: Colors.blueAccent),
+                title: const Text('Kulüpler'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const Scaffold(appBar: PreferredSize(preferredSize: Size.fromHeight(kToolbarHeight), child: SizedBox()), body: ClubsTab())));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.military_tech, color: Colors.purpleAccent),
+                title: const Text('Rozet İlerlemesi'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen()));
+                },
+              ),
+            ],
+          ),
+        ),
+
         appBar: AppBar(
           backgroundColor: Theme.of(context).colorScheme.surface,
           elevation: 0,
           scrolledUnderElevation: 0,
           toolbarHeight: 60,
-          titleSpacing: 12,
+          
+          // --- YENİ: Menü İkonu Solda, Arama Kutusu Sağa Kaydı ---
+          titleSpacing: 0, // Varsayılan boşluğu sıfırla
           title: Align(
             alignment: Alignment.centerLeft,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 240),
+              constraints: const BoxConstraints(maxWidth: 220), // Genişliği biraz kıstık
               child: InkWell(
                 onTap: () {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SearchProfilesScreen()));
@@ -192,13 +233,14 @@ class _FeedPageState extends State<FeedPage> {
                     children: [
                       Icon(Icons.search, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
                       const SizedBox(width: 5),
-                      Text('Kullanıcı Adı Ara', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      Text('Kullanıcı Ara', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     ],
                   ),
                 ),
               ),
             ),
           ),
+          
           actions: [
             const NotificationsButton(),
             IconButton(
@@ -259,8 +301,8 @@ class _FeedPageState extends State<FeedPage> {
                               final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
                               final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
                               final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
-                              
                               final postImage = (m['postImage'] ?? '') as String;
+
                               final double? rating = (m['rating'] as num?)?.toDouble();
                               final bool isSpoiler = (m['isSpoiler'] == true);
                               final String? reviewTitle = m['reviewTitle'] as String?;
@@ -315,7 +357,6 @@ class _FeedPageState extends State<FeedPage> {
           ],
         ),
         
-        // --- POST OLUŞTURMA BUTONU ---
         floatingActionButton: FloatingActionButton(
           heroTag: 'feed_compose_fab',
           onPressed: () {
@@ -325,54 +366,36 @@ class _FeedPageState extends State<FeedPage> {
               useSafeArea: true,
               builder: (_) => ComposePostPage(
                 maxChars: 280,
-                // DÜZELTME: required isSpoiler eklendi
                 onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
                   Navigator.pop(context);
-                  
                   final user = FirebaseAuth.instance.currentUser;
                   if (user == null) return;
-
                   try {
                     String? imageUrl;
-
                     if (image != null) {
                       final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                      final ref = FirebaseStorage.instance
-                          .ref()
-                          .child('post_images')
-                          .child(fileName);
-
+                      final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
                       await ref.putFile(image);
                       imageUrl = await ref.getDownloadURL();
                     }
-
                     await FeedService.instance.createPost(
                       text: text,
                       movie: movie,
                       photoURL: imageUrl,
                       displayName: user.displayName,
                       handle: user.email?.split('@')[0] ?? 'user',
-                      
-                      // Yeni Alanlar
                       rating: rating,
                       isSpoiler: isSpoiler,
                       tags: tags,
                       reviewTitle: reviewTitle,
                     );
-
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Gönderildi!')),
-                      );
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gönderildi!')));
                       _refresh();
                     }
                   } catch (e) {
                     debugPrint('Post gönderme hatası: $e');
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Hata oluştu.')),
-                      );
-                    }
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hata oluştu.')));
                   }
                 },
               ),
@@ -421,7 +444,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       if(id != null && !_localAuthorCache.containsKey(id)) uids.add(id);
     }
     if(uids.isEmpty) return;
-    
     final list = uids.toList();
     for(var i=0; i<list.length; i+=10) {
       final chunk = list.sublist(i, i+10 > list.length ? list.length : i+10);
@@ -450,31 +472,21 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         if(mounted) setState(() { _items = []; _loading = false; });
         return;
       }
-      final followingQs = await FirebaseFirestore.instance
-          .collection('users').doc(me).collection('following')
-          .orderBy('createdAt', descending: true).limit(30).get();
-      
+      final followingQs = await FirebaseFirestore.instance.collection('users').doc(me).collection('following').orderBy('createdAt', descending: true).limit(30).get();
       final uids = followingQs.docs.map((d) => d.id).toList();
 
       if (uids.isEmpty) {
         if(mounted) setState(() { _items = []; _loading = false; });
         return;
       }
-
       final List<DocumentSnapshot<Map<String, dynamic>>> acc = [];
       final processUids = uids.take(15).toList();
 
       for (var i = 0; i < processUids.length; i += 10) {
         final chunk = processUids.sublist(i, i + 10 > processUids.length ? processUids.length : i + 10);
-        final qs = await FirebaseFirestore.instance
-            .collection('posts')
-            .where('authorId', whereIn: chunk)
-            .orderBy('createdAt', descending: true)
-            .limit(5)
-            .get(const GetOptions(source: Source.server));
+        final qs = await FirebaseFirestore.instance.collection('posts').where('authorId', whereIn: chunk).orderBy('createdAt', descending: true).limit(5).get(const GetOptions(source: Source.server));
         acc.addAll(qs.docs);
       }
-
       acc.sort((a, b) {
         final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
         final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
@@ -484,10 +496,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       await _fetchAuthors(acc);
 
       if (mounted) {
-        setState(() {
-          _items = acc;
-          _loading = false;
-        });
+        setState(() { _items = acc; _loading = false; });
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -540,8 +549,13 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
-          
           final postImage = (m['postImage'] ?? '') as String;
+          
+          // YENİ ALANLAR
+          final double? rating = (m['rating'] as num?)?.toDouble();
+          final bool isSpoiler = (m['isSpoiler'] == true);
+          final String? reviewTitle = m['reviewTitle'] as String?;
+          final List<String> tags = List<String>.from(m['tags'] ?? []);
 
           return PostTile(
             postId: d.id,
@@ -556,6 +570,10 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
             replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+            rating: rating,
+            isSpoiler: isSpoiler,
+            reviewTitle: reviewTitle,
+            tags: tags,
             onToggleLike: (pid, like) => FeedService.instance.toggleLike(postId: pid, like: like),
             onStartChat: (String _) async {},
             onFollow: (uid) async {

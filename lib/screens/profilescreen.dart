@@ -15,12 +15,14 @@ import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
-import 'package:fluttergirdi/screens/post_detail_screen.dart'; // Post detayı için
+import 'package:fluttergirdi/screens/post_detail_screen.dart';
 
-// --- ÖZEL LİSTELER İÇİN İMPORTLAR ---
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
+
+// YENİ İMPORT: Oyunlaştırma servisi
+import 'package:fluttergirdi/services/gamification_service.dart';
 
 // --- In-memory shelf cache ---
 class UserShelfCache {
@@ -46,7 +48,6 @@ class UserShelfCache {
   }
 }
 
-// Lightweight view model for activities
 class _ActivityItemData {
   final String id; 
   final String text;
@@ -55,6 +56,7 @@ class _ActivityItemData {
   final String title; 
   final int likeCount;
   final int replyCount;
+  final int? tmdbId;
 
   const _ActivityItemData({
     required this.id,
@@ -64,6 +66,7 @@ class _ActivityItemData {
     this.title = '',
     this.likeCount = 0,
     this.replyCount = 0,
+    this.tmdbId,
   });
 }
 
@@ -90,7 +93,6 @@ class _CountPill extends StatelessWidget {
   }
 }
 
-// --- PROFİL BAŞLIĞI (RESİM BÜYÜTME EKLENDİ) ---
 Widget _profileHeaderSection({
   required BuildContext context,
   required User user,
@@ -99,7 +101,6 @@ Widget _profileHeaderSection({
   required String? lbUsername,
   required String Function(User) shownName,
 }) {
-  // Resim Büyütme Fonksiyonu
   void showEnlargedImage(String? imageUrl) {
     if (imageUrl == null || imageUrl.isEmpty) return;
     showDialog(
@@ -213,8 +214,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _bindLbFromFirestore();
     _bootstrapCounts();
   }
-
-  // ... (Mevcut yardımcı fonksiyonlar: _bootstrapCounts, _extractMovieInfo, _primeShelfCache vb. AYNEN KALSIN) ...
   
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -241,12 +240,6 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() => _following = (_following ?? 0) + (e.followed ? 1 : -1));
       }
     });
-  }
-
-  Map<String, String> _extractMovieInfo(Map<String, dynamic> m) {
-    final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
-    final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
-    return {'poster': poster, 'title': title};
   }
 
   Future<void> _primeShelfCache() async {
@@ -412,7 +405,6 @@ class _ProfilePageState extends State<ProfilePage> {
     if (queued > 0) await batch.commit();
   }
 
-  // ... (Diğer sync fonksiyonları: _writeTasteProfile, _syncLetterboxdToFirestore aynı kalacak) ...
   Future<void> _writeTasteProfile({required String uid, required String lbUsername, required List<LetterboxdFilm> fiveStars, required List<LetterboxdFilm> lowRatings}) async {
     final db = FirebaseFirestore.instance;
     final doc = db.collection('userTasteProfiles').doc(uid);
@@ -470,6 +462,12 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
      await MatchService.instance.autoCreateMatchesFiveOnly(uid, minCommonFive: 1);
     } catch (_) {}
+    
+    // --- YENİ: Rozet Kontrolü Tetiklemesi ---
+    // Letterboxd senkronizasyonu bittiğinde rozetleri kontrol et
+    try {
+      await GamificationService.instance.checkAndAwardBadges();
+    } catch (e) { debugPrint('Gamification check error: $e'); }
   }
 
   @override
@@ -527,7 +525,23 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _refreshFavorites() async {
     if (_lbUsername == null || _lbUsername!.isEmpty) {
-      // ...
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        try {
+          final ref = FirebaseFirestore.instance.collection('users').doc(uid);
+          var snap = await ref.get(const GetOptions(source: Source.cache));
+          if (!snap.exists) {
+            snap = await ref.get(const GetOptions(source: Source.server));
+          }
+          final lb = (snap.data()?['letterboxdUsername'] ?? '').toString();
+          if (lb.isNotEmpty) {
+            setState(() {
+              _lbUsername = lb;
+            });
+          }
+        } catch (_) {}
+      }
+      if (_lbUsername == null || _lbUsername!.isEmpty) return;
     }
     final sp = await SharedPreferences.getInstance();
     final key = 'lb_cache_${_lbUsername?.toLowerCase()}';
@@ -545,7 +559,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
-  // --- Watchlist Section (Helper) ---
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     void onReturnFromSearch() {
       setState(() => _watchlistFutureCache.clear());
@@ -589,7 +602,7 @@ class _ProfilePageState extends State<ProfilePage> {
           return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
         }
         if (!filmSnap.hasData) {
-           return SizedBox(
+          return SizedBox(
             height: 180,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
@@ -622,7 +635,14 @@ class _ProfilePageState extends State<ProfilePage> {
              return GestureDetector(
                 onTap: () {
                   if (title.isNotEmpty) {
-                    MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: ShelfTarget.watchlist, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
+                    MovieActionHelper.show(
+                      context,
+                      title: title,
+                      posterUrl: poster,
+                      docId: docId,
+                      target: ShelfTarget.watchlist,
+                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
+                    );
                   }
                 },
                 child: AspectRatio(
@@ -709,7 +729,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- FİLMLER SEKMESİ (Ana İçerik) ---
+  // --- 1. SEKME: FİLMLER ---
   Widget _buildProfileContentAfterHeader() {
     return RefreshIndicator(
       onRefresh: () async {
@@ -825,8 +845,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   body: TabBarView(
                     children: [
                       _buildProfileContentAfterHeader(),
-                      const _ActivitiesTab(), // Lazy Loaded
-                      const _ListsTab(),      // Lazy Loaded
+                      _ActivitiesTab(uid: user.uid), // Lazy Loaded
+                      _ListsTab(uid: user.uid),      // Lazy Loaded
                     ],
                   ),
                 ),
@@ -846,9 +866,11 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-// --- YENİ LAZY LOADING ACTIVITY TAB ---
+// --- 2. SEKME: AKTİVİTELER (LAZY LOADING) ---
 class _ActivitiesTab extends StatefulWidget {
-  const _ActivitiesTab();
+  final String uid;
+  const _ActivitiesTab({required this.uid});
+
   @override
   State<_ActivitiesTab> createState() => _ActivitiesTabState();
 }
@@ -873,13 +895,15 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
     final db = FirebaseFirestore.instance;
     final List<_ActivityItemData> items = [];
     try {
-      final q = db.collection('posts').where('authorId', isEqualTo: uid).orderBy('createdAt', descending: true).limit(30);
+      final q = db.collection('posts').where('authorId', isEqualTo: widget.uid).orderBy('createdAt', descending: true).limit(30);
       final qs = await q.get();
       for (final d in qs.docs) {
         final m = d.data();
         final ts = m['createdAt'];
         final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
         final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
+        
+        final tmdbId = (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
 
         items.add(_ActivityItemData(
           id: d.id,
@@ -889,6 +913,7 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
           title: title,
           likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
           replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+          tmdbId: (tmdbId is int) ? tmdbId : null,
         ));
       }
     } catch (_) {}
@@ -901,6 +926,13 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
         _loadingActivities = false;
       });
     }
+  }
+  
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    return '${diff.inDays}g';
   }
 
   @override
@@ -929,10 +961,7 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
                 final when = a.createdAt;
                 String timeLabel = '';
                 if (when != null) {
-                  final diff = DateTime.now().difference(when);
-                  if (diff.inMinutes < 60) { timeLabel = '${diff.inMinutes}m'; } 
-                  else if (diff.inHours < 24) { timeLabel = '${diff.inHours}h'; } 
-                  else { timeLabel = '${diff.inDays}g'; }
+                  timeLabel = _timeAgo(when);
                 }
                 return _ActivityWidget(item: a, timeLabel: timeLabel);
               },
@@ -952,7 +981,12 @@ class _ActivityWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: item.id)));
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostDetailScreen(postId: item.id),
+          ),
+        );
       },
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 6),
@@ -961,8 +995,18 @@ class _ActivityWidget extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if ((item.posterUrl).isNotEmpty) ...[
-              ClipRRect(borderRadius: BorderRadius.circular(8), child: PosterImage(posterUrl: item.posterUrl, title: item.title, width: 44, height: 66, fit: BoxFit.cover)),
+            if ((item.posterUrl).isNotEmpty || item.tmdbId != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: PosterImage(
+                  posterUrl: item.posterUrl, 
+                  title: item.title,
+                  tmdbId: item.tmdbId, // <--- EKLENDİ
+                  width: 44, 
+                  height: 66, 
+                  fit: BoxFit.cover
+                ),
+              ),
               const SizedBox(width: 12),
             ],
             Expanded(
@@ -992,9 +1036,11 @@ class _ActivityWidget extends StatelessWidget {
   }
 }
 
-// --- YENİ LAZY LOADING LISTS TAB ---
+// --- 3. SEKME: LAZY LOADING LISTS TAB ---
 class _ListsTab extends StatefulWidget {
-  const _ListsTab();
+  final String uid;
+  const _ListsTab({required this.uid});
+
   @override
   State<_ListsTab> createState() => _ListsTabState();
 }
@@ -1019,6 +1065,18 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
         builder: (context, snapshot) {
            if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
            final lists = snapshot.data ?? [];
+           
+           if (lists.isEmpty) {
+             return ListView(
+               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+               children: [
+                 _CreateListTile(onTap: () => _showCreateListDialog(context)),
+                 const SizedBox(height: 20),
+                 const Center(child: Text("Henüz liste oluşturmadın.")),
+               ],
+             );
+           }
+
            return ListView.builder(
              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
              itemCount: lists.length + 1,
@@ -1133,5 +1191,47 @@ class _AddPosterTile extends StatelessWidget {
       },
       child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Container(color: Colors.white10, alignment: Alignment.center, child: const Icon(Icons.add, size: 40, color: Colors.white70))),
     );
+  }
+}
+
+class _AddFilmDialog extends StatefulWidget {
+  @override
+  State<_AddFilmDialog> createState() => _AddFilmDialogState();
+}
+
+class _AddFilmDialogState extends State<_AddFilmDialog> {
+  final TextEditingController _controller = TextEditingController();
+  bool _submitting = false;
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Yeni Film Ekle'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Film adı'),
+        onSubmitted: _submit,
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.pop(context),
+          child: const Text('İptal'),
+        ),
+        ElevatedButton(
+          onPressed: _submitting ? null : () => _submit(_controller.text),
+          child: _submitting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Ekle'),
+        ),
+      ],
+    );
+  }
+
+  void _submit(String value) async {
+    final filmName = value.trim();
+    if (filmName.isEmpty) return;
+    setState(() => _submitting = true);
+    await Future.delayed(const Duration(milliseconds: 200));
+    Navigator.of(context).pop(filmName);
   }
 }
