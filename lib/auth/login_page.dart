@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'register_page.dart';
+import 'package:fluttergirdi/widgets/offline_banner.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -106,150 +107,157 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      body: GestureDetector(
-        onTap: () {
-          FocusScope.of(context).unfocus();
-          setState(() {
-            _eyeOffsetX = 0;
-            _eyeOffsetY = 0;
-          });
-        },
-        behavior: HitTestBehavior.translucent,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Form(
-                key: _form,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _ForestFace(offsetX: _eyeOffsetX, offsetY: _eyeOffsetY),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Hoş geldin',
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _email,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: 'E-posta',
-                        prefixIcon: Icon(Icons.email_outlined),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'E-posta zorunlu';
-                        if (!v.contains('@')) return 'Geçerli bir e-posta gir';
-                        return null;
-                      },
-                      onTap: () {
-                        setState(() {
-                          _eyeOffsetX = -8;
-                          _eyeOffsetY = 6;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _password,
-                      obscureText: _obscure,
-                      decoration: InputDecoration(
-                        labelText: 'Şifre',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                          icon: Icon(
-                            _obscure ? Icons.visibility : Icons.visibility_off,
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                FocusScope.of(context).unfocus();
+                setState(() {
+                  _eyeOffsetX = 0;
+                  _eyeOffsetY = 0;
+                });
+              },
+              behavior: HitTestBehavior.translucent,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Form(
+                      key: _form,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _ForestFace(offsetX: _eyeOffsetX, offsetY: _eyeOffsetY),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Hoş geldin',
+                            style: Theme.of(context).textTheme.headlineMedium,
                           ),
-                        ),
-                      ),
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Şifre zorunlu';
-                        if (v.length < 6) return 'En az 6 karakter olmalı';
-                        return null;
-                      },
-                      onTap: () {
-                        setState(() {
-                          _eyeOffsetX = 0;
-                          _eyeOffsetY = 12;
-                        });
-                      },
-                    ),
-                    if (_errorMessage != null) ...[
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    if (_showRegisterPrompt) ...[
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: _loading
-                              ? null
-                              : () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => const RegisterPage(),
-                                    ),
-                                  );
-                                },
-                          child: const Text('Hemen kayıt ol'),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _loading ? null : _submit,
-                        child: _loading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Giriş Yap'),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                      alignment: Alignment.center,
-                      child: TextButton(
-                        onPressed: _loading ? null : _onForgotPassword,
-                        child: const Text('Şifremi unuttum'),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: _loading
-                          ? null
-                          : () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const RegisterPage(),
-                                ),
-                              );
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _email,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
+                              labelText: 'E-posta',
+                              prefixIcon: Icon(Icons.email_outlined),
+                            ),
+                            validator: (v) {
+                              if (v == null || v.isEmpty) return 'E-posta zorunlu';
+                              if (!v.contains('@')) return 'Geçerli bir e-posta gir';
+                              return null;
                             },
-                      child: Text(
-                        'Hesabın yok mu? Kaydol',
-                        style: TextStyle(color: cs.primary),
+                            onTap: () {
+                              setState(() {
+                                _eyeOffsetX = -8;
+                                _eyeOffsetY = 6;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _password,
+                            obscureText: _obscure,
+                            decoration: InputDecoration(
+                              labelText: 'Şifre',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                onPressed: () => setState(() => _obscure = !_obscure),
+                                icon: Icon(
+                                  _obscure ? Icons.visibility : Icons.visibility_off,
+                                ),
+                              ),
+                            ),
+                            validator: (v) {
+                              if (v == null || v.isEmpty) return 'Şifre zorunlu';
+                              if (v.length < 6) return 'En az 6 karakter olmalı';
+                              return null;
+                            },
+                            onTap: () {
+                              setState(() {
+                                _eyeOffsetX = 0;
+                                _eyeOffsetY = 12;
+                              });
+                            },
+                          ),
+                          if (_errorMessage != null) ...[
+                            Text(
+                              _errorMessage!,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          if (_showRegisterPrompt) ...[
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: _loading
+                                    ? null
+                                    : () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => const RegisterPage(),
+                                          ),
+                                        );
+                                      },
+                                child: const Text('Hemen kayıt ol'),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: _loading ? null : _submit,
+                              child: _loading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Giriş Yap'),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.center,
+                            child: TextButton(
+                              onPressed: _loading ? null : _onForgotPassword,
+                              child: const Text('Şifremi unuttum'),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: _loading
+                                ? null
+                                : () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const RegisterPage(),
+                                      ),
+                                    );
+                                  },
+                            child: Text(
+                              'Hesabın yok mu? Kaydol',
+                              style: TextStyle(color: cs.primary),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

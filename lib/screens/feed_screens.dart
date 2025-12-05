@@ -11,6 +11,7 @@ import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
+import 'package:fluttergirdi/widgets/offline_banner.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -248,85 +249,92 @@ class _FeedPageState extends State<FeedPage> {
             ),
           ),
         ),
-        body: TabBarView(
+        body: Column(
           children: [
-            // 1) POPÜLER AKIŞ
-            RefreshIndicator(
-              onRefresh: _refresh,
-              child: _initialLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : ListView.separated(
-                      controller: _listController,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, i) {
-                        if (i == 0) return const RecommendationCard();
-                        
-                        final postIndex = i - 1;
-                        if (_loadingMore && postIndex == _posts.length) {
-                          return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
-                        }
-                        
-                        final d = _posts[postIndex];
-                        final m = d.data() ?? {};
-                        final authorId = (m['authorId'] ?? '') as String;
-
-                        final cachedUser = _authorCache[authorId];
-                        final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
-                        final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
-                        final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
-
-                        final createdAt = (m['createdAt'] as Timestamp?);
-                        final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
-                        final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
-                        final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
-                        
-                        // --- DÜZELTME: postImage ALINIYOR ---
-                        final postImage = (m['postImage'] ?? '') as String;
-                        // ------------------------------------
-
-                        final postWidget = PostTile(
-                          postId: d.id,
-                          authorId: authorId,
-                          displayName: displayName, 
-                          handle: handle,
-                          photoURL: photoURL,
-                          timeLabel: timeLabel,
-                          movieTitle: movieTitle.isEmpty ? null : movieTitle,
-                          moviePoster: moviePoster.isEmpty ? null : moviePoster,
-                          // --- DÜZELTME: postImage EKLENDİ ---
-                          postImage: postImage.isEmpty ? null : postImage,
-                          // -----------------------------------
-                          text: (m['text'] ?? '') as String,
-                          likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
-                          replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-                          onToggleLike: (pid, like) => FeedService().toggleLike(postId: pid, like: like),
-                          onStartChat: (String _) async {},
-                          onFollow: (uid) async {
-                             await FeedService().followUser(uid);
-                             await FeedService().notifyFollow(toUid: uid);
-                          },
-                          onReport: (pid) => FeedService().reportPost(pid),
-                        );
-
-                        if (postIndex == 3) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              postWidget,
-                              const SizedBox(height: 12),
-                              const RecommendedUsers(title: 'Önerilen kullanıcılar', limit: 10),
-                            ],
-                          );
-                        }
-                        return postWidget;
-                      },
-                    ),
+            const OfflineBanner(),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  // 1) POPÜLER AKIŞ
+                  RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: _initialLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : ListView.separated(
+                            controller: _listController,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
+                            separatorBuilder: (_, __) => const SizedBox(height: 12),
+                            itemBuilder: (context, i) {
+                              if (i == 0) return const RecommendationCard();
+                              
+                              final postIndex = i - 1;
+                              if (_loadingMore && postIndex == _posts.length) {
+                                return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
+                              }
+                              
+                              final d = _posts[postIndex];
+                              final m = d.data() ?? {};
+                              final authorId = (m['authorId'] ?? '') as String;
+              
+                              final cachedUser = _authorCache[authorId];
+                              final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
+                              final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
+                              final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
+              
+                              final createdAt = (m['createdAt'] as Timestamp?);
+                              final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
+                              final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
+                              final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
+                              
+                              // --- DÜZELTME: postImage ALINIYOR ---
+                              final postImage = (m['postImage'] ?? '') as String;
+                              // ------------------------------------
+              
+                              final postWidget = PostTile(
+                                postId: d.id,
+                                authorId: authorId,
+                                displayName: displayName, 
+                                handle: handle,
+                                photoURL: photoURL,
+                                timeLabel: timeLabel,
+                                movieTitle: movieTitle.isEmpty ? null : movieTitle,
+                                moviePoster: moviePoster.isEmpty ? null : moviePoster,
+                                // --- DÜZELTME: postImage EKLENDİ ---
+                                postImage: postImage.isEmpty ? null : postImage,
+                                // -----------------------------------
+                                text: (m['text'] ?? '') as String,
+                                likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+                                replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+                                onToggleLike: (pid, like) => FeedService().toggleLike(postId: pid, like: like),
+                                onStartChat: (String _) async {},
+                                onFollow: (uid) async {
+                                   await FeedService().followUser(uid);
+                                   await FeedService().notifyFollow(toUid: uid);
+                                },
+                                onReport: (pid) => FeedService().reportPost(pid),
+                              );
+              
+                              if (postIndex == 3) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    postWidget,
+                                    const SizedBox(height: 12),
+                                    const RecommendedUsers(title: 'Önerilen kullanıcılar', limit: 10),
+                                  ],
+                                );
+                              }
+                              return postWidget;
+                            },
+                          ),
+                  ),
+              
+                  // 2) TAKİP EDİLENLER
+                  const _FollowingFeed(),
+                ],
+              ),
             ),
-
-            // 2) TAKİP EDİLENLER
-            const _FollowingFeed(),
           ],
         ),
         
