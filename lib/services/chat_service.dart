@@ -49,16 +49,14 @@ class ChatService {
         .snapshots();
   }
 
-  /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki global sayacı artırma işlemi kaldırıldı (Hot Spot optimizasyonu).
-  /// (imageUrl parametresi kaldırıldı, orijinal haline döndü)
-  /// OPTİMİZE EDİLDİ: Mesaj gönderirken alıcının `users` dokümanındaki sayacı artırır.
-  /// YENİ: 'movie' parametresi eklendi.
+  /// DÜZELTİLDİ: Grup sohbetlerinde (otherUid boş ise) unreadCounts güncellemesi atlanarak hata önlendi.
   Future<void> send(
     String chatId,
     String fromUid,
     String text, {
     required String otherUid,
-    Map<String, dynamic>? movie, // <-- YENİ PARAMETRE
+    Map<String, dynamic>? movie,
+    String? imageUrl,
   }) async {
     final chatRef = _fs.collection('chats').doc(chatId);
     final msgRef = chatRef.collection('messages').doc();
@@ -74,38 +72,62 @@ class ChatService {
       'createdAt': FieldValue.serverTimestamp(),
     };
 
-    // Eğer film verisi varsa, tipini 'movie' yap ve veriyi ekle
+    // Tip belirleme
     if (movie != null) {
       msgData['type'] = 'movie';
       msgData['movie'] = movie;
+    } else if (imageUrl != null) {
+      msgData['type'] = 'image';
+      msgData['imageUrl'] = imageUrl;
     }
 
     batch.set(msgRef, msgData);
 
-    batch.set(chatRef, {
-      'participants': FieldValue.arrayUnion([fromUid, otherUid]),
-      'lastMessage': trimmed.isEmpty && movie != null ? '🎬 Film paylaştı' : trimmed,
+    // Son mesaj metnini belirle
+    String lastMsgText = trimmed;
+    if (lastMsgText.isEmpty) {
+      if (movie != null) lastMsgText = '🎬 Film paylaştı';
+      else if (imageUrl != null) lastMsgText = '📷 Fotoğraf';
+    }
+
+    // Chat metadata güncellemesi
+    final Map<String, dynamic> chatUpdate = {
+      'lastMessage': lastMsgText,
       'lastMessageAt': FieldValue.serverTimestamp(),
       'lastMessageAuthorId': fromUid,
       'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-    
-    // Chat içindeki sayaç
-    batch.update(chatRef, {'unreadCounts.$otherUid': FieldValue.increment(1)});
-    
-    // !!! HOT SPOT OPTİMİZASYONU: ALICININ GLOBAL SAYACINI ARTIRMA İŞLEMİ KALDIRILDI
+    };
+
+    // --- KRİTİK DÜZELTME ---
+    // Eğer otherUid doluysa (Birebir sohbet), katılımcı ve sayaç güncelle.
+    // Eğer boşsa (Kulüp/Grup sohbeti), bu alanları güncelleme çünkü '' anahtarı hataya yol açar.
+    if (otherUid.isNotEmpty) {
+      chatUpdate['participants'] = FieldValue.arrayUnion([fromUid, otherUid]);
+      // Nested field update (merge ile çalışır)
+      chatUpdate['unreadCounts'] = {otherUid: FieldValue.increment(1)};
+    } else {
+      // Kulüplerde gönderenin participants içinde olduğundan emin olmak isteyebiliriz
+      // ama club_service zaten bunu yönetiyor. Yine de garanti olsun:
+      chatUpdate['participants'] = FieldValue.arrayUnion([fromUid]);
+    }
+
+    batch.set(chatRef, chatUpdate, SetOptions(merge: true));
 
     await batch.commit();
-    unawaited(markMutualLikeSeen(fromUid, otherUid));
+    
+    // Karşılıklı beğeni "görüldü" işaretlemesi sadece birebir sohbette anlamlıdır
+    if (otherUid.isNotEmpty) {
+      unawaited(markMutualLikeSeen(fromUid, otherUid));
+    }
   }
 
-  /// OPTİMİZE EDİLDİ: Global sayaç (Hot Spot) güncelleme transaction'ı kaldırıldı.
   Future<void> markAsRead(String chatId, String uid) async {
     final chatRef = _fs.collection('chats').doc(chatId);
-    // final userRef = _fs.collection('users').doc(uid); // Artık kullanılmıyor
-
-    // Önce chat içi sayacı temizle (Hot Spot transaction'ı kaldırıldı, bu direkt update yeterli)
-    await chatRef.update({'unreadCounts.$uid': 0});
+    
+    // Sayaç sıfırlama
+    await chatRef.set({
+      'unreadCounts': {uid: 0}
+    }, SetOptions(merge: true));
 
     final lastMsgSnap = await chatRef
         .collection('messages')
@@ -172,7 +194,6 @@ class ChatService {
     });
   }
 
-  /// DÜZELTME: Bu fonksiyon sadece kullanıcının bulunduğu sohbet sayısını döndürdüğü için adı değiştirildi.
   Stream<int> totalChatCount(String myUid) {
      final q = _fs
         .collection('chats')
@@ -180,11 +201,7 @@ class ChatService {
     return q.snapshots().map((qs) => qs.docs.length);
   }
 
-  /// YENİ OPTİMİZASYON: Hot Spot'u (totalUnreadCount) kaldırdığımız için,
-  /// toplam okunmamış mesaj sayısını tüm ilgili sohbet dokümanlarını okuyarak hesaplar.
   Stream<int> totalUnreadMessagesFor(String myUid) {
-    // DÜZELTME: Sadece participants filtresi kullanıyoruz.
-    // 'unreadCounts.$myUid' filtresini BURADAN SİLMELİSİNİZ.
     final q = _fs
         .collection('chats')
         .where('participants', arrayContains: myUid);

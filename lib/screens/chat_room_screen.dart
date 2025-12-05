@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/services/club_service.dart'; // YENİ
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
@@ -16,12 +20,17 @@ class ChatRoomScreen extends StatefulWidget {
   final String chatId;
   final String otherUid;
   final String? otherTitle;
+  
+  final bool isGroup;
+  final String? groupName;
 
   const ChatRoomScreen({
     super.key,
     required this.chatId,
     required this.otherUid,
     this.otherTitle,
+    this.isGroup = false, 
+    this.groupName,
   });
 
   @override
@@ -38,7 +47,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void initState() {
     super.initState();
     final myUid = FirebaseAuth.instance.currentUser!.uid;
-    _svc.ensureChat(widget.chatId, myUid, widget.otherUid);
+    
+    if (!widget.isGroup) {
+      _svc.ensureChat(widget.chatId, myUid, widget.otherUid);
+    }
 
     _latestSub = FirebaseFirestore.instance
         .collection('chats')
@@ -80,7 +92,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid != null) {
       _svc.markAsRead(widget.chatId, myUid);
-      _svc.deleteIfEmpty(widget.chatId);
+      if (!widget.isGroup) {
+        _svc.deleteIfEmpty(widget.chatId);
+      }
     }
     _latestSub?.cancel();
     _ctrl.dispose();
@@ -92,15 +106,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final txt = _ctrl.text.trim();
     if (txt.isEmpty) return;
     if (TextFilterService.hasProfanity(txt)) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Mesajınız uygunsuz ifadeler içeriyor.'),
-        backgroundColor: Colors.red,
-        duration: Duration(seconds: 2),
-      ),
-    );
-    return;
-  }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mesajınız uygunsuz ifadeler içeriyor.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
       _ctrl.clear();
@@ -113,13 +127,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  // ÖNCEKİ DÜZELTİLMİŞ FİLM SEÇİCİ (Aynen korundu)
   Future<void> _openFilmPicker() async {
     final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: Colors.transparent, // Şeffaf arka plan
+      backgroundColor: Colors.transparent, 
       builder: (ctx) {
         return Container(
           decoration: BoxDecoration(
@@ -242,7 +255,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final poster = (result['poster'] ?? '').trim();
     const txt ="";
        
-
     try {
       await _svc.send(
         widget.chatId,
@@ -266,11 +278,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return Scaffold(
       appBar: AppBar(
         title: _ChatAppBarTitle(
+          chatId: widget.chatId,
           otherUid: widget.otherUid,
           initialTitle: widget.otherTitle,
+          isGroup: widget.isGroup,
+          groupName: widget.groupName,
         ),
         elevation: 0,
-        // DEĞİŞİKLİK: AppBar arka planını tema ile uyumlu hale getir
         backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
       ),
       body: Stack(
@@ -279,7 +293,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             children: [
               Expanded(
                 child: Container(
-                  // DEĞİŞİKLİK: Chat body arka planını tema ile uyumlu hale getir
                   color: Theme.of(context).scaffoldBackgroundColor,
                   child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: FirebaseFirestore.instance
@@ -325,12 +338,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           final ts = (m['createdAt'] as Timestamp?);
                           final dt = ts?.toDate();
 
-                          return _buildMessageBubble(
+                          return _buildMessageRow(
                             context,
                             text: text,
                             movie: m['movie'],
                             isMine: mine,
                             timestamp: dt,
+                            authorId: author,
                           );
                         },
                       );
@@ -339,7 +353,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 ),
               ),
 
-              // --- MESAJ GÖNDERME BARI (Dokunulmadı) ---
               SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
@@ -350,7 +363,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E1E), // Hafif gri
+                            color: const Color(0xFF1E1E1E), 
                             borderRadius: BorderRadius.circular(28),
                             border: Border.all(color: Colors.white10),
                           ),
@@ -386,26 +399,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                         color: Colors.white54),
                                   ),
                                   const SizedBox(width: 12),
-                                  IconButton(
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    tooltip: 'Watchlist Çarkı',
-                                    onPressed: () {
-                                      showModalBottomSheet(
-                                        context: context,
-                                        isScrollControlled: true,
-                                        useSafeArea: true,
-                                        backgroundColor: Colors.transparent,
-                                        builder: (_) => _WatchlistWheelSheet(
-                                          chatId: widget.chatId,
-                                          myUid: myUid,
-                                          otherUid: widget.otherUid,
-                                        ),
-                                      );
-                                    },
-                                    icon: const Icon(Icons.donut_large,
-                                        color: Colors.white54),
-                                  ),
+                                  if (!widget.isGroup)
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      tooltip: 'Watchlist Çarkı',
+                                      onPressed: () {
+                                        showModalBottomSheet(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          useSafeArea: true,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (_) => _WatchlistWheelSheet(
+                                            chatId: widget.chatId,
+                                            myUid: myUid,
+                                            otherUid: widget.otherUid,
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.donut_large,
+                                          color: Colors.white54),
+                                    ),
                                 ],
                               ),
                             ],
@@ -430,7 +444,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ],
           ),
 
-          // REHBER KARAKTER
           ValueListenableBuilder<bool>(
             valueListenable: _showGuideNotifier,
             builder: (context, isVisible, child) {
@@ -448,6 +461,41 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  Widget _buildMessageRow(
+    BuildContext context, {
+    required String text,
+    dynamic movie,
+    required bool isMine,
+    DateTime? timestamp,
+    required String authorId,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end, 
+        children: [
+          if (!isMine) ...[
+            _UserAvatar(uid: authorId, size: 16),
+            const SizedBox(width: 8),
+          ],
+
+          _buildMessageBubble(
+            context,
+            text: text,
+            movie: movie,
+            isMine: isMine,
+            timestamp: timestamp,
+          ),
+
+          if (isMine) ...[
+             const SizedBox(width: 8), 
+          ]
+        ],
+      ),
+    );
+  }
+
   Widget _buildMessageBubble(
     BuildContext context, {
     required String text,
@@ -455,7 +503,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     required bool isMine,
     DateTime? timestamp,
   }) {
-    // Film verisini ayıkla
     String posterUrl = '';
     String movieTitle = '';
     bool hasMovie = false;
@@ -466,7 +513,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       hasMovie = true;
     }
 
-    // Renk paleti ve sabitler
     final myGradient = LinearGradient(
       colors: [
         Theme.of(context).colorScheme.primary,
@@ -477,136 +523,125 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
     final otherColor = const Color(0xFF2C2C2E);
 
-    final maxBubbleWidth = MediaQuery.of(context).size.width * 0.75;
-    const paddingHorizontal = 24.0; // İç padding (12 + 12)
+    final maxBubbleWidth = MediaQuery.of(context).size.width * 0.70; 
+    const paddingHorizontal = 24.0;
     final maxContentWidth = maxBubbleWidth - paddingHorizontal;
     const movieCardWidth = 200.0;
 
-    return Align(
-      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        constraints: BoxConstraints(
-          maxWidth: maxBubbleWidth, // Maksimum genişliği korur
-          minWidth: 40,
+    return Container(
+      constraints: BoxConstraints(
+        maxWidth: maxBubbleWidth,
+        minWidth: 40,
+      ),
+      decoration: BoxDecoration(
+        gradient: isMine ? myGradient : null,
+        color: isMine ? null : otherColor,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(20),
+          topRight: const Radius.circular(20),
+          bottomLeft: Radius.circular(isMine ? 20 : 4),
+          bottomRight: Radius.circular(isMine ? 4 : 20),
         ),
-        decoration: BoxDecoration(
-          gradient: isMine ? myGradient : null,
-          color: isMine ? null : otherColor,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(20),
-            topRight: const Radius.circular(20),
-            bottomLeft: Radius.circular(isMine ? 20 : 4),
-            bottomRight: Radius.circular(isMine ? 4 : 20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.12),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          // ÇÖZÜM: IntrinsicWidth, Column'u içeriği kadar (yatayda) küçülmeye zorlar.
-          child: IntrinsicWidth(
-            child: Column(
-              mainAxisSize: MainAxisSize.min, // Dikeyde küçülme
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 1. FİLM KARTI
-                if (hasMovie)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    width: movieCardWidth, // Sabit genişlik
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: Colors.black26,
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (posterUrl.isNotEmpty)
-                          AspectRatio(
-                            aspectRatio: 2 / 3,
-                            child: PosterImage(
-                              posterUrl: posterUrl,
-                              title: movieTitle,
-                              fit: BoxFit.cover,
-                            ),
-                          )
-                        else
-                          Container(
-                            height: 120,
-                            width: double.infinity,
-                            color: Colors.grey.shade900,
-                            child: const Center(
-                              child: Icon(Icons.movie,
-                                  size: 32, color: Colors.white24),
-                            ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: IntrinsicWidth(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (hasMovie)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  width: movieCardWidth,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.black26,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (posterUrl.isNotEmpty)
+                        AspectRatio(
+                          aspectRatio: 2 / 3,
+                          child: PosterImage(
+                            posterUrl: posterUrl,
+                            title: movieTitle,
+                            fit: BoxFit.cover,
                           ),
+                        )
+                      else
                         Container(
+                          height: 120,
                           width: double.infinity,
-                          padding: const EdgeInsets.all(8),
-                          color: Colors.black38,
-                          child: Text(
-                            movieTitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
+                          color: Colors.grey.shade900,
+                          child: const Center(
+                            child: Icon(Icons.movie,
+                                size: 32, color: Colors.white24),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-
-                // 2. MESAJ METNİ
-                if (text.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    // ConstrainedBox, uzun metnin alt satıra geçmesini sağlar, 
-                    // IntrinsicWidth'in yanlış hesap yapmasını engeller.
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        // Eğer film varsa, metin film genişliği kadar yayılır. Yoksa maxContentWidth kadar.
-                        maxWidth: hasMovie 
-                          ? movieCardWidth 
-                          : maxContentWidth, 
-                      ),
-                      child: Text(
-                        text,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          height: 1.3,
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(8),
+                        color: Colors.black38,
+                        child: Text(
+                          movieTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
+                ),
 
-                // 3. SAAT BİLGİSİ
-                if (timestamp != null)
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        _formatTime(timestamp),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.white.withOpacity(0.6),
-                        ),
+              if (text.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: hasMovie 
+                        ? movieCardWidth 
+                        : maxContentWidth, 
+                    ),
+                    child: Text(
+                      text,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        height: 1.3,
                       ),
                     ),
                   ),
-              ],
-            ),
+                ),
+
+              if (timestamp != null)
+                Align(
+                  alignment: Alignment.bottomRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      _formatTime(timestamp),
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withOpacity(0.6),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -614,18 +649,305 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 }
 
-class _ChatAppBarTitle extends StatelessWidget {
-  final String otherUid;
-  final String? initialTitle;
-  
-  const _ChatAppBarTitle({
-    required this.otherUid,
-    this.initialTitle,
-  });
+class _UserAvatar extends StatelessWidget {
+  final String uid;
+  final double size;
+  const _UserAvatar({required this.uid, this.size = 20});
 
   @override
   Widget build(BuildContext context) {
-    // SADECE users/{otherUid} dokümanını dinliyoruz.
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, snap) {
+        String? url;
+        if (snap.hasData && snap.data!.exists) {
+          final data = snap.data!.data() as Map<String, dynamic>;
+          url = data['photoURL'];
+        }
+        return CircleAvatar(
+          radius: size,
+          backgroundImage: (url != null && url.isNotEmpty) ? NetworkImage(url) : null,
+          child: (url == null || url.isEmpty) ? Icon(Icons.person, size: size) : null,
+        );
+      },
+    );
+  }
+}
+
+class _ChatAppBarTitle extends StatelessWidget {
+  final String chatId;
+  final String otherUid;
+  final String? initialTitle;
+  final bool isGroup;
+  final String? groupName;
+  
+  const _ChatAppBarTitle({
+    required this.chatId,
+    required this.otherUid,
+    this.initialTitle,
+    required this.isGroup,
+    this.groupName,
+  });
+
+  void _showClubInfo(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.9,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance.collection('clubs').doc(chatId).snapshots(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snap.hasData || !snap.data!.exists) {
+                  return const Center(child: Text("Kulüp bilgisi alınamadı."));
+                }
+                
+                final data = snap.data!.data() as Map<String, dynamic>;
+                final members = List<String>.from(data['members'] ?? []);
+                final admins = List<String>.from(data['admins'] ?? []);
+                final imageUrl = data['imageUrl'] as String?;
+                final description = data['description'] as String?;
+                final ownerId = data['ownerId'];
+                
+                final myUid = FirebaseAuth.instance.currentUser?.uid;
+                
+                // --- YETKİ KONTROLÜ ---
+                // Sahibi veya herhangi bir yönetici mi?
+                final isOwner = (ownerId == myUid);
+                final isAdmin = admins.contains(myUid);
+                
+                // Menüyü görebilecek kişi: Sahip veya Yönetici
+                final canManage = isOwner || isAdmin;
+
+                return Column(
+                  children: [
+                    Stack(
+                      children: [
+                        Container(
+                          height: 200,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade900,
+                            image: (imageUrl != null && imageUrl.isNotEmpty)
+                                ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
+                                : null,
+                          ),
+                          child: (imageUrl == null || imageUrl.isEmpty)
+                              ? const Center(child: Icon(Icons.groups, size: 64, color: Colors.white24))
+                              : null,
+                        ),
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (isOwner)
+                          Positioned(
+                            top: 16,
+                            right: 16,
+                            child: IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.white),
+                              tooltip: 'Kulübü Düzenle',
+                              style: IconButton.styleFrom(backgroundColor: Colors.black45),
+                              onPressed: () {
+                                Navigator.pop(context);
+                                showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  builder: (_) => _EditClubSheet(
+                                    clubId: chatId, 
+                                    currentName: data['name'], 
+                                    currentDesc: description,
+                                    currentImage: imageUrl
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        Positioned(
+                          bottom: 16,
+                          left: 16,
+                          right: 16,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                data['name'] ?? 'Kulüp',
+                                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                              ),
+                              if (description != null && description.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Text(
+                                    description,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text("Üyeler", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      ),
+                    ),
+                    const Divider(height: 1),
+
+                    Expanded(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        itemCount: members.length,
+                        itemBuilder: (ctx, i) {
+                          final uid = members[i];
+                          final isThisMemberOwner = (uid == ownerId);
+                          final isThisMemberAdmin = admins.contains(uid);
+
+                          return FutureBuilder<DocumentSnapshot>(
+                            future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+                            builder: (context, userSnap) {
+                               if (!userSnap.hasData) return const SizedBox.shrink();
+                               final userData = userSnap.data!.data() as Map<String, dynamic>?;
+                               final name = userData?['displayName'] ?? userData?['username'] ?? 'Kullanıcı';
+                               final photo = userData?['photoURL'];
+
+                               return ListTile(
+                                 leading: CircleAvatar(
+                                   backgroundImage: (photo != null) ? NetworkImage(photo) : null,
+                                   child: photo == null ? const Icon(Icons.person) : null,
+                                 ),
+                                 title: Text(name),
+                                 subtitle: isThisMemberOwner 
+                                    ? const Text('Kurucu', style: TextStyle(color: Colors.amber, fontSize: 12))
+                                    : (isThisMemberAdmin ? const Text('Yönetici', style: TextStyle(color: Colors.green, fontSize: 12)) : null),
+                                 
+                                 // YÖNETİM MENÜSÜ (Eğer ben yetkiliysem ve o kişi ben değilsem ve o kişi kurucu değilse)
+                                 trailing: (canManage && uid != myUid && !isThisMemberOwner) 
+                                    ? PopupMenuButton<String>(
+                                        onSelected: (value) {
+                                          if (value == 'kick') {
+                                            ClubService.instance.kickMember(chatId, uid);
+                                          } else if (value == 'promote') {
+                                            ClubService.instance.toggleAdmin(chatId, uid, true);
+                                          } else if (value == 'demote') {
+                                            ClubService.instance.toggleAdmin(chatId, uid, false);
+                                          }
+                                        },
+                                        itemBuilder: (BuildContext context) {
+                                          return [
+                                            if (!isThisMemberAdmin)
+                                              const PopupMenuItem(
+                                                value: 'promote',
+                                                child: Text('Yönetici Yap'),
+                                              )
+                                            else
+                                              const PopupMenuItem(
+                                                value: 'demote',
+                                                child: Text('Yöneticilikten Al'),
+                                              ),
+                                            const PopupMenuItem(
+                                              value: 'kick',
+                                              child: Text('Kulüpten At', style: TextStyle(color: Colors.red)),
+                                            ),
+                                          ];
+                                        },
+                                      )
+                                    : null,
+                                 onTap: () {
+                                   Navigator.push(
+                                     context,
+                                     MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid))
+                                   );
+                                 },
+                               );
+                            }
+                          );
+                        }
+                      ),
+                    ),
+                  ],
+                );
+              }
+            );
+          },
+        );
+      }
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (isGroup) {
+      return StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('clubs').doc(chatId).snapshots(),
+        builder: (context, snap) {
+          String? imageUrl;
+          if (snap.hasData && snap.data!.exists) {
+            imageUrl = (snap.data!.data() as Map<String, dynamic>)['imageUrl'];
+          }
+
+          return InkWell(
+            onTap: () => _showClubInfo(context),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.grey.shade800,
+                  backgroundImage: (imageUrl != null && imageUrl.isNotEmpty) 
+                      ? NetworkImage(imageUrl) 
+                      : null,
+                  child: (imageUrl == null || imageUrl.isEmpty) 
+                      ? const Icon(Icons.groups, color: Colors.white, size: 20) 
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        groupName ?? 'Kulüp Sohbeti',
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      Text(
+                        'Bilgi >',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+      );
+    }
+
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('users')
@@ -655,10 +977,8 @@ class _ChatAppBarTitle extends StatelessWidget {
         final showTitle = title;
         final photoUrl = photo;
 
-        // UI Bileşeni
         return InkWell(
           onTap: () {
-            // PublicProfileScreen'e navigasyon
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -685,7 +1005,6 @@ class _ChatAppBarTitle extends StatelessWidget {
                   showTitle,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                       
                         fontWeight: FontWeight.bold,
                       ),
                 ),
@@ -710,7 +1029,150 @@ String _formatTime(DateTime dt) {
   return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}';
 }
 
-// --- Watchlist Wheel Sheet ---
+class _EditClubSheet extends StatefulWidget {
+  final String clubId;
+  final String? currentName;
+  final String? currentDesc;
+  final String? currentImage;
+
+  const _EditClubSheet({
+    required this.clubId, 
+    this.currentName, 
+    this.currentDesc, 
+    this.currentImage
+  });
+
+  @override
+  State<_EditClubSheet> createState() => _EditClubSheetState();
+}
+
+class _EditClubSheetState extends State<_EditClubSheet> {
+  late TextEditingController _descCtrl;
+  bool _isLoading = false;
+  File? _imageFile;
+  final ImagePicker _picker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _descCtrl = TextEditingController(text: widget.currentDesc);
+  }
+
+  Future<void> _pickImage() async {
+    final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
+    if (picked != null) {
+      setState(() {
+        _imageFile = File(picked.path);
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _isLoading = true);
+    try {
+      String? newImageUrl;
+
+      if (_imageFile != null) {
+        final fileName = '${widget.clubId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final ref = FirebaseStorage.instance.ref().child('club_images/$fileName');
+        await ref.putFile(_imageFile!);
+        newImageUrl = await ref.getDownloadURL();
+      }
+
+      final Map<String, dynamic> updates = {
+        'description': _descCtrl.text.trim(),
+      };
+      
+      if (newImageUrl != null) {
+        updates['imageUrl'] = newImageUrl;
+      }
+
+      await FirebaseFirestore.instance.collection('clubs').doc(widget.clubId).update(updates);
+      
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kulüp bilgileri güncellendi.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hata: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Kulübü Düzenle", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+              const SizedBox(height: 20),
+              
+              GestureDetector(
+                onTap: _pickImage,
+                child: Container(
+                  height: 120,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade800,
+                    borderRadius: BorderRadius.circular(12),
+                    image: _imageFile != null
+                        ? DecorationImage(image: FileImage(_imageFile!), fit: BoxFit.cover)
+                        : (widget.currentImage != null && widget.currentImage!.isNotEmpty)
+                            ? DecorationImage(image: NetworkImage(widget.currentImage!), fit: BoxFit.cover)
+                            : null,
+                  ),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+                      child: const Icon(Icons.add_a_photo, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 20),
+              
+              TextField(
+                controller: _descCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Kulüp Açıklaması',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
+              ),
+              
+              const SizedBox(height: 24),
+              
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  onPressed: _isLoading ? null : _save,
+                  child: _isLoading ? const CircularProgressIndicator() : const Text('Kaydet'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --- Watchlist Wheel Sheet (Aynı kaldı) ---
 class _WatchlistWheelSheet extends StatefulWidget {
   final String chatId;
   final String myUid;
@@ -726,22 +1188,20 @@ class _WatchlistWheelSheet extends StatefulWidget {
 }
 
 class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
-  final _chatSvc = ChatService(); // Chat servisi mesaj göndermek için
-  final _watchlistSvc = WatchlistService.instance; // Yeni watchlist servisi
+  final _chatSvc = ChatService();
+  final _watchlistSvc = WatchlistService.instance;
 
   late Future<List<WatchlistMovie>> _loader;
 
   @override
   void initState() {
     super.initState();
-    // Veri yükleme mantığı servise taşındı
     _loader = _watchlistSvc.loadSharedWatchlist(widget.myUid, widget.otherUid);
   }
 
   Future<void> _sendChosenToChat(WatchlistMovie m) async {
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
-      // Chat servisi kullanılarak mesaj gönderildi
       await _chatSvc.send(
         widget.chatId,
         myUid,

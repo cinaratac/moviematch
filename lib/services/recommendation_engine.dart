@@ -13,8 +13,8 @@ class MovieRecommendation {
   final double voteAverage;
   final String releaseDate;
   final List<String> genres;
-  double matchScore; // Artık değiştirilebilir (merge işlemi için)
-  String matchReason; // Artık değiştirilebilir
+  double matchScore; 
+  String matchReason; 
 
   MovieRecommendation({
     required this.tmdbId,
@@ -91,7 +91,7 @@ class RecommendationEngine {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final String _tmdbBearer = Secrets.tmdbAccessToken;
 
-  // Cache süresi (1 saat)
+  // Cache süresi (7 Gün)
   static const Duration _cacheDuration = Duration(days: 7);
   List<MovieRecommendation>? _memoryCache;
   DateTime? _lastFetchTime;
@@ -126,7 +126,7 @@ class RecommendationEngine {
     // Geçici ham liste
     final rawRecommendations = <MovieRecommendation>[];
 
-    // 2. Paralel olarak farklı kaynaklardan öneriler topla (Havuzu genişletelim)
+    // 2. Paralel olarak farklı kaynaklardan öneriler topla
     await Future.wait([
       _getGenreBasedRecommendations(profile, rawRecommendations),
       _getDirectorBasedRecommendations(profile, rawRecommendations),
@@ -134,20 +134,18 @@ class RecommendationEngine {
       _getSimilarMovieRecommendations(profile, rawRecommendations),
     ]);
 
-    // 3. Tekilleştirme ve Puan Birleştirme (De-duplication)
+    // 3. Tekilleştirme ve Puan Birleştirme
     final uniqueMap = <int, MovieRecommendation>{};
 
     for (final rec in rawRecommendations) {
       if (uniqueMap.containsKey(rec.tmdbId)) {
         final existing = uniqueMap[rec.tmdbId]!;
         // Eğer zaten listede varsa:
-        // 1. Puanını artır (Bonus puan)
+        // 1. Puanını artır
         existing.matchScore = (existing.matchScore + 10).clamp(0.0, 100.0);
         
-        // 2. Sebebi güncelle (Daha zengin açıklama)
+        // 2. Sebebi güncelle
         if (!existing.matchReason.contains(rec.matchReason)) {
-           // Örnek: "Favori yönetmen" + ", Favori tür"
-           // Çok uzun olmaması için basit bir check
            if (existing.matchReason.length < 50) {
              existing.matchReason = '${existing.matchReason}, ${rec.matchReason.split(':').last}';
            }
@@ -175,11 +173,13 @@ class RecommendationEngine {
 
     return top30;
   }
+
   void clearMemoryCache() {
     _memoryCache = null;
     _lastFetchTime = null;
   }
-  /// Cache'den önerileri getir
+
+  /// Cache'den önerileri getir (DÜZELTİLEN FONKSİYON)
   Future<List<MovieRecommendation>?> getCachedRecommendations(String uid) async {
     if (_memoryCache != null && _memoryCache!.isNotEmpty) {
        return _memoryCache;
@@ -201,14 +201,21 @@ class RecommendationEngine {
       final list = recommendationsData
           .map((e) => MovieRecommendation.fromMap(e as Map<String, dynamic>))
           .toList();
-          _memoryCache = list;
+      
+      // --- EKLENEN KISIM: Profil verisine göre filtreleme ---
+      // Cache'ten gelse bile, kullanıcı bu sürede izlemiş olabilir diye tekrar filtreliyoruz
+      final profile = await _fetchUserProfile(uid);
+      final filteredList = _filterKnownMovies(list, profile); 
+      // -----------------------------------------------------
+
+      _memoryCache = filteredList;
       _lastFetchTime = cachedAt ?? DateTime.now();
-      return list;
+      return filteredList;
     } catch (e) {
-  }
+      return null; // <-- BU SATIR EKSİKTİ, EKLENDİ
+    }
   }
 
-  // ... _fetchUserProfile ve _fetchTmdbIdsFromKeys metodları AYNI (değişiklik yok) ...
   Future<UserTasteProfile> _fetchUserProfile(String uid) async {
     final userDoc = await _db.collection('users').doc(uid).get();
     if (!userDoc.exists) return UserTasteProfile();
@@ -216,9 +223,6 @@ class RecommendationEngine {
     final data = userDoc.data()!;
     final lovedIds = await _fetchTmdbIdsFromKeys(List<String>.from(data['fiveStarKeys'] ?? []));
     final dislikedIds = await _fetchTmdbIdsFromKeys(List<String>.from(data['dislikedKeys'] ?? []));
-
-    // Ek olarak watchlist ve izlenenleri de "bilinen" olarak almalıyız ki tekrar önermeyelim
-    // Ancak basitlik adına şimdilik mevcut yapıyı koruyoruz.
     
     return UserTasteProfile(
       favoriteGenres: List<String>.from(data['favGenres'] ?? []),
@@ -246,26 +250,25 @@ class RecommendationEngine {
     return ids;
   }
 
-  /// Tür bazlı öneriler (Geliştirilmiş Puanlama)
+  // Paralel istekler için güncellenmiş yardımcı fonksiyonlar
   Future<void> _getGenreBasedRecommendations(
     UserTasteProfile profile,
     List<MovieRecommendation> recommendations,
   ) async {
     if (profile.favoriteGenres.isEmpty) return;
-
     final genreMap = await _getGenreIdMap();
     
-    // İlk 5 favori türe bak (önceden 3'tü)
-    for (final genreName in profile.favoriteGenres.take(5)) {
+    // Future.wait ile paralel çalıştır
+    await Future.wait(profile.favoriteGenres.take(5).map((genreName) async {
       final genreId = genreMap[genreName.toLowerCase()];
-      if (genreId == null) continue;
+      if (genreId == null) return;
 
       try {
         final randomPage = Random().nextInt(3) + 1;
         final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
           'with_genres': genreId.toString(),
           'sort_by': 'vote_average.desc',
-          'vote_count.gte': '300', // Filtreyi biraz gevşettik
+          'vote_count.gte': '300',
           'language': 'tr-TR',
           'page': randomPage.toString(),
         });
@@ -279,11 +282,9 @@ class RecommendationEngine {
           final data = json.decode(resp.body);
           final results = data['results'] as List;
 
-          // Her türden en iyi 10 filmi al (önceden 5'ti)
           for (final movie in results.take(10)) {
-            // Dinamik Skor: Baz (60) + (IMDB * 4) -> 7.0 ise 60 + 28 = 88 puan
             final vote = (movie['vote_average'] ?? 0.0).toDouble();
-            final score = 50.0 + (vote * 5.0); // Max 100 civarı
+            final score = 50.0 + (vote * 5.0);
 
             recommendations.add(_createRecommendation(
               movie,
@@ -293,17 +294,17 @@ class RecommendationEngine {
           }
         }
       } catch (_) {}
-    }
+    }));
   }
 
-  /// Yönetmen bazlı öneriler (Geliştirilmiş Arama)
   Future<void> _getDirectorBasedRecommendations(
     UserTasteProfile profile,
     List<MovieRecommendation> recommendations,
   ) async {
     if (profile.favoriteDirectors.isEmpty) return;
 
-    for (final directorName in profile.favoriteDirectors.take(5)) {
+    // Paralel çalıştır
+    await Future.wait(profile.favoriteDirectors.take(5).map((directorName) async {
       try {
         final searchUri = Uri.https('api.themoviedb.org', '/3/search/person', {
           'query': directorName,
@@ -315,14 +316,13 @@ class RecommendationEngine {
           'Accept': 'application/json',
         });
 
-        if (searchResp.statusCode != 200) continue;
+        if (searchResp.statusCode != 200) return;
 
         final searchData = json.decode(searchResp.body);
         final results = searchData['results'] as List;
         
-        if (results.isEmpty) continue;
+        if (results.isEmpty) return;
         
-        // Doğru kişiyi bulma: Known for Directing?
         var person = results.first;
         if (results.length > 1) {
            final directorPerson = results.firstWhere(
@@ -350,12 +350,10 @@ class RecommendationEngine {
           final crew = moviesData['crew'] as List;
           final directed = crew.where((c) => c['job'] == 'Director').toList();
           
-          // Popülerliğe göre sırala ki en bilinenleri önersin
           directed.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
 
           for (final movie in directed.take(5)) {
              final vote = (movie['vote_average'] ?? 0.0).toDouble();
-             // Yönetmen filmleri genelde daha değerli (Baz 60)
              final score = 60.0 + (vote * 4.0); 
 
             recommendations.add(_createRecommendation(
@@ -366,17 +364,17 @@ class RecommendationEngine {
           }
         }
       } catch (_) {}
-    }
+    }));
   }
 
-  /// Oyuncu bazlı öneriler
   Future<void> _getActorBasedRecommendations(
     UserTasteProfile profile,
     List<MovieRecommendation> recommendations,
   ) async {
     if (profile.favoriteActors.isEmpty) return;
 
-    for (final actorName in profile.favoriteActors.take(3)) {
+    // Paralel çalıştır
+    await Future.wait(profile.favoriteActors.take(3).map((actorName) async {
       try {
         final searchUri = Uri.https('api.themoviedb.org', '/3/search/person', {
           'query': actorName,
@@ -388,12 +386,11 @@ class RecommendationEngine {
           'Accept': 'application/json',
         });
 
-        if (searchResp.statusCode != 200) continue;
+        if (searchResp.statusCode != 200) return;
         final searchData = json.decode(searchResp.body);
         final results = searchData['results'] as List;
-        if (results.isEmpty) continue;
+        if (results.isEmpty) return;
 
-        // Oyunculuk kontrolü
         var person = results.first;
          if (results.length > 1) {
            person = results.firstWhere(
@@ -418,8 +415,6 @@ class RecommendationEngine {
           final moviesData = json.decode(moviesResp.body);
           final cast = moviesData['cast'] as List;
           
-          // Çok figüran olduğu filmleri elemek için 'order' kontrolü yapılabilir ama
-          // şimdilik popülarite sıralaması yeterli
           cast.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
 
           for (final movie in cast.take(5)) {
@@ -434,18 +429,17 @@ class RecommendationEngine {
           }
         }
       } catch (_) {}
-    }
+    }));
   }
 
-  /// Benzer filmler
   Future<void> _getSimilarMovieRecommendations(
     UserTasteProfile profile,
     List<MovieRecommendation> recommendations,
   ) async {
     if (profile.lovedMovieTmdbIds.isEmpty) return;
 
-    // En son eklenen 5 sevilen filme bak
-    for (final tmdbId in profile.lovedMovieTmdbIds.reversed.take(5)) {
+    // Paralel çalıştır
+    await Future.wait(profile.lovedMovieTmdbIds.reversed.take(5).map((tmdbId) async {
       try {
         final uri = Uri.https(
           'api.themoviedb.org',
@@ -469,12 +463,12 @@ class RecommendationEngine {
             recommendations.add(_createRecommendation(
               movie,
               matchScore: score.clamp(0.0, 92.0),
-              matchReason: 'Zevkine uygun', // Daha genel başlık
+              matchReason: 'Zevkine uygun',
             ));
           }
         }
       } catch (_) {}
-    }
+    }));
   }
 
   MovieRecommendation _createRecommendation(
@@ -526,7 +520,6 @@ class RecommendationEngine {
     } catch (_) {}
   }
 
-  // _getGenreIdMap ve _genreIdToName aynı kalabilir...
   Future<Map<String, int>> _getGenreIdMap() async {
     return {
       'aksiyon': 28, 'macera': 12, 'animasyon': 16, 'komedi': 35, 'suç': 80,

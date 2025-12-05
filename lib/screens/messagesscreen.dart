@@ -5,6 +5,7 @@ import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
+import 'package:fluttergirdi/screens/clubs_tab.dart'; // Kulüpler sekmesi için import
 
 class MessagesPage extends StatelessWidget {
   const MessagesPage({super.key});
@@ -12,18 +13,51 @@ class MessagesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser!.uid;
-    final fs = FirebaseFirestore.instance;
 
+    return DefaultTabController(
+      length: 2, // İki sekme: Sohbetler ve Kulüpler
+      child: Scaffold(
+        appBar: AppBar(
+          toolbarHeight: 40,
+          title: const Text('Mesajlar'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Sohbetler'),
+              Tab(text: 'Kulüpler'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // 1. Sekme: Sohbetler (Eski kodunun refactor edilmiş hali)
+            _ChatsView(uid: uid),
+            
+            // 2. Sekme: Kulüpler (Yeni özellik)
+            const ClubsTab(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- ESKİ MESAJ EKRANI İÇERİĞİ (SOHBETLER SEKMESİ) ---
+class _ChatsView extends StatelessWidget {
+  final String uid;
+  const _ChatsView({required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    final fs = FirebaseFirestore.instance;
     return Scaffold(
-      appBar: AppBar(toolbarHeight: 40, title: const Text('Sohbetler')),
+      // FAB sadece Sohbetler sekmesinde görünsün diye buraya koyduk
       floatingActionButton: _TrashFab(currentUid: uid),
       body: Column(
         children: [
-          // 1. ADIM: Eşleşme mekaniğini buraya, listenin dışına ekliyoruz.
-          // Bu sayede liste scroll edilirken bu sorgu tekrar çalışmaz.
+          // Eşleşme Başlığı
           NewMatchHeader(currentUid: uid),
 
-          // 2. ADIM: Mevcut Sohbetler Listesi (Önceki kodun aynısı)
+          // Sohbet Listesi
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: fs
@@ -35,19 +69,16 @@ class MessagesPage extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
                 
-                // ... (Önceki cevaptaki sıralama ve filtreleme kodları burada olacak) ...
-                // Kodu kısaltmak için burayı özet geçiyorum, önceki cevaptaki StreamBuilder
-                // mantığını aynen kullanın.
-                
                 final docs = s.data?.docs.toList() ?? [];
-                // Sıralama...
+                
+                // Sıralama (En yeniden eskiye)
                 docs.sort((a, b) {
                     final tA = (a.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
                     final tB = (b.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
                     return tB.compareTo(tA);
                 });
                 
-                // Gizli olanları filtreleme...
+                // Gizli sohbetleri filtreleme
                 docs.removeWhere((doc) {
                     final vis = (doc.data()['visibleFor'] as Map?) ?? {};
                     return vis[uid] == false;
@@ -75,6 +106,9 @@ class MessagesPage extends StatelessWidget {
     );
   }
 }
+
+// --- AŞAĞIDAKİ SINIFLAR AYNEN KORUNDU ---
+
 class NewMatchHeader extends StatefulWidget {
   final String currentUid;
   const NewMatchHeader({super.key, required this.currentUid});
@@ -84,7 +118,6 @@ class NewMatchHeader extends StatefulWidget {
 }
 
 class _NewMatchHeaderState extends State<NewMatchHeader> {
-  // Sorgu sonucunu burada tutacağız
   Future<Map<String, dynamic>?>? _matchFuture;
 
   @override
@@ -93,12 +126,10 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
     _matchFuture = _findLatestMutualLike();
   }
 
-  // Orijinal karmaşık mantığınızın optimize edilmiş hali
   Future<Map<String, dynamic>?> _findLatestMutualLike() async {
     final fs = FirebaseFirestore.instance;
     final uid = widget.currentUid;
 
-    // 1. İki yönlü sorgu (Benim beğendiklerim / Beni beğenenler)
     final results = await Future.wait([
       fs.collection('likes').where('a', isEqualTo: uid).limit(50).get(),
       fs.collection('likes').where('b', isEqualTo: uid).limit(50).get(),
@@ -107,23 +138,19 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
     String? targetUid;
     DateTime? latestTime;
 
-    // Helper: Bir like dökümanını analiz et
     void checkDoc(Map<String, dynamic> data) {
       final aLiked = data['aLiked'] == true;
       final bLiked = data['bLiked'] == true;
       
-      // Karşılıklı beğeni yoksa geç
       if (!aLiked || !bLiked) return; 
 
       final a = (data['a'] ?? '').toString();
       final b = (data['b'] ?? '').toString();
       final other = (a == uid) ? b : a;
 
-      // Benim tarafımdan görülmüş mü?
       final meIsA = (a == uid);
       final seen = meIsA ? (data['aSeen'] == true) : (data['bSeen'] == true);
       
-      // Eğer görmediysem adaydır
       if (!seen) {
          final ts = (data['createdAt'] as Timestamp?)?.toDate();
          if (latestTime == null || (ts != null && ts.isAfter(latestTime!))) {
@@ -141,8 +168,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
 
     if (targetUid == null) return null;
 
-    // 2. KONTROL: Zaten bir sohbet var mı?
-    // Eğer konuşmaya başladılarsa promosyonu gösterme.
     final chatCheck = await fs
         .collection('chats')
         .where('participants', arrayContains: uid)
@@ -151,12 +176,10 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
     for (var doc in chatCheck.docs) {
       final parts = List.from(doc.data()['participants'] ?? []);
       if (parts.contains(targetUid)) {
-        // Zaten sohbet var, gösterme.
         return null; 
       }
     }
 
-    // 3. Kullanıcı bilgilerini çek
     final userDoc = await fs.collection('users').doc(targetUid).get();
     if (!userDoc.exists) return null;
     
@@ -175,7 +198,7 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
       future: _matchFuture,
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data == null) {
-          return const SizedBox.shrink(); // Eşleşme yoksa yer kaplama
+          return const SizedBox.shrink(); 
         }
 
         final data = snapshot.data!;
@@ -216,13 +239,11 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
             subtitle: const Text('Bu kişiyle birbirinizi beğendiniz!'),
             trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
             onTap: () async {
-              // Tıklayınca sohbeti başlat
                final chatId = await ChatService.instance
                  .getOrCreateChat(widget.currentUid, otherUid);
                
                if (!context.mounted) return;
                
-               // Oraya git
                Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -234,7 +255,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
                 ),
               );
               
-              // Widget'ı yenile (artık promo gözükmemeli çünkü sohbet oluştu)
               setState(() {
                 _matchFuture = _findLatestMutualLike();
               });
@@ -245,6 +265,7 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
     );
   }
 }
+
 class ChatListTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
   final String currentUid;
@@ -260,7 +281,6 @@ class ChatListTile extends StatelessWidget {
     final data = chatDoc.data();
     final parts = (data['participants'] as List<dynamic>?) ?? [];
     
-    // Diğer kullanıcının ID'sini bul
     final otherUid = parts.firstWhere(
       (id) => id != currentUid,
       orElse: () => null,
@@ -268,14 +288,11 @@ class ChatListTile extends StatelessWidget {
 
     if (otherUid == null) return const SizedBox.shrink();
 
-    // Veritabanındaki hazır verileri al (Stream beklemeden göstermek için)
     final lastMsg = (data['lastMessage'] ?? '').toString();
     final lastMsgTime = (data['lastMessageAt'] as Timestamp?)?.toDate();
     final titles = (data['titles'] as Map?) ?? {};
     final savedTitle = titles[currentUid] as String?;
 
-    // Kullanıcı verisini dinle (FutureBuilder YERİNE StreamBuilder)
-    // Bu sayede veri değişirse anlık yansır ve titreme yapmaz.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance.collection('users').doc(otherUid).snapshots(),
       builder: (context, userSnap) {
@@ -289,7 +306,6 @@ class ChatListTile extends StatelessWidget {
           final name = userData['displayName'] as String?;
           photoUrl = userData['photoURL'] as String?;
 
-          // İsim önceliği: Username > DisplayName > SavedTitle
           if (username != null && username.isNotEmpty) {
             displayName = username;
           } else if (name != null && name.isNotEmpty) {
@@ -299,7 +315,6 @@ class ChatListTile extends StatelessWidget {
 
         return ListTile(
           onTap: () {
-            // Tıklanınca detay sayfasına git
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -311,13 +326,11 @@ class ChatListTile extends StatelessWidget {
               ),
             );
             
-            // Okundu olarak işaretle (Fire-and-forget)
             ChatService.instance.markAsRead(chatDoc.id, currentUid);
           },
           onLongPress: () => _showHideDialog(context, chatDoc.id),
           leading: InkWell(
             onTap: () {
-               // Profil sayfasına git
                Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -389,6 +402,7 @@ class ChatListTile extends StatelessWidget {
     }
   }
 }
+
 class _UnreadCountBadge extends StatelessWidget {
   final String chatId;
   final String uid;
@@ -423,6 +437,7 @@ class _UnreadCountBadge extends StatelessWidget {
     );
   }
 } 
+
 class _TrashFab extends StatelessWidget {
   final String currentUid;
   const _TrashFab({required this.currentUid});
@@ -467,7 +482,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
   Future<List<_TrashItem>> _loadHiddenMessages() async {
     final uid = widget.currentUid;
 
-    // 1) Fetch chats where I am a participant
     final chatsQs = await _fs
         .collection('chats')
         .where('participants', arrayContains: uid)
@@ -475,7 +489,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
 
     final items = <_TrashItem>[];
 
-    // 2) For each chat, fetch messages marked hidden/deleted for me using separate queries
     for (final chatDoc in chatsQs.docs) {
       final chatId = chatDoc.id;
       final msgs = _fs.collection('chats').doc(chatId).collection('messages');
@@ -493,7 +506,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
 
       final results = await Future.wait(futures);
 
-      // 3) Merge unique docs by full path
       final seen = <String>{};
       for (final qs in results) {
         for (final d in qs.docs) {
@@ -520,7 +532,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
       }
     }
 
-    // 4) Sort newest first
     items.sort((a, b) => b.when.compareTo(a.when));
     return items;
   }
@@ -574,7 +585,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
                 ? (data['updatedAt'] as Timestamp).toDate()
                 : DateTime.fromMillisecondsSinceEpoch(0));
 
-      // Prefer cached display if present
       final titles = (data['titles'] as Map<String, dynamic>?) ?? const {};
       final photos = (data['photos'] as Map<String, dynamic>?) ?? const {};
       String title = (titles[uid] as String?)?.trim() ?? '';
@@ -592,7 +602,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
       );
     }
 
-    // Sort newest first
     items.sort((a, b) => b.lastAt.compareTo(a.lastAt));
     return items;
   }
@@ -729,7 +738,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
                               label: const Text('Geri al'),
                             ),
                             onTap: () async {
-                              // Open chat (it will remain hidden until user restores; offering quick restore then navigate)
                               try {
                                 final snap = await _fs
                                     .collection('chats')
@@ -764,7 +772,6 @@ class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
                             },
                           ),
                         ),
-                        const Divider(height: 1),
                       ],
 
                       Padding(
@@ -882,7 +889,7 @@ class _ForestFace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const base = Color(0xFF1B5E20); // forest green
+    const base = Color(0xFF1B5E20); 
     return SizedBox(
       width: 140,
       height: 140,
@@ -942,16 +949,15 @@ class _EmptyMessagesInteractive extends StatefulWidget {
 
 class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
   double _offsetX = 0;
-  double _offsetY = -10; // default: look slightly upward
+  double _offsetY = -10; 
 
   void _updateOffsets(Offset p, Size size) {
-    // Normalize position to [-1,1] range around the center of the available area
     final cx = size.width / 2;
     final cy = size.height / 2;
     double nx = ((p.dx - cx) / (cx.abs())).clamp(-1.0, 1.0);
     double ny = ((p.dy - cy) / (cy.abs())).clamp(-1.0, 1.0);
 
-    const max = 10.0; // max eye travel in our _ForestFace alignment mapping
+    const max = 10.0;
     setState(() {
       _offsetX = nx * max;
       _offsetY = ny * max;
@@ -961,7 +967,7 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
   void _resetUp() {
     setState(() {
       _offsetX = 0;
-      _offsetY = -10; // back to looking up in empty state
+      _offsetY = -10; 
     });
   }
 
