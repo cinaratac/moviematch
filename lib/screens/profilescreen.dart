@@ -487,7 +487,6 @@ class _ProfilePageState extends State<ProfilePage> {
           if (!snap.exists) return;
           final data = snap.data() ?? const {};
           _lastUserData = Map<String, dynamic>.from(data);
-          final lb = (data['letterboxdUsername'] ?? '').toString().trim();
           final appU =
               (data['username'] ?? data['handle'] ?? data['appUsername'] ?? '')
                   .toString()

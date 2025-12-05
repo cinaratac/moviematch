@@ -10,6 +10,7 @@ import '../services/chat_service.dart';
 import '../services/follow_system_service.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
+import '../widgets/comments_sheet.dart';
 
 class PostTile extends StatefulWidget {
   final String postId;
@@ -132,11 +133,11 @@ class _PostTileState extends State<PostTile> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      backgroundColor: Colors.transparent, // Sheet'in kendi decoration'ı var
+      builder: (context) => CommentsSheet(
+        postId: widget.postId,
+        postAuthorId: widget.authorId,
       ),
-      builder: (context) => _CommentsSheet(postId: widget.postId),
     );
   }
 
@@ -577,177 +578,3 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-// --- GÜNCELLENEN YORUM PENCERESİ (DÜZELTİLDİ: 'replies' koleksiyonu) ---
-class _CommentsSheet extends StatefulWidget {
-  final String postId;
-  const _CommentsSheet({required this.postId});
-
-  @override
-  State<_CommentsSheet> createState() => _CommentsSheetState();
-}
-
-class _CommentsSheetState extends State<_CommentsSheet> {
-  final TextEditingController _commentCtrl = TextEditingController();
-  bool _isSending = false;
-
-  Future<void> _sendComment() async {
-    final text = _commentCtrl.text.trim();
-    if (text.isEmpty) return;
-    if (TextFilterService.hasProfanity(text)) {
-    // Kullanıcıya uyarı göster ve işlemi durdur
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Mesajınız uygunsuz ifadeler içeriyor. Lütfen düzeltin.'),
-        backgroundColor: Colors.red,
-      ),
-    );
-    return; // Firebase'e göndermeden fonksiyondan çık
-  }
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    setState(() => _isSending = true);
-    try {
-      // DÜZELTME: Koleksiyon adı 'replies' olarak değiştirildi
-      await FirebaseFirestore.instance
-          .collection('posts')
-          .doc(widget.postId)
-          .collection('replies') // <-- replies olarak düzeltildi
-          .add({
-        'text': text,
-        'authorId': user.uid,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // ReplyCount artır
-      await FirebaseFirestore.instance.collection('posts').doc(widget.postId).update({
-        'replyCount': FieldValue.increment(1),
-      });
-
-      _commentCtrl.clear();
-      FocusScope.of(context).unfocus();
-    } catch (e) {
-      debugPrint("Yorum hatası: $e");
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.7,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Column(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('Yorumlar', style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                // DÜZELTME: Stream de 'replies' koleksiyonunu dinliyor
-                stream: FirebaseFirestore.instance
-                    .collection('posts')
-                    .doc(widget.postId)
-                    .collection('replies') // <-- replies olarak düzeltildi
-                    .orderBy('createdAt', descending: true)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final docs = snapshot.data?.docs ?? [];
-                  if (docs.isEmpty) {
-                    return const Center(child: Text("Henüz yorum yok. İlk yorumu sen yap!", style: TextStyle(color: Colors.grey)));
-                  }
-                  
-                  return ListView.builder(
-                    itemCount: docs.length,
-                    itemBuilder: (context, index) {
-                      final data = docs[index].data() as Map<String, dynamic>;
-                      return FutureBuilder<DocumentSnapshot>(
-                        future: FirebaseFirestore.instance.collection('users').doc(data['authorId']).get(),
-                        builder: (ctx, userSnap) {
-                          String name = "Kullanıcı";
-                          String? photo;
-                          if (userSnap.hasData && userSnap.data!.exists) {
-                            final userData = userSnap.data!.data() as Map<String, dynamic>;
-                            name = userData['displayName'] ?? userData['username'] ?? "Kullanıcı";
-                            photo = userData['photoURL'];
-                          }
-                          
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundImage: photo != null ? NetworkImage(photo) : null,
-                              child: photo == null ? const Icon(Icons.person) : null,
-                              radius: 16,
-                            ),
-                            title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                            subtitle: Text(data['text'] ?? '', style: const TextStyle(fontSize: 14)),
-                          );
-                        }
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _commentCtrl,
-                      decoration: InputDecoration(
-                        hintText: 'Yorum yaz...',
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
-                        ),
-                        filled: true,
-                        fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                      ),
-                      minLines: 1,
-                      maxLines: 3,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _isSending ? null : _sendComment,
-                    icon: _isSending 
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
-                      : Icon(Icons.send_rounded, color: Theme.of(context).colorScheme.primary),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
