@@ -54,3 +54,47 @@ exports.sendNotification = functions.firestore
     // FCM üzerinden gönder
     await admin.messaging().sendToDevice(tokens, payload);
   });
+  exports.sendChatNotification = functions.firestore
+  .document("chats/{chatId}/messages/{messageId}")
+  .onCreate(async (snapshot, context) => {
+    const messageData = snapshot.data();
+    const chatId = context.params.chatId;
+    const authorId = messageData.authorId;
+
+    // 1. Chat dokümanını çekip katılımcıları (participants) bulalım
+    const chatDoc = await admin.firestore().collection("chats").doc(chatId).get();
+    if (!chatDoc.exists) return;
+
+    const participants = chatDoc.data().participants || [];
+
+    // 2. Mesajı gönderen dışındaki diğer kişiyi bul (Alıcı)
+    const receiverId = participants.find((uid) => uid !== authorId);
+    if (!receiverId) return;
+
+    // 3. Alıcının FCM tokenlarını al
+    const tokensSnap = await admin.firestore()
+      .collection("users")
+      .doc(receiverId)
+      .collection("fcmTokens")
+      .get();
+
+    if (tokensSnap.empty) return;
+
+    const tokens = tokensSnap.docs.map((doc) => doc.id);
+
+    // 4. Bildirim içeriğini hazırla
+    const payload = {
+      notification: {
+        title: "Yeni Mesaj",
+        body: messageData.text || "Bir film gönderildi.", // Mesaj metni veya varsayılan
+      },
+      data: {
+        type: "chat",
+        chatId: chatId,
+        click_action: "FLUTTER_NOTIFICATION_CLICK"
+      },
+    };
+
+    // 5. Gönder
+    await admin.messaging().sendToDevice(tokens, payload);
+  });

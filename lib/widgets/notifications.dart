@@ -1,8 +1,9 @@
+import 'package:cached_network_image/cached_network_image.dart'; // EKLENDİ
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil yönlendirmesi için
+import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
 
 /// AppBar içinde kullan: NotificationsButton()
 class NotificationsButton extends StatelessWidget {
@@ -199,35 +200,37 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                         builder: (context, actorSnap) {
                           final actor = actorSnap.data;
                           return ListTile(
-                              onTap: () async {
-                                // 1. Okundu işaretle
-                                await docs[i].reference.update({'read': true});
-                                
-                                if (!context.mounted) return;
+                            onTap: () {
+                              final navigator = Navigator.of(context);
+                              
+                              // 1. Okundu işaretle (await etmeye gerek yok, UI takılmasın)
+                              docs[i].reference.update({'read': true});
+                              
+                              // 2. Bildirim tipine göre yönlendirme yap
+                              final postId = (m['postId'] ?? '').toString();
 
-                                // 2. Bildirim tipine göre yönlendirme yap
-                                final postId = (m['postId'] ?? '').toString();
-
-                                if (type == 'follow') {
-                                  // Takip bildirimiyse profile git
-                                  if (actorId.isNotEmpty) {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PublicProfileScreen(uid: actorId),
-                                      ),
-                                    );
-                                  }
-                                } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
-                                  // Like veya Yorum ise GÖNDERİYE git
-                                  Navigator.push(
-                                    context,
+                              if (type == 'follow') {
+                                // Takip bildirimiyse profile git
+                                if (actorId.isNotEmpty) {
+                                  // Önce bildirim penceresini kapat, sonra git
+                                  navigator.pop(); 
+                                  navigator.push(
                                     MaterialPageRoute(
-                                      builder: (_) => PostDetailScreen(postId: postId),
+                                      builder: (_) => PublicProfileScreen(uid: actorId),
                                     ),
                                   );
                                 }
-                              },
+                              } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
+                                // Like veya Yorum ise GÖNDERİYE git
+                                // Önce bildirim penceresini kapat, sonra git
+                                navigator.pop();
+                                navigator.push(
+                                  MaterialPageRoute(
+                                    builder: (_) => PostDetailScreen(postId: postId),
+                                  ),
+                                );
+                              }
+                            },
                             leading: _Avatar(url: actor?.photoURL),
                             title: Text(
                               actor?.displayName ?? title,
@@ -355,7 +358,22 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (url != null && url!.isNotEmpty) {
-      return CircleAvatar(radius: 20, backgroundImage: NetworkImage(url!));
+      return ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: url!,
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.person, color: Colors.grey),
+          ),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.person, color: Colors.grey),
+          ),
+        ),
+      );
     }
     return const CircleAvatar(radius: 20, child: Icon(Icons.person));
   }

@@ -291,7 +291,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         validator: (v) {
                           final value = (v ?? '').trim();
                           if (value.isEmpty) return 'Kullanıcı adı zorunlu';
-                          final re = RegExp(r'^[a-z0-9._-]{3,20}$');
+                          final re = RegExp(r'^[a-zA-Z0-9._-]{3,20}$');
                           if (!re.hasMatch(value)) {
                             return 'Sadece a-z, 0-9, . _ - ve 3-20 karakter olmalı';
                           }

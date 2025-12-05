@@ -1,25 +1,36 @@
-import 'dart:io'; // Dosya işlemleri için gerekli
+import 'dart:io'; 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart'; // Storage için gerekli
+import 'package:firebase_storage/firebase_storage.dart'; 
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/models/shelf_target.dart'; // ShelfTarget enum'ı için
 
 class MovieActionHelper {
-  /// Film seçenekleri menüsünü açar
+  /// Film seçenekleri menüsünü açar.
+  /// [docId], [target] ve [onItemDeleted] verilirse "Profilden Sil" seçeneği aktif olur.
   static void show(
     BuildContext context, {
     required String title,
     required String posterUrl,
+    String? docId,
+    ShelfTarget? target,
+    VoidCallback? onItemDeleted, // Silme işlemi sonrası tetiklenecek fonksiyon
   }) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      isScrollControlled: true, // İçeriğin boyutuna göre esnemesi için
-      useSafeArea: true, // Sistem barlarıyla çakışmayı önler (Çentik vs.)
-      builder: (ctx) => _MovieActionSheet(title: title, posterUrl: posterUrl),
+      isScrollControlled: true, 
+      useSafeArea: true, 
+      builder: (ctx) => _MovieActionSheet(
+        title: title, 
+        posterUrl: posterUrl,
+        docId: docId,
+        target: target,
+        onItemDeleted: onItemDeleted,
+      ),
     );
   }
 }
@@ -27,13 +38,90 @@ class MovieActionHelper {
 class _MovieActionSheet extends StatelessWidget {
   final String title;
   final String posterUrl;
+  final String? docId;
+  final ShelfTarget? target;
+  final VoidCallback? onItemDeleted;
 
-  const _MovieActionSheet({required this.title, required this.posterUrl});
+  const _MovieActionSheet({
+    required this.title, 
+    required this.posterUrl,
+    this.docId,
+    this.target,
+    this.onItemDeleted,
+  });
+
+  // Hangi hedefin hangi Firestore alanına denk geldiğini bulur
+  String? _getFieldForTarget(ShelfTarget t) {
+    switch (t) {
+      case ShelfTarget.fiveStar: return 'fiveStarKeys';
+      case ShelfTarget.disliked: return 'dislikedKeys';
+      case ShelfTarget.favorites: return 'favoritesKeys';
+      case ShelfTarget.watchlist: return 'watchlistKeys';
+    }
+  }
+
+  Future<void> _deleteFromProfile(BuildContext context) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || docId == null || target == null) return;
+
+    final field = _getFieldForTarget(target!);
+    if (field == null) return;
+
+    // 1. Menüyü hemen kapat
+    Navigator.pop(context); 
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final batch = db.batch();
+
+      // A) users/{uid} içindeki array'den sil
+      final userRef = db.collection('users').doc(uid);
+      batch.update(userRef, {
+        field: FieldValue.arrayRemove([docId])
+      });
+
+      // B) userTasteProfiles/{uid} içinden de silinmesi gerekiyorsa sil
+      if (target == ShelfTarget.fiveStar) {
+        final tasteRef = db.collection('userTasteProfiles').doc(uid);
+        batch.update(tasteRef, {
+          'fiveStars': FieldValue.arrayRemove([docId])
+        });
+      } else if (target == ShelfTarget.disliked) {
+        final tasteRef = db.collection('userTasteProfiles').doc(uid);
+        batch.update(tasteRef, {
+          'lowRatings': FieldValue.arrayRemove([docId])
+        });
+      }
+
+      await batch.commit();
+
+      // 2. İşlem başarılı, geri bildirimi tetikle
+      if (onItemDeleted != null) {
+        onItemDeleted!();
+      }
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$title profilinden silindi.'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Silme hatası: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Silinirken bir hata oluştu.')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // Alt kısımdaki sistem çubuğu (Home indicator) yüksekliğini al
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     
     return Container(
@@ -41,7 +129,6 @@ class _MovieActionSheet extends StatelessWidget {
         color: theme.scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      // Alt kısma güvenli alan + 20px ekstra boşluk ekliyoruz
       padding: EdgeInsets.fromLTRB(0, 20, 0, bottomPadding + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -73,25 +160,38 @@ class _MovieActionSheet extends StatelessWidget {
           ),
           const Divider(),
           
-          // Seçenek 1: Feed'de Paylaş
+          // Feed'de Paylaş
           ListTile(
             leading: const Icon(Icons.edit_note_outlined),
             title: const Text('Feed\'de Paylaş'),
             onTap: () {
-              Navigator.pop(context); // Menüyü kapat
+              Navigator.pop(context); 
               _shareOnFeed(context);
             },
           ),
           
-          // Seçenek 2: Mesaj Olarak Gönder
+          // Mesaj Olarak Gönder
           ListTile(
             leading: const Icon(Icons.send_rounded),
             title: const Text('Mesaj Olarak Gönder'),
             onTap: () {
-              Navigator.pop(context); // Menüyü kapat
+              Navigator.pop(context); 
               _showInboxPicker(context);
             },
           ),
+
+          // --- SİLME SEÇENEĞİ (Sadece ID ve Target varsa görünür) ---
+          if (docId != null && target != null) ...[
+            const Divider(),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+              title: Text(
+                'Profilden Sil',
+                style: TextStyle(color: theme.colorScheme.error, fontWeight: FontWeight.bold),
+              ),
+              onTap: () => _deleteFromProfile(context),
+            ),
+          ],
         ],
       ),
     );
@@ -103,12 +203,10 @@ class _MovieActionSheet extends StatelessWidget {
         builder: (_) => ComposePostPage(
           maxChars: 280,
           initialMovie: {'title': title, 'poster': posterUrl}, 
-          // GÜNCELLENEN KISIM: onSend artık imageFile parametresi de alıyor
           onSend: (text, movie, imageFile) async {
              final user = FirebaseAuth.instance.currentUser;
              if (user == null) return;
 
-             // 1. Resim Yükleme (Eğer seçildiyse)
              String? postImageUrl;
              if (imageFile != null) {
                try {
@@ -125,7 +223,6 @@ class _MovieActionSheet extends StatelessWidget {
                }
              }
 
-             // 2. Firestore'a Kaydetme
              final doc = FirebaseFirestore.instance.collection('posts').doc();
              final now = FieldValue.serverTimestamp();
              
@@ -137,7 +234,6 @@ class _MovieActionSheet extends StatelessWidget {
                'photoURL': user.photoURL ?? '',
                'text': text.trim(),
                'movie': movie,
-               // Eğer resim yüklendiyse URL'i kaydet
                if (postImageUrl != null) 'postImage': postImageUrl,
                'likeCount': 0,
                'replyCount': 0,
@@ -147,7 +243,7 @@ class _MovieActionSheet extends StatelessWidget {
              });
              
              if (context.mounted) {
-               Navigator.pop(context); // Compose sayfasını kapat
+               Navigator.pop(context); 
                ScaffoldMessenger.of(context).showSnackBar(
                  const SnackBar(content: Text('Gönderildi!')),
                );
@@ -162,8 +258,12 @@ class _MovieActionSheet extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      useSafeArea: true, // Tam ekran modunda güvenli alanı korur
-      builder: (ctx) => _InboxPickerSheet(movieTitle: title, moviePoster: posterUrl),
+      useSafeArea: true, 
+      builder: (ctx) => _InboxPickerSheet(
+        movieTitle: title, 
+        moviePoster: posterUrl,
+        docId: docId, // <-- BU SATIRI EKLE (Eksikti)
+      ),
     );
   }
 }
@@ -171,13 +271,13 @@ class _MovieActionSheet extends StatelessWidget {
 class _InboxPickerSheet extends StatelessWidget {
   final String movieTitle;
   final String moviePoster;
+  final String? docId;
 
-  const _InboxPickerSheet({required this.movieTitle, required this.moviePoster});
+  const _InboxPickerSheet({required this.movieTitle, required this.moviePoster, this.docId,});
 
   @override
   Widget build(BuildContext context) {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
-    // Listenin en altına da boşluk bırakalım
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     if (myUid == null) return const SizedBox.shrink();
@@ -216,7 +316,6 @@ class _InboxPickerSheet extends StatelessWidget {
           }
 
           return ListView.builder(
-            // Listenin altına padding ekliyoruz ki son eleman home bar'ın altında kalmasın
             padding: EdgeInsets.only(bottom: bottomPadding + 20),
             itemCount: docs.length,
             itemBuilder: (context, index) {
@@ -280,11 +379,12 @@ class _InboxPickerSheet extends StatelessWidget {
     if (myUid == null) return;
 
     try {
-      final text = "🎬 Film önerisi: $movieTitle";
+      final text = "";
       
       final movieData = {
         'title': movieTitle,
         'poster': moviePoster,
+        if (docId != null) 'id': docId,
       };
       
       await ChatService.instance.send(
@@ -296,7 +396,7 @@ class _InboxPickerSheet extends StatelessWidget {
       );
 
       if (context.mounted) {
-        Navigator.pop(context); // Pencereyi kapat
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('$otherName kişisine gönderildi.')),
         );

@@ -372,7 +372,12 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                       }
 
                       if (mounted) {
-                        Navigator.of(context).pop();
+                        Navigator.of(context).pop(); // Alttan açılan detay penceresini kapatır
+                        
+                        // --- DÜZELTME BURADA: İKİNCİ POP EKLENDİ ---
+                        Navigator.of(context).pop(true); // Arama sayfasını kapatır ve 'true' döner
+                        // ------------------------------------------
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text('$title başarıyla eklendi'),
