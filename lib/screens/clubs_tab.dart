@@ -1,17 +1,38 @@
-import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart'; // Resim seçici
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/services/club_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:io';
 
-class ClubsTab extends StatelessWidget {
-  const ClubsTab({super.key});
+// --- 1. DRAWER'DAN AÇILAN HAVALI EKRAN ---
+class ClubsScreen extends StatelessWidget {
+  const ClubsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Kulüpler', style: TextStyle(fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+      ),
+      body: const ClubsTab(isStandalone: true), // Bağımsız mod
+    );
+  }
+}
+
+// --- 2. TAB İÇERİĞİ (HEM MESAJLARDA HEM BURADA KULLANILIR) ---
+class ClubsTab extends StatelessWidget {
+  final bool isStandalone;
+  const ClubsTab({super.key, this.isStandalone = false});
+
+  @override
+  Widget build(BuildContext context) {
+    // Scaffold yerine doğrudan içerik döndürüyoruz (Parent yönetiyor)
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       body: StreamBuilder<QuerySnapshot>(
@@ -27,9 +48,11 @@ class ClubsTab extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.groups_3_outlined, size: 64, color: Colors.grey.shade400),
+                  Icon(Icons.groups_3_outlined, size: 80, color: Colors.grey.shade300),
                   const SizedBox(height: 16),
-                  const Text("Henüz bir kulüp yok. İlkini sen kur!", style: TextStyle(color: Colors.grey)),
+                  const Text("Henüz bir kulüp yok.\nİlkini sen kur!", 
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey, fontSize: 16)),
                 ],
               ),
             );
@@ -38,7 +61,7 @@ class ClubsTab extends StatelessWidget {
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
             itemBuilder: (context, index) {
               final data = docs[index].data() as Map<String, dynamic>;
               return _ClubCard(data: data);
@@ -46,10 +69,11 @@ class ClubsTab extends StatelessWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'create_club',
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'create_club_fab',
         onPressed: () => _showCreateClubSheet(context),
-        child: const Icon(Icons.add),
+        icon: const Icon(Icons.add),
+        label: const Text("Kulüp Kur"),
       ),
     );
   }
@@ -78,13 +102,18 @@ class _ClubCard extends StatelessWidget {
     final isMember = members.contains(myUid);
     final isPending = pending.contains(myUid);
     final isOwner = ownerId == myUid;
-    final imageUrl = data['imageUrl'] as String?; // Resim URL'i
+    final imageUrl = data['imageUrl'] as String?;
 
     final theme = Theme.of(context);
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
@@ -94,7 +123,7 @@ class _ClubCard extends StatelessWidget {
               MaterialPageRoute(
                 builder: (_) => ChatRoomScreen(
                   chatId: data['id'],
-                  otherUid: '', 
+                  otherUid: '',
                   isGroup: true,
                   groupName: data['name'],
                 ),
@@ -107,94 +136,89 @@ class _ClubCard extends StatelessWidget {
           }
         },
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- KULÜP RESMİ ALANI ---
-            Container(
-              height: 120,
+            // --- RESİM ---
+            SizedBox(
+              height: 140,
               width: double.infinity,
-              decoration: BoxDecoration(
-                // Resim varsa göster, yoksa gradient
-                image: (imageUrl != null && imageUrl.isNotEmpty) 
-                    ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
-                    : null,
-                gradient: (imageUrl == null || imageUrl.isEmpty)
-                    ? LinearGradient(
-                        colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (imageUrl != null && imageUrl.isNotEmpty)
+                    Image.network(imageUrl, fit: BoxFit.cover)
+                  else
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [theme.colorScheme.primaryContainer, theme.colorScheme.secondaryContainer],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: Center(child: Icon(Icons.groups, size: 50, color: theme.colorScheme.onPrimaryContainer.withOpacity(0.5))),
+                    ),
+                  if (isPrivate)
+                    Positioned(
+                      top: 12, right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(8)),
+                        child: const Row(
+                          children: [Icon(Icons.lock, color: Colors.white, size: 12), SizedBox(width: 4), Text("Gizli", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))],
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              child: (imageUrl == null || imageUrl.isEmpty)
-                  ? Center(child: Icon(Icons.groups, size: 48, color: Colors.white.withOpacity(0.8)))
-                  : null,
             ),
-            
+
+            // --- BİLGİLER ---
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          data['name'] ?? 'İsimsiz Kulüp',
-                          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (isPrivate)
-                        const Icon(Icons.lock_outline, size: 16, color: Colors.grey),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
                   Text(
-                    data['description'] ?? 'Açıklama yok.',
-                    style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    data['name'] ?? 'İsimsiz',
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 12),
+                  if (data['description'] != null && data['description'].toString().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      data['description'],
+                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      maxLines: 2, overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
                   Row(
                     children: [
-                      Icon(Icons.person, size: 14, color: theme.colorScheme.primary),
-                      const SizedBox(width: 4),
-                      Text('${members.length} Üye', style: theme.textTheme.labelMedium),
+                      _AvatarPile(count: members.length),
+                      const SizedBox(width: 8),
+                      Text('${members.length} Üye', style: const TextStyle(fontWeight: FontWeight.bold)),
                       const Spacer(),
-                      
                       if (isMember)
-                        Chip(label: const Text('Gir'), backgroundColor: theme.colorScheme.primaryContainer, visualDensity: VisualDensity.compact)
+                        FilledButton.tonal(onPressed: null, child: const Text("Üyesin"))
                       else if (isPending)
-                        const Chip(label: Text('Bekleniyor...'), visualDensity: VisualDensity.compact)
+                        OutlinedButton(onPressed: null, child: const Text("Bekleniyor"))
                       else
-                        FilledButton.tonal(
+                        FilledButton(
                           onPressed: () => _showJoinDialog(context, data['id'], data['name'], isPrivate),
-                          child: Text(isPrivate ? 'İstek Gönder' : 'Katıl'),
+                          child: Text(isPrivate ? "İstek At" : "Katıl"),
                         ),
                     ],
                   ),
                   if (isOwner && pending.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
+                      padding: const EdgeInsets.only(top: 12),
                       child: InkWell(
                         onTap: () => _showRequestsDialog(context, data['id'], pending),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade100,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.notifications_active, size: 16, color: Colors.deepOrange),
-                              const SizedBox(width: 6),
-                              Text('${pending.length} kişi katılmak istiyor', style: const TextStyle(color: Colors.deepOrange, fontWeight: FontWeight.bold, fontSize: 12)),
-                            ],
-                          ),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.orange.withOpacity(0.3))),
+                          child: Row(children: [const Icon(Icons.info_outline, size: 16, color: Colors.orange), const SizedBox(width: 8), Text("${pending.length} onay bekleyen üye", style: const TextStyle(color: Colors.deepOrange, fontWeight: FontWeight.bold))]),
                         ),
                       ),
                     ),
@@ -211,19 +235,17 @@ class _ClubCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isPrivate ? 'İstek Gönder' : 'Kulübe Katıl'),
-        content: Text(isPrivate 
-          ? '$name kulübü gizli bir kulüp. Katılmak için yöneticinin onayı gerekiyor.' 
-          : '$name kulübüne katılmak üzeresin.'),
+        title: Text(isPrivate ? 'İstek Gönder' : 'Katıl'),
+        content: Text('"$name" kulübüne katılmak istiyor musun?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('İptal')),
           FilledButton(
             onPressed: () {
               ClubService.instance.joinClub(clubId, isPrivate);
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İşlem yapıldı.')));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İşlem başarılı.')));
             },
-            child: Text(isPrivate ? 'Gönder' : 'Katıl'),
+            child: const Text('Evet'),
           ),
         ],
       ),
@@ -238,28 +260,18 @@ class _ClubCard extends StatelessWidget {
         children: [
           const Text('Katılım İstekleri', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           const Divider(),
-          if (pendingUids.isEmpty) const Text("Bekleyen istek yok."),
           ...pendingUids.map((uid) => FutureBuilder<DocumentSnapshot>(
             future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
             builder: (context, snap) {
-              if (!snap.hasData) return const LinearProgressIndicator();
-              final userData = snap.data!.data() as Map<String, dynamic>;
+              if (!snap.hasData) return const SizedBox.shrink();
+              final d = snap.data!.data() as Map<String, dynamic>;
               return ListTile(
-                leading: CircleAvatar(backgroundImage: NetworkImage(userData['photoURL'] ?? '')),
-                title: Text(userData['displayName'] ?? 'Kullanıcı'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.check, color: Colors.green),
-                      onPressed: () => ClubService.instance.approveMember(clubId, uid),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.red),
-                      onPressed: () => ClubService.instance.rejectMember(clubId, uid),
-                    ),
-                  ],
-                ),
+                leading: CircleAvatar(backgroundImage: NetworkImage(d['photoURL'] ?? '')),
+                title: Text(d['displayName'] ?? 'Kullanıcı'),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(icon: const Icon(Icons.check, color: Colors.green), onPressed: () => ClubService.instance.approveMember(clubId, uid)),
+                  IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => ClubService.instance.rejectMember(clubId, uid)),
+                ]),
               );
             },
           )),
@@ -269,10 +281,27 @@ class _ClubCard extends StatelessWidget {
   }
 }
 
-// --- KULÜP OLUŞTURMA SAYFASI (GÜNCELLENMİŞ) ---
+class _AvatarPile extends StatelessWidget {
+  final int count;
+  const _AvatarPile({required this.count});
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 50, height: 24,
+      child: Stack(
+        children: [
+          const Positioned(left: 0, child: CircleAvatar(radius: 12, backgroundColor: Colors.grey, child: Icon(Icons.person, size: 12, color: Colors.white))),
+          if (count > 1) const Positioned(left: 15, child: CircleAvatar(radius: 12, backgroundColor: Colors.grey, child: Icon(Icons.person, size: 12, color: Colors.white))),
+          if (count > 2) const Positioned(left: 30, child: CircleAvatar(radius: 12, backgroundColor: Colors.grey, child: Icon(Icons.person, size: 12, color: Colors.white))),
+        ],
+      ),
+    );
+  }
+}
+
+// ... (_CreateClubSheet aynı kalabilir, sadece yukarıya ekledik)
 class _CreateClubSheet extends StatefulWidget {
   const _CreateClubSheet();
-
   @override
   State<_CreateClubSheet> createState() => _CreateClubSheetState();
 }
@@ -282,102 +311,45 @@ class _CreateClubSheetState extends State<_CreateClubSheet> {
   final _descCtrl = TextEditingController();
   bool _isPrivate = false;
   bool _isLoading = false;
-  
-  // Resim Seçimi İçin
   File? _imageFile;
   final ImagePicker _picker = ImagePicker();
 
   Future<void> _pickImage() async {
     final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      setState(() {
-        _imageFile = File(picked.path);
-      });
-    }
+    if (picked != null) setState(() => _imageFile = File(picked.path));
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         padding: const EdgeInsets.all(24),
-        child: SingleChildScrollView( // Klavye açılınca taşmasın diye
+        child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Yeni Kulüp Oluştur', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const Text('Yeni Kulüp', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 20),
-              
-              // RESİM SEÇME ALANI
-              Center(
-                child: GestureDetector(
-                  onTap: _pickImage,
-                  child: Container(
-                    height: 120,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.withOpacity(0.3)),
-                      image: _imageFile != null 
-                          ? DecorationImage(image: FileImage(_imageFile!), fit: BoxFit.cover)
-                          : null,
-                    ),
-                    child: _imageFile == null 
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.add_a_photo, size: 32, color: theme.colorScheme.primary),
-                              const SizedBox(height: 8),
-                              const Text("Kulüp Resmi Ekle"),
-                            ],
-                          )
-                        : null,
+              GestureDetector(
+                onTap: _pickImage,
+                child: Container(
+                  height: 100, width: 100,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(12),
+                    image: _imageFile != null ? DecorationImage(image: FileImage(_imageFile!), fit: BoxFit.cover) : null,
                   ),
+                  child: _imageFile == null ? const Icon(Icons.add_a_photo, size: 30, color: Colors.grey) : null,
                 ),
               ),
-              
               const SizedBox(height: 20),
-              TextField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Kulüp İsmi (Zorunlu)',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.groups),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _descCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Açıklama (İsteğe bağlı)',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.description),
-                ),
-                maxLines: 3,
-              ),
-              const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('Gizli Kulüp'),
-                subtitle: const Text('Üyeler sadece onay ile katılabilir.'),
-                value: _isPrivate,
-                onChanged: (v) => setState(() => _isPrivate = v),
-                contentPadding: EdgeInsets.zero,
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton(
-                  onPressed: _isLoading ? null : _create,
-                  child: _isLoading 
-                    ? const CircularProgressIndicator() 
-                    : const Text('Oluştur'),
-                ),
-              ),
+              TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Kulüp İsmi', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Açıklama', border: OutlineInputBorder()), maxLines: 2),
+              SwitchListTile(title: const Text('Gizli Kulüp'), value: _isPrivate, onChanged: (v) => setState(() => _isPrivate = v)),
+              const SizedBox(height: 20),
+              SizedBox(width: double.infinity, child: FilledButton(onPressed: _isLoading ? null : _create, child: _isLoading ? const CircularProgressIndicator() : const Text('Oluştur'))),
             ],
           ),
         ),
@@ -386,34 +358,19 @@ class _CreateClubSheetState extends State<_CreateClubSheet> {
   }
 
   Future<void> _create() async {
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty) return;
-
+    if (_nameCtrl.text.isEmpty) return;
     setState(() => _isLoading = true);
-    
     try {
-      String? imageUrl;
-
-      // 1. Resmi Storage'a Yükle (Eğer seçildiyse)
+      String? url;
       if (_imageFile != null) {
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final ref = FirebaseStorage.instance.ref().child('club_images/$fileName');
+        final ref = FirebaseStorage.instance.ref().child('club_images/${DateTime.now().millisecondsSinceEpoch}.jpg');
         await ref.putFile(_imageFile!);
-        imageUrl = await ref.getDownloadURL();
+        url = await ref.getDownloadURL();
       }
-
-      // 2. Kulübü Oluştur (URL ile)
-      await ClubService.instance.createClub(
-        name: name,
-        description: _descCtrl.text.trim(),
-        isPrivate: _isPrivate,
-        imageUrl: imageUrl, // URL'i servise gönder
-      );
-      
+      await ClubService.instance.createClub(name: _nameCtrl.text.trim(), description: _descCtrl.text.trim(), isPrivate: _isPrivate, imageUrl: url);
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      debugPrint('Kulüp oluşturma hatası: $e');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Hata: $e")));
+      debugPrint(e.toString());
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }

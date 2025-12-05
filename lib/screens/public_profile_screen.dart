@@ -11,14 +11,15 @@ import 'dart:ui' as ui;
 import 'package:fluttergirdi/services/match_service.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 
-// --- YENİ İMPORTLAR ---
+// --- İMPORTLAR ---
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
-// Eksik importlar:
-import 'package:fluttergirdi/models/shelf_target.dart'; 
+import 'package:fluttergirdi/widgets/movie_action_helper.dart';
+import 'package:fluttergirdi/models/shelf_target.dart';
+import 'package:fluttergirdi/models/gamification.dart'; // Rozetler için
 
-// Aktivite Verisi Modeli (Eksik olan sınıf)
+// Aktivite Verisi Modeli
 class _ActivityItemData {
   final String id; 
   final String text;
@@ -28,7 +29,7 @@ class _ActivityItemData {
   final int likeCount;
   final int replyCount;
   final int repostCount;
-  final int? tmdbId; // Poster için gerekli
+  final int? tmdbId; 
 
   const _ActivityItemData({
     required this.id,
@@ -79,11 +80,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     if (imageUrl.isEmpty) return;
     showDialog(
       context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.9),
+      barrierDismissible: true, 
+      barrierColor: Colors.black.withOpacity(0.9), 
       builder: (ctx) {
         return GestureDetector(
-          onTap: () => Navigator.pop(ctx),
+          onTap: () => Navigator.pop(ctx), 
           child: InteractiveViewer(
             child: Center(
               child: Image.network(
@@ -94,6 +95,17 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           ),
         );
       },
+    );
+  }
+
+  // --- TAKİP LİSTESİ GÖSTERME ---
+  void _showUserList(String title, String collection) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      builder: (_) => _UserListSheet(title: title, uid: widget.uid, collection: collection),
     );
   }
 
@@ -421,7 +433,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 3, // 3 SEKME
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: Colors.transparent,
@@ -497,6 +509,44 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                         Text(titleText, style: Theme.of(context).textTheme.titleLarge, overflow: TextOverflow.ellipsis),
                                         if (displayName.isNotEmpty && titleText != displayName)
                                           Text(displayName, style: Theme.of(context).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+                                        
+                                        // --- YENİ: ROZET ALANI ---
+                                        StreamBuilder<DocumentSnapshot>(
+                                          stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
+                                          builder: (context, snap) {
+                                            if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
+                                            final uData = snap.data!.data() as Map<String, dynamic>?;
+                                            final badges = List<String>.from(uData?['badges'] ?? []);
+                                            if (badges.isEmpty) return const SizedBox.shrink();
+
+                                            return Padding(
+                                              padding: const EdgeInsets.only(top: 4.0),
+                                              child: Wrap(
+                                                spacing: 6,
+                                                runSpacing: 4,
+                                                children: badges.map((badgeId) {
+                                                  final badge = AppBadge.allBadges.firstWhere(
+                                                    (b) => b.id == badgeId, 
+                                                    orElse: () => AppBadge.allBadges.first
+                                                  );
+                                                  return Tooltip(
+                                                    message: '${badge.name}: ${badge.description}',
+                                                    triggerMode: TooltipTriggerMode.tap,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.all(4),
+                                                      decoration: BoxDecoration(
+                                                        color: badge.color.withOpacity(0.15),
+                                                        shape: BoxShape.circle,
+                                                        border: Border.all(color: badge.color.withOpacity(0.6), width: 1),
+                                                      ),
+                                                      child: Icon(badge.icon, size: 12, color: badge.color),
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            );
+                                          },
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -516,9 +566,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                 ),
                               Row(
                                 children: [
-                                  _StatContainer(icon: Icons.groups, label: 'Takipçi', count: _followersCount ?? 0),
+                                  _StatContainer(
+                                    icon: Icons.groups, 
+                                    label: 'Takipçi', 
+                                    count: _followersCount ?? 0,
+                                    onTap: () => _showUserList('Takipçiler', 'followers'),
+                                  ),
                                   const SizedBox(width: 8),
-                                  _StatContainer(icon: Icons.person_add_alt, label: 'Takip', count: _followingCount ?? 0),
+                                  _StatContainer(
+                                    icon: Icons.person_add_alt, 
+                                    label: 'Takip', 
+                                    count: _followingCount ?? 0,
+                                    onTap: () => _showUserList('Takip Edilenler', 'following'),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 17),
@@ -660,7 +720,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 }
 
-// --- 2. SEKME: AKTİVİTELER (LAZY LOADING) ---
+// --- 2. SEKME: AKTİVİTELER ---
 class _ActivitiesTab extends StatefulWidget {
   final String uid;
   const _ActivitiesTab({required this.uid});
@@ -697,7 +757,6 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
         final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
         final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
         
-        // TMDB ID çekiliyor (Poster için kritik)
         final tmdbId = (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
 
         items.add(_ActivityItemData(
@@ -708,7 +767,6 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
           title: title,
           likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
           replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-          repostCount: ((m['repostCount'] ?? 0) as num).toInt(),
           tmdbId: (tmdbId is int) ? tmdbId : null,
         ));
       }
@@ -800,7 +858,7 @@ class _ActivityWidget extends StatelessWidget {
                 child: PosterImage(
                   posterUrl: item.posterUrl, 
                   title: item.title,
-                  tmdbId: item.tmdbId,
+                  tmdbId: item.tmdbId, 
                   width: 44, 
                   height: 66, 
                   fit: BoxFit.cover
@@ -824,7 +882,7 @@ class _ActivityWidget extends StatelessWidget {
                       const SizedBox(width: 12), 
                       const Icon(Icons.repeat, size: 16),
                       const Spacer(),
-                      if (timeLabel.isNotEmpty) Text('Paylaştı  $timeLabel', style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                      if (timeLabel.isNotEmpty) Text('Paylaştı  $timeLabel', style: Theme.of(context).textTheme.labelSmall),
                     ]),
                   ),
                 ],
@@ -837,7 +895,7 @@ class _ActivityWidget extends StatelessWidget {
   }
 }
 
-// --- 3. SEKME: LAZY LOADING LISTS TAB ---
+// --- 3. SEKME: LİSTELER ---
 class _PublicListsTab extends StatefulWidget {
   final String uid;
   const _PublicListsTab({required this.uid});
@@ -855,8 +913,8 @@ class _PublicListsTabState extends State<_PublicListsTab> with AutomaticKeepAliv
     super.build(context);
     return RefreshIndicator(
       onRefresh: () async {
-         await Future.delayed(const Duration(milliseconds: 500));
-         setState(() {});
+        await Future.delayed(const Duration(milliseconds: 500));
+        setState((){});
       },
       child: StreamBuilder<List<CustomList>>(
         stream: CustomListService.instance.getUserLists(widget.uid),
@@ -935,31 +993,35 @@ class _CustomListCard extends StatelessWidget {
   }
 }
 
-// --- YARDIMCI WIDGETLAR ---
-
 class _StatContainer extends StatelessWidget {
   final IconData icon;
   final String label;
   final int count;
-  const _StatContainer({required this.icon, required this.label, required this.count});
+  final VoidCallback? onTap; // Tıklanabilir yapıldı
+
+  const _StatContainer({required this.icon, required this.label, required this.count, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant, width: 0.6),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 6),
-          Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(width: 6),
-          Text(count.toString(), style: Theme.of(context).textTheme.bodySmall),
-        ],
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant, width: 0.6),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 6),
+            Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(width: 6),
+            Text(count.toString(), style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
       ),
     );
   }
@@ -1042,6 +1104,78 @@ class _WatchlistSection extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// --- KULLANICI LİSTESİ PENCERESİ (YENİ) ---
+class _UserListSheet extends StatelessWidget {
+  final String title;
+  final String uid;
+  final String collection; // 'followers' or 'following'
+
+  const _UserListSheet({required this.title, required this.uid, required this.collection});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid)
+                  .collection(collection)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return const Center(child: Text('Liste boş.'));
+                }
+                return ListView.separated(
+                  itemCount: docs.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final docId = docs[index].id; // docId = user UID
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance.collection('users').doc(docId).get(),
+                      builder: (context, userSnap) {
+                        if (!userSnap.hasData) return const ListTile(title: Text('Yükleniyor...'));
+                        final data = userSnap.data!.data() as Map<String, dynamic>?;
+                        final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
+                        final photo = data?['photoURL'];
+                        
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundImage: (photo != null) ? NetworkImage(photo) : null,
+                            child: photo == null ? const Icon(Icons.person) : null,
+                          ),
+                          title: Text(name),
+                          onTap: () {
+                            Navigator.push(
+                              context, 
+                              MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: docId))
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

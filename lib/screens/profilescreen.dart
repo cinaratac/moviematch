@@ -12,19 +12,21 @@ import 'package:fluttergirdi/screens/edit_profile_page.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/search_movie.dart';
-import 'package:fluttergirdi/models/shelf_target.dart';
+import 'package:fluttergirdi/models/shelf_target.dart'; // ShelfTarget için
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil yönlendirmesi için
 
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 
-// YENİ İMPORT: Oyunlaştırma servisi
+import 'package:fluttergirdi/models/gamification.dart';
 import 'package:fluttergirdi/services/gamification_service.dart';
 
-// --- In-memory shelf cache ---
+// --- MODEL SINIFLARI ---
+
 class UserShelfCache {
   static List<Map<String, String>> favorites = const [];
   static List<Map<String, String>> fiveStar = const [];
@@ -48,6 +50,7 @@ class UserShelfCache {
   }
 }
 
+// Aktivite verisi için model
 class _ActivityItemData {
   final String id; 
   final String text;
@@ -70,10 +73,14 @@ class _ActivityItemData {
   });
 }
 
+// --- WIDGETLAR ---
+
 class _CountPill extends StatelessWidget {
   final String label;
   final int value;
-  const _CountPill({required this.label, required this.value});
+  final VoidCallback? onTap;
+
+  const _CountPill({required this.label, required this.value, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -81,14 +88,18 @@ class _CountPill extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: Colors.white,
     );
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white24, width: 1),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white24, width: 1),
+        ),
+        child: Text('$label: $value', style: textStyle),
       ),
-      child: Text('$label: $value', style: textStyle),
     );
   }
 }
@@ -117,6 +128,16 @@ Widget _profileHeaderSection({
           ),
         );
       },
+    );
+  }
+
+  void showUserList(String title, String collection) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      builder: (_) => _UserListSheet(title: title, uid: user.uid, collection: collection),
     );
   }
 
@@ -153,6 +174,45 @@ Widget _profileHeaderSection({
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
+              
+              // --- ROZET ALANI ---
+              StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+                builder: (context, snap) {
+                  if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
+                  final userData = snap.data!.data() as Map<String, dynamic>?;
+                  final badges = List<String>.from(userData?['badges'] ?? []);
+                  if (badges.isEmpty) return const SizedBox.shrink();
+
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: badges.map((badgeId) {
+                        final badge = AppBadge.allBadges.firstWhere(
+                          (b) => b.id == badgeId, 
+                          orElse: () => AppBadge.allBadges.first
+                        );
+                        return Tooltip(
+                          message: '${badge.name}: ${badge.description}',
+                          triggerMode: TooltipTriggerMode.tap,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: badge.color.withOpacity(0.15),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: badge.color.withOpacity(0.6), width: 1),
+                            ),
+                            child: Icon(badge.icon, size: 12, color: badge.color),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  );
+                },
+              ),
+              
               const SizedBox(height: 6),
               (followers == null || following == null)
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
@@ -160,8 +220,16 @@ Widget _profileHeaderSection({
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        _CountPill(label: 'Takipçi', value: followers),
-                        _CountPill(label: 'Takip', value: following),
+                        _CountPill(
+                          label: 'Takipçi', 
+                          value: followers,
+                          onTap: () => showUserList('Takipçiler', 'followers'),
+                        ),
+                        _CountPill(
+                          label: 'Takip', 
+                          value: following,
+                          onTap: () => showUserList('Takip Edilenler', 'following'),
+                        ),
                       ],
                     ),
               const SizedBox(height: 5),
@@ -201,8 +269,8 @@ class _ProfilePageState extends State<ProfilePage> {
   final Set<String> _catalogUpsertedKeys = <String>{};
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
 
-  int? _followers;
-  int? _following;
+  int? _followersCount; // Değişken ismi düzeltildi
+  int? _followingCount; // Değişken ismi düzeltildi
   StreamSubscription<FollowEvent>? _followSub;
   bool _initialSyncTriggered = false;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
@@ -224,24 +292,36 @@ class _ProfilePageState extends State<ProfilePage> {
       final f2 = await svc.fetchFollowingCountOnce(uid);
       if (mounted) {
         setState(() {
-          _followers = f1;
-          _following = f2;
+          _followersCount = f1;
+          _followingCount = f2;
         });
       }
+      
+      // Liderlik tablosu güncelleme
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+         'followersCount': f1,
+         'followingCount': f2,
+         'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Rozet Kontrolü
+      await GamificationService.instance.checkAndAwardBadges();
+
     } catch (_) {}
 
     _followSub?.cancel();
     _followSub = svc.events.listen((e) {
       if (!mounted) return;
       if (e.targetUid == uid) {
-        setState(() => _followers = (_followers ?? 0) + (e.followed ? 1 : -1));
+        setState(() => _followersCount = (_followersCount ?? 0) + (e.followed ? 1 : -1));
       }
       if (e.actorUid == uid) {
-        setState(() => _following = (_following ?? 0) + (e.followed ? 1 : -1));
+        setState(() => _followingCount = (_followingCount ?? 0) + (e.followed ? 1 : -1));
       }
     });
   }
 
+  // ... (Mevcut fonksiyonlar aynı kalacak)
   Future<void> _primeShelfCache() async {
     try {
       if (_futureFavs != null) {
@@ -287,7 +367,6 @@ class _ProfilePageState extends State<ProfilePage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     final lb = (_lbUsername ?? '').trim();
     if (uid == null || lb.isEmpty) return;
-
     try {
       final db = FirebaseFirestore.instance;
       Map<String, dynamic>? userData;
@@ -301,10 +380,8 @@ class _ProfilePageState extends State<ProfilePage> {
           if (s.exists) userData = s.data();
         } catch (_) {}
       }
-
       final favKeys = List<String>.from((userData?['favoritesKeys'] ?? const []));
       final fiveKeys = List<String>.from((userData?['fiveStarKeys'] ?? const []));
-      
       Map<String, dynamic>? tasteData;
       try {
         final t = await db.collection('userTasteProfiles').doc(uid).get(const GetOptions(source: Source.cache));
@@ -316,7 +393,6 @@ class _ProfilePageState extends State<ProfilePage> {
           if (t2.exists) tasteData = t2.data();
         } catch (_) {}
       }
-
       final missing = favKeys.isEmpty || fiveKeys.isEmpty || (tasteData == null);
       if (missing) {
         _initialSyncTriggered = true; 
@@ -351,20 +427,14 @@ class _ProfilePageState extends State<ProfilePage> {
       await sp.setString('lb_username_$uid', oldGlobal);
       await sp.remove('lb_username');
     }
-
     final u = uid != null ? sp.getString('lb_username_$uid') : sp.getString('lb_username');
-
     setState(() {
       _lbUsername = u;
       _futureFavs = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFavorites(u);
       _futureFiveStar = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFiveStar(u);
       _futureDisliked = (u == null || u.isEmpty) ? null : LetterboxdService.fetchDisliked(u);
     });
-
-    _primeShelfCache().then((_) {
-      _checkGuideVisibility(); 
-    });
-
+    _primeShelfCache().then((_) { _checkGuideVisibility(); });
     _forceWriteLbUsernameIfMissing();
     _ensureInitialSyncIfNeeded();
   }
@@ -379,7 +449,6 @@ class _ProfilePageState extends State<ProfilePage> {
           _lastUserData = Map<String, dynamic>.from(data);
           final lb = (data['letterboxdUsername'] ?? '').toString().trim();
           final appU = (data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
-
           if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
             if (mounted) setState(() => _appUsername = appU);
           }
@@ -410,7 +479,6 @@ class _ProfilePageState extends State<ProfilePage> {
     final doc = db.collection('userTasteProfiles').doc(uid);
     final newFive = fiveStars.map((e) => e.key).where((k) => k.isNotEmpty).toList();
     final newLow = lowRatings.map((e) => e.key).where((k) => k.isNotEmpty).toList();
-
     await doc.set({
       'fiveStars': newFive,
       'lowRatings': newLow,
@@ -423,31 +491,25 @@ class _ProfilePageState extends State<ProfilePage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || lbUsername.isEmpty) return;
     final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-
     try {
       await userRef.set({
         'letterboxdUsername': lbUsername, 'letterboxdUsername_lc': lbUsername.toLowerCase(), 'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (_) {}
-
     List<LetterboxdFilm> favs = [], five = [], low = [];
     try { favs = await LetterboxdService.fetchFavorites(lbUsername); } catch (_) {}
     try { five = await LetterboxdService.fetchFiveStar(lbUsername); } catch (_) {}
     try { low = await LetterboxdService.fetchDisliked(lbUsername); } catch (_) {}
-
     try { await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername); } catch (_) {}
     try { await LetterboxdService.syncWatchlistToFirestore(lbUsername: lbUsername); } catch (_) {}
     try { await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername); } catch (_) {}
-
     try { await _upsertCatalogFromList(favs); } catch (_) {}
     try { await _upsertCatalogFromList(five); } catch (_) {}
     try { await _upsertCatalogFromList(low); } catch (_) {}
-
     try {
       final newFavKeys = favs.map((e) => e.key).where((k) => k.isNotEmpty).toList();
       final newFiveKeys = five.map((e) => e.key).where((k) => k.isNotEmpty).toList();
       final newLowKeys = low.map((e) => e.key).where((k) => k.isNotEmpty).toList();
-
       await userRef.set({
         if (newFavKeys.isNotEmpty) 'favoritesKeys': newFavKeys,
         if (newFiveKeys.isNotEmpty) 'fiveStarKeys': newFiveKeys,
@@ -455,7 +517,6 @@ class _ProfilePageState extends State<ProfilePage> {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (_) {}
-
     try {
       await _writeTasteProfile(uid: uid, lbUsername: lbUsername, fiveStars: five, lowRatings: low);
     } catch (_) {}
@@ -463,11 +524,10 @@ class _ProfilePageState extends State<ProfilePage> {
      await MatchService.instance.autoCreateMatchesFiveOnly(uid, minCommonFive: 1);
     } catch (_) {}
     
-    // --- YENİ: Rozet Kontrolü Tetiklemesi ---
-    // Letterboxd senkronizasyonu bittiğinde rozetleri kontrol et
+    // Rozet Kontrolü
     try {
       await GamificationService.instance.checkAndAwardBadges();
-    } catch (e) { debugPrint('Gamification check error: $e'); }
+    } catch (_) {}
   }
 
   @override
@@ -530,15 +590,9 @@ class _ProfilePageState extends State<ProfilePage> {
         try {
           final ref = FirebaseFirestore.instance.collection('users').doc(uid);
           var snap = await ref.get(const GetOptions(source: Source.cache));
-          if (!snap.exists) {
-            snap = await ref.get(const GetOptions(source: Source.server));
-          }
+          if (!snap.exists) snap = await ref.get(const GetOptions(source: Source.server));
           final lb = (snap.data()?['letterboxdUsername'] ?? '').toString();
-          if (lb.isNotEmpty) {
-            setState(() {
-              _lbUsername = lb;
-            });
-          }
+          if (lb.isNotEmpty) setState(() => _lbUsername = lb);
         } catch (_) {}
       }
       if (_lbUsername == null || _lbUsername!.isEmpty) return;
@@ -559,6 +613,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
+  // --- Watchlist Section ---
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     void onReturnFromSearch() {
       setState(() => _watchlistFutureCache.clear());
@@ -577,47 +632,35 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       );
     }
-
     final limited = keys.take(maxItems).toList();
     final hash = limited.join('|');
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
         final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
-        try {
-          final c = await col.get(const GetOptions(source: Source.cache));
-          if (c.exists) { final d = c.data(); d?['docId'] = k; return d; }
-        } catch (_) {}
-        try {
-          final s = await col.get(const GetOptions(source: Source.server));
-          if (s.exists) { final d = s.data(); d?['docId'] = k; return d; }
-        } catch (_) {}
+        try { final c = await col.get(const GetOptions(source: Source.cache)); if (c.exists) { final d = c.data(); d?['docId'] = k; return d; } } catch (_) {}
+        try { final s = await col.get(const GetOptions(source: Source.server)); if (s.exists) { final d = s.data(); d?['docId'] = k; return d; } } catch (_) {}
         return null;
       }),
     );
-
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
         if (filmSnap.connectionState == ConnectionState.waiting && !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
           return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
         }
-        if (!filmSnap.hasData) {
+        final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+        UserShelfCache.setWatchlistFromMaps(films);
+        if (films.isEmpty) {
           return SizedBox(
             height: 180,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: 1,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => AspectRatio(
-                aspectRatio: 2 / 3,
-                child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
-              ),
+              itemBuilder: (context, i) => AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch)),
             ),
           );
         }
-        final films = filmSnap.data!.where((m) => m != null).map((m) => m!).toList();
-        UserShelfCache.setWatchlistFromMaps(films);
-
         return SizedBox(
           height: 180,
           child: ListView.separated(
@@ -625,39 +668,16 @@ class _ProfilePageState extends State<ProfilePage> {
             itemCount: films.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
-              if (i == films.length) {
-                return AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch));
-              }
+              if (i == films.length) return AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch));
               final film = films[i];
               final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
              return GestureDetector(
                 onTap: () {
-                  if (title.isNotEmpty) {
-                    MovieActionHelper.show(
-                      context,
-                      title: title,
-                      posterUrl: poster,
-                      docId: docId,
-                      target: ShelfTarget.watchlist,
-                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
-                    );
-                  }
+                  if (title.isNotEmpty) MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: ShelfTarget.watchlist, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
                 },
-                child: AspectRatio(
-                aspectRatio: 2 / 3,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800),
-                      if (title.isNotEmpty)
-                        Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center))),
-                    ],
-                  ),
-                ),)
+                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800), if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
               );
             },
           ),
@@ -672,7 +692,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     final keys = List<dynamic>.from((_lastUserData?[fieldName] ?? const [])).map((e) => e.toString()).toList();
     final ShelfTarget target = fieldName == 'favoritesKeys' ? ShelfTarget.favorites : fieldName == 'fiveStarKeys' ? ShelfTarget.fiveStar : ShelfTarget.disliked;
-
     if (keys.isEmpty) {
       return SizedBox(
         height: 180,
@@ -684,7 +703,6 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       );
     }
-
     final limited = keys.take(maxItems).toList();
     final hash = '$fieldName:' + limited.join('|');
     final future = _watchlistFutureCache[hash] ??= Future.wait(
@@ -695,7 +713,6 @@ class _ProfilePageState extends State<ProfilePage> {
         return null;
       }),
     );
-
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
@@ -703,7 +720,6 @@ class _ProfilePageState extends State<ProfilePage> {
           return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
         }
         final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
-
         return SizedBox(
           height: 180,
           child: ListView.separated(
@@ -813,7 +829,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             Column(
                               children: [
                                 SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
-                                _profileHeaderSection(context: context, user: user, followers: _followers, following: _following, lbUsername: _lbUsername, shownName: _shownName),
+                                _profileHeaderSection(context: context, user: user, followers: _followersCount, following: _followingCount, lbUsername: _lbUsername, shownName: _shownName),
                                 const SizedBox(height: 12),
                                 Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -845,8 +861,8 @@ class _ProfilePageState extends State<ProfilePage> {
                   body: TabBarView(
                     children: [
                       _buildProfileContentAfterHeader(),
-                      _ActivitiesTab(uid: user.uid), // Lazy Loaded
-                      _ListsTab(uid: user.uid),      // Lazy Loaded
+                      _ActivitiesTab(uid: user.uid),
+                      _ListsTab(uid: user.uid),
                     ],
                   ),
                 ),
@@ -866,7 +882,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-// --- 2. SEKME: AKTİVİTELER (LAZY LOADING) ---
+// --- 2. SEKME: AKTİVİTELER ---
 class _ActivitiesTab extends StatefulWidget {
   final String uid;
   const _ActivitiesTab({required this.uid});
@@ -979,6 +995,9 @@ class _ActivityWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -1001,7 +1020,7 @@ class _ActivityWidget extends StatelessWidget {
                 child: PosterImage(
                   posterUrl: item.posterUrl, 
                   title: item.title,
-                  tmdbId: item.tmdbId, // <--- EKLENDİ
+                  tmdbId: item.tmdbId,
                   width: 44, 
                   height: 66, 
                   fit: BoxFit.cover
@@ -1022,6 +1041,8 @@ class _ActivityWidget extends StatelessWidget {
                     ],
                   ),
                   if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 4, overflow: TextOverflow.ellipsis)),
+                  if (item.title.isNotEmpty && item.posterUrl.isEmpty && item.tmdbId == null)
+                    Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [const Icon(Icons.local_movies, size: 16), const SizedBox(width: 6), Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall))])),
                   Padding(
                     padding: const EdgeInsets.only(top: 6.0),
                     child: Row(children: [const Icon(Icons.favorite_border, size: 16), const SizedBox(width: 4), Text('${item.likeCount}'), const SizedBox(width: 12), const Icon(Icons.mode_comment_outlined, size: 16), const SizedBox(width: 4), Text('${item.replyCount}'), const SizedBox(width: 12), const Icon(Icons.repeat, size: 16)]),
@@ -1036,7 +1057,7 @@ class _ActivityWidget extends StatelessWidget {
   }
 }
 
-// --- 3. SEKME: LAZY LOADING LISTS TAB ---
+// --- 3. SEKME: LİSTELER ---
 class _ListsTab extends StatefulWidget {
   final String uid;
   const _ListsTab({required this.uid});
@@ -1177,7 +1198,6 @@ class _CustomListCard extends StatelessWidget {
   }
 }
 
-// --- Eski Widget'lar (poster tile, dialog) aynen korunuyor ---
 class _AddPosterTile extends StatelessWidget {
   final ShelfTarget target;
   final VoidCallback? onRefresh;
@@ -1233,5 +1253,77 @@ class _AddFilmDialogState extends State<_AddFilmDialog> {
     setState(() => _submitting = true);
     await Future.delayed(const Duration(milliseconds: 200));
     Navigator.of(context).pop(filmName);
+  }
+}
+
+// --- KULLANICI LİSTESİ PENCERESİ (Takipçi/Takip edilenler için) ---
+class _UserListSheet extends StatelessWidget {
+  final String title;
+  final String uid;
+  final String collection; // 'followers' or 'following'
+
+  const _UserListSheet({required this.title, required this.uid, required this.collection});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid)
+                  .collection(collection)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return const Center(child: Text('Liste boş.'));
+                }
+                return ListView.separated(
+                  itemCount: docs.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final docId = docs[index].id; 
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance.collection('users').doc(docId).get(),
+                      builder: (context, userSnap) {
+                        if (!userSnap.hasData) return const ListTile(title: Text('Yükleniyor...'));
+                        final data = userSnap.data!.data() as Map<String, dynamic>?;
+                        final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
+                        final photo = data?['photoURL'];
+                        
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundImage: (photo != null) ? NetworkImage(photo) : null,
+                            child: photo == null ? const Icon(Icons.person) : null,
+                          ),
+                          title: Text(name),
+                          onTap: () {
+                            Navigator.push(
+                              context, 
+                              MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: docId))
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

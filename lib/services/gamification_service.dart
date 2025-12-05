@@ -23,17 +23,18 @@ class GamificationService {
     final List<String> newBadges = [];
 
     // 1. Film Kurdu Kontrolü (Benzersiz Film Sayısı)
-    // Letterboxd'dan gelenler de bu alanlara yazıldığı için otomatik olarak sayılır.
     final favs = List<String>.from(data['favoritesKeys'] ?? []);
     final fives = List<String>.from(data['fiveStarKeys'] ?? []);
     final watch = List<String>.from(data['watchlistKeys'] ?? []);
-    final disliked = List<String>.from(data['dislikedKeys'] ?? []); // Sevmedikleri de bir "kayıt" sayılabilir
+    final disliked = List<String>.from(data['dislikedKeys'] ?? []); 
 
-    // Set kullanarak mükerrer kayıtları (hem favori hem 5 yıldız olanları) eliyoruz
-    final uniqueMovies = {...favs, ...fives, ...watch, ...disliked};
-    final totalMovies = uniqueMovies.length;
+    // Benzersiz film sayısını hesapla
+    final uniqueMovies = {...favs, ...fives, ...watch, ...disliked}.length;
 
-    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.filmBuff), totalMovies, currentBadges, newBadges);
+    // ÖNEMLİ: Bu sayıyı veritabanına yaz ki liderlik tablosunda kullanabilelim
+    await userDocRef.update({'totalMovies': uniqueMovies});
+
+    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.filmBuff), uniqueMovies, currentBadges, newBadges);
 
     // 2. Eleştirmen Kontrolü
     final postsQuery = await _db.collection('posts')
@@ -52,7 +53,11 @@ class GamificationService {
     final listCount = listQuery.count ?? 0;
     _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.archivist), listCount, currentBadges, newBadges);
 
-    // Veritabanına Yaz
+    // 4. Popülerlik (Takipçi) Kontrolü
+    final followers = (data['followersCount'] ?? 0) as int;
+    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.socialite), followers, currentBadges, newBadges);
+
+    // Yeni rozet varsa kaydet
     if (newBadges.isNotEmpty) {
       await userDocRef.update({
         'badges': FieldValue.arrayUnion(newBadges)
@@ -67,23 +72,47 @@ class GamificationService {
   }
 
   // --- LİDERLİK TABLOLARI ---
+  
+  // 1. En Popüler (Takipçi Sayısına Göre)
   Future<List<LeaderboardUser>> getWeeklyTopUsers() async {
-    // Takipçi sayısına göre sıralama
-    final qs = await _db.collection('users')
-        .orderBy('followersCount', descending: true) // Bu alanın user'da tutulduğundan emin olun
-        .limit(10)
-        .get();
+    try {
+      final qs = await _db.collection('users')
+          .orderBy('followersCount', descending: true)
+          .limit(20) // Listeyi biraz genişletelim
+          .get();
 
+      return _mapToLeaderboard(qs, 'followersCount');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // 2. Film Kurtları (İzlenen Film Sayısına Göre)
+  Future<List<LeaderboardUser>> getTopFilmBuffs() async {
+    try {
+      // Not: 'totalMovies' alanı için Firestore'da index oluşturmanız gerekebilir.
+      // Hata alırsanız logdaki linke tıklayın.
+      final qs = await _db.collection('users')
+          .orderBy('totalMovies', descending: true)
+          .limit(20)
+          .get();
+
+      return _mapToLeaderboard(qs, 'totalMovies');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  List<LeaderboardUser> _mapToLeaderboard(QuerySnapshot<Map<String, dynamic>> qs, String scoreField) {
     return qs.docs.asMap().entries.map((entry) {
       final idx = entry.key;
       final d = entry.value.data();
-      
       return LeaderboardUser(
         uid: entry.value.id,
         rank: idx + 1,
         displayName: d['displayName'] ?? d['username'] ?? 'Kullanıcı',
         photoURL: d['photoURL'],
-        score: (d['followersCount'] ?? 0) as int,
+        score: (d[scoreField] ?? 0) as int,
       );
     }).toList();
   }

@@ -189,7 +189,11 @@ class _FeedPageState extends State<FeedPage> {
                 title: const Text('Kulüpler'),
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const Scaffold(appBar: PreferredSize(preferredSize: Size.fromHeight(kToolbarHeight), child: SizedBox()), body: ClubsTab())));
+                  // DÜZELTME: Artık ClubsScreen (AppBar'lı) çağırılıyor.
+                  Navigator.push(
+                    context, 
+                    MaterialPageRoute(builder: (_) => const ClubsScreen())
+                  );
                 },
               ),
               ListTile(
