@@ -16,6 +16,11 @@ import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
 
+// --- YENİ İMPORTLAR (Özel Listeler İçin) ---
+import 'package:fluttergirdi/services/custom_list_service.dart';
+import 'package:fluttergirdi/models/custom_list.dart';
+import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
+
 // --- In-memory shelf cache to avoid duplicate Firestore reads across screens ---
 class UserShelfCache {
   static List<Map<String, String>> favorites = const [];
@@ -191,9 +196,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<List<LetterboxdFilm>>? _futureDisliked;
   
   final Set<String> _catalogUpsertedKeys = <String>{};
-  
-  final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
-      {};
+  final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
   
   bool _loadingActivities = false;
   List<_ActivityItem> _activities = <_ActivityItem>[];
@@ -234,21 +237,13 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Map<String, String> _extractMovieInfo(Map<String, dynamic> m) {
-    final poster =
-        (m['moviePoster'] ??
-                m['moviePosterUrl'] ??
-                m['poster'] ??
-                (m['movie'] is Map
-                    ? (m['movie']['poster'] ?? m['movie']['posterUrl'])
-                    : '') ??
-                '')
-            .toString();
-    final title =
-        (m['movieTitle'] ??
-                m['title'] ??
-                (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ??
-                '')
-            .toString();
+    final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ??
+            (m['movie'] is Map
+                ? (m['movie']['poster'] ?? m['movie']['posterUrl'])
+                : '') ?? '').toString();
+    final title = (m['movieTitle'] ?? m['title'] ??
+            (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '')
+        .toString();
     return {'poster': poster, 'title': title};
   }
 
@@ -266,8 +261,7 @@ class _ProfilePageState extends State<ProfilePage> {
         final low = await _futureDisliked!;
         UserShelfCache.setDisliked(low);
       }
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 
   Future<void> _forceWriteLbUsernameIfMissing() async {
@@ -303,55 +297,37 @@ class _ProfilePageState extends State<ProfilePage> {
       final db = FirebaseFirestore.instance;
       Map<String, dynamic>? userData;
       try {
-        final c = await db
-            .collection('users')
-            .doc(uid)
-            .get(const GetOptions(source: Source.cache));
+        final c = await db.collection('users').doc(uid).get(const GetOptions(source: Source.cache));
         if (c.exists) userData = c.data();
       } catch (_) {}
       if (userData == null) {
         try {
-          final s = await db
-              .collection('users')
-              .doc(uid)
-              .get(const GetOptions(source: Source.server));
+          final s = await db.collection('users').doc(uid).get(const GetOptions(source: Source.server));
           if (s.exists) userData = s.data();
         } catch (_) {}
       }
 
-      final favKeys = List<String>.from(
-        (userData?['favoritesKeys'] ?? const []),
-      );
-      final fiveKeys = List<String>.from(
-        (userData?['fiveStarKeys'] ?? const []),
-      );
+      final favKeys = List<String>.from((userData?['favoritesKeys'] ?? const []));
+      final fiveKeys = List<String>.from((userData?['fiveStarKeys'] ?? const []));
 
       Map<String, dynamic>? tasteData;
       try {
-        final t = await db
-            .collection('userTasteProfiles')
-            .doc(uid)
-            .get(const GetOptions(source: Source.cache));
+        final t = await db.collection('userTasteProfiles').doc(uid).get(const GetOptions(source: Source.cache));
         if (t.exists) tasteData = t.data();
       } catch (_) {}
       if (tasteData == null) {
         try {
-          final t2 = await db
-              .collection('userTasteProfiles')
-              .doc(uid)
-              .get(const GetOptions(source: Source.server));
+          final t2 = await db.collection('userTasteProfiles').doc(uid).get(const GetOptions(source: Source.server));
           if (t2.exists) tasteData = t2.data();
         } catch (_) {}
       }
 
-      final missing =
-          favKeys.isEmpty || fiveKeys.isEmpty || (tasteData == null);
+      final missing = favKeys.isEmpty || fiveKeys.isEmpty || (tasteData == null);
       if (missing) {
         _initialSyncTriggered = true; 
         await _syncLetterboxdToFirestore(lb);
       }
-    } catch (_) {
-    }
+    } catch (_) {}
   }
 
   @override
@@ -365,15 +341,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void _checkGuideVisibility() {
     if (!mounted) return;
-
     final favKeys = _lastUserData?['favoritesKeys'];
     final hasFirestoreFavs = (favKeys is List && favKeys.isNotEmpty);
-    
     final fiveStarKeys = _lastUserData?['fiveStarKeys'];
     final hasFirestoreFiveStar = (fiveStarKeys is List && fiveStarKeys.isNotEmpty);
-
     final hasCacheFavs = UserShelfCache.favorites.isNotEmpty;
-    
     final hasCacheFiveStar = UserShelfCache.fiveStar.isNotEmpty;
 
     if (hasFirestoreFavs || hasCacheFavs || hasFirestoreFiveStar || hasCacheFiveStar) {
@@ -392,8 +364,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final List<_ActivityItem> items = [];
 
     try {
-      final q = db
-          .collection('posts')
+      final q = db.collection('posts')
           .where('authorId', isEqualTo: uid)
           .orderBy('createdAt', descending: true)
           .limit(30);
@@ -487,17 +458,14 @@ class _ProfilePageState extends State<ProfilePage> {
           if (!snap.exists) return;
           final data = snap.data() ?? const {};
           _lastUserData = Map<String, dynamic>.from(data);
-          final appU =
-              (data['username'] ?? data['handle'] ?? data['appUsername'] ?? '')
-                  .toString()
-                  .trim();
+          final lb = (data['letterboxdUsername'] ?? '').toString().trim();
+          final appU = (data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
 
           if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
             if (mounted) {
               setState(() => _appUsername = appU);
             }
           }
-
           _checkGuideVisibility();
         });
   }
@@ -508,12 +476,8 @@ class _ProfilePageState extends State<ProfilePage> {
     var queued = 0;
     for (final f in films) {
       final k = (f.key);
-      if (k.isEmpty) {
-        continue;
-      }
-      if (_catalogUpsertedKeys.contains(k)) {
-        continue; 
-      }
+      if (k.isEmpty) continue;
+      if (_catalogUpsertedKeys.contains(k)) continue;
       _catalogUpsertedKeys.add(k);
       final ref = db.collection('catalog_films').doc(k);
       batch.set(ref, {
@@ -524,9 +488,7 @@ class _ProfilePageState extends State<ProfilePage> {
       }, SetOptions(merge: true));
       queued++;
     }
-    if (queued > 0) {
-      await batch.commit();
-    }
+    if (queued > 0) await batch.commit();
   }
 
   Future<void> _writeTasteProfile({
@@ -539,14 +501,8 @@ class _ProfilePageState extends State<ProfilePage> {
     final db = FirebaseFirestore.instance;
     final doc = db.collection('userTasteProfiles').doc(uid);
 
-    final newFive = fiveStars
-        .map((e) => e.key)
-        .where((k) => k.isNotEmpty)
-        .toList();
-    final newLow = lowRatings
-        .map((e) => e.key)
-        .where((k) => k.isNotEmpty)
-        .toList();
+    final newFive = fiveStars.map((e) => e.key).where((k) => k.isNotEmpty).toList();
+    final newLow = lowRatings.map((e) => e.key).where((k) => k.isNotEmpty).toList();
 
     Map<String, dynamic> old = const {};
     try {
@@ -585,9 +541,7 @@ class _ProfilePageState extends State<ProfilePage> {
         oldProfile['letterboxdUsername'] == newProfile['letterboxdUsername'] &&
         oldProfile['avatarUrl'] == newProfile['avatarUrl'];
 
-    if (listsSame && profileSame) {
-      return; 
-    }
+    if (listsSame && profileSame) return; 
 
     await doc.set({
       'fiveStars': newFive,
@@ -619,59 +573,32 @@ class _ProfilePageState extends State<ProfilePage> {
     List<LetterboxdFilm> low = const [];
     try {
       favs = await LetterboxdService.fetchFavorites(lbUsername);
-    } catch (e) {
-      debugPrint('fetchFavorites error: $e');
-    }
+    } catch (e) { debugPrint('fetchFavorites error: $e'); }
     try {
       five = await LetterboxdService.fetchFiveStar(lbUsername);
-    } catch (e) {
-      debugPrint('fetchFiveStar error: $e');
-    }
+    } catch (e) { debugPrint('fetchFiveStar error: $e'); }
     try {
       low = await LetterboxdService.fetchDisliked(lbUsername);
-    } catch (e) {
-      debugPrint('fetchDisliked error: $e');
-    }
+    } catch (e) { debugPrint('fetchDisliked error: $e'); }
 
     try {
       await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername);
-    } catch (e) {
-      debugPrint('syncFavoritesToFirestore error: $e');
-    }
+    } catch (e) { debugPrint('syncFavoritesToFirestore error: $e'); }
     try {
       await LetterboxdService.syncWatchlistToFirestore(lbUsername: lbUsername);
-    } catch (e) {
-      debugPrint('syncWatchlistToFirestore error: $e');
-    }
+    } catch (e) { debugPrint('syncWatchlistToFirestore error: $e'); }
     try {
       await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername);
-    } catch (e) {
-      debugPrint('syncDislikedToFirestore error: $e');
-    }
+    } catch (e) { debugPrint('syncDislikedToFirestore error: $e'); }
+
+    try { await _upsertCatalogFromList(favs); } catch (_) {}
+    try { await _upsertCatalogFromList(five); } catch (_) {}
+    try { await _upsertCatalogFromList(low); } catch (_) {}
 
     try {
-      await _upsertCatalogFromList(favs);
-    } catch (_) {}
-    try {
-      await _upsertCatalogFromList(five);
-    } catch (_) {}
-    try {
-      await _upsertCatalogFromList(low);
-    } catch (_) {}
-
-    try {
-      final newFavKeys = favs
-          .map((e) => e.key)
-          .where((k) => k.isNotEmpty)
-          .toList();
-      final newFiveKeys = five
-          .map((e) => e.key)
-          .where((k) => k.isNotEmpty)
-          .toList();
-      final newLowKeys = low
-          .map((e) => e.key)
-          .where((k) => k.isNotEmpty)
-          .toList();
+      final newFavKeys = favs.map((e) => e.key).where((k) => k.isNotEmpty).toList();
+      final newFiveKeys = five.map((e) => e.key).where((k) => k.isNotEmpty).toList();
+      final newLowKeys = low.map((e) => e.key).where((k) => k.isNotEmpty).toList();
 
       await userRef.set({
         if (newFavKeys.isNotEmpty) 'favoritesKeys': newFavKeys,
@@ -679,9 +606,7 @@ class _ProfilePageState extends State<ProfilePage> {
         if (newLowKeys.isNotEmpty) 'dislikedKeys': newLowKeys,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('users mirror arrays error: $e');
-    }
+    } catch (e) { debugPrint('users mirror arrays error: $e'); }
 
     try {
       await _writeTasteProfile(
@@ -690,15 +615,11 @@ class _ProfilePageState extends State<ProfilePage> {
         fiveStars: five,
         lowRatings: low,
       );
-    } catch (e) {
-      debugPrint('writeTasteProfile error: $e');
-    }
+    } catch (e) { debugPrint('writeTasteProfile error: $e'); }
 
     try {
      await MatchService.instance.autoCreateMatchesFiveOnly(uid, minCommonFive: 1);
-    } catch (e) {
-      debugPrint('autoCreateMatchesFiveOnly error: $e');
-    }
+    } catch (e) { debugPrint('autoCreateMatchesFiveOnly error: $e'); }
   }
 
   @override
@@ -711,9 +632,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _shownName(User user) {
     final local = (_appUsername ?? '').trim();
-    if (local.isNotEmpty) {
-      return local; 
-    }
+    if (local.isNotEmpty) return local; 
     final dn = (user.displayName ?? '').trim();
     if (dn.isNotEmpty) return dn; 
     final email = user.email ?? '';
@@ -722,7 +641,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
  Widget _blurBackdrop() {
     const Widget baseBlack = SizedBox.expand(child: ColoredBox(color: Colors.black));
-
     if (_futureFavs == null) return baseBlack;
 
     return FutureBuilder<List<LetterboxdFilm>>(
@@ -730,25 +648,17 @@ class _ProfilePageState extends State<ProfilePage> {
       builder: (context, snap) {
         final list = snap.data ?? const <LetterboxdFilm>[];
         final hasPoster = list.isNotEmpty && (list.first.posterUrl).isNotEmpty;
-        
         if (!hasPoster) return baseBlack;
-
         final url = list.first.posterUrl;
         return SizedBox.expand(
           child: Stack(
             fit: StackFit.expand,
             children: [
               const ColoredBox(color: Colors.black),
-              
               ImageFiltered(
                 imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: PosterImage(
-                  posterUrl: url,
-                  title: list.first.title,
-                  fit: BoxFit.cover,
-                ),
+                child: PosterImage(posterUrl: url, title: list.first.title, fit: BoxFit.cover),
               ),
-              
               Container(
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
@@ -776,14 +686,10 @@ class _ProfilePageState extends State<ProfilePage> {
         try {
           final ref = FirebaseFirestore.instance.collection('users').doc(uid);
           var snap = await ref.get(const GetOptions(source: Source.cache));
-          if (!snap.exists) {
-            snap = await ref.get(const GetOptions(source: Source.server));
-          }
+          if (!snap.exists) snap = await ref.get(const GetOptions(source: Source.server));
           final lb = (snap.data()?['letterboxdUsername'] ?? '').toString();
           if (lb.isNotEmpty) {
-            setState(() {
-              _lbUsername = lb;
-            });
+            setState(() => _lbUsername = lb);
           }
         } catch (_) {}
       }
@@ -805,11 +711,10 @@ class _ProfilePageState extends State<ProfilePage> {
     return t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
   }
 
+  // --- WATCHLIST SECTION ---
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     void onReturnFromSearch() {
-      setState(() {
-        _watchlistFutureCache.clear();
-      });
+      setState(() => _watchlistFutureCache.clear());
     }
 
     if (keys.isEmpty) {
@@ -835,23 +740,17 @@ class _ProfilePageState extends State<ProfilePage> {
 
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
-        final col = FirebaseFirestore.instance
-            .collection('catalog_films')
-            .doc(k);
+        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
         try {
           final c = await col.get(const GetOptions(source: Source.cache));
           if (c.exists) {
-            final data = c.data();
-            data?['docId'] = k; // ID EKLENDI
-            return data;
+             final d = c.data(); d?['docId'] = k; return d;
           }
         } catch (_) {}
         try {
           final s = await col.get(const GetOptions(source: Source.server));
           if (s.exists) {
-            final data = s.data();
-            data?['docId'] = k; // ID EKLENDI
-            return data;
+            final d = s.data(); d?['docId'] = k; return d;
           }
         } catch (_) {}
         return null;
@@ -863,10 +762,7 @@ class _ProfilePageState extends State<ProfilePage> {
       builder: (context, filmSnap) {
         if (filmSnap.connectionState == ConnectionState.waiting &&
             !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
-          return const SizedBox(
-            height: 180,
-            child: Center(child: CircularProgressIndicator()),
-          );
+          return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
         }
         if (!filmSnap.hasData) {
           return SizedBox(
@@ -877,19 +773,12 @@ class _ProfilePageState extends State<ProfilePage> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, i) => AspectRatio(
                 aspectRatio: 2 / 3,
-                child: _AddPosterTile(
-                  target: ShelfTarget.watchlist,
-                  onRefresh: onReturnFromSearch,
-                ),
+                child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
               ),
             ),
           );
         }
-        final films = filmSnap.data!
-            .where((m) => m != null)
-            .map((m) => m!)
-            .toList();
-
+        final films = filmSnap.data!.where((m) => m != null).map((m) => m!).toList();
         UserShelfCache.setWatchlistFromMaps(films);
 
         if (films.isEmpty) {
@@ -901,10 +790,7 @@ class _ProfilePageState extends State<ProfilePage> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, i) => AspectRatio(
                 aspectRatio: 2 / 3,
-                child: _AddPosterTile(
-                  target: ShelfTarget.watchlist,
-                  onRefresh: onReturnFromSearch,
-                ),
+                child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
               ),
             ),
           );
@@ -920,19 +806,13 @@ class _ProfilePageState extends State<ProfilePage> {
               if (i == films.length) {
                 return AspectRatio(
                   aspectRatio: 2 / 3,
-                  child: _AddPosterTile(
-                    target: ShelfTarget.watchlist,
-                    onRefresh: onReturnFromSearch,
-                  ),
+                  child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
                 );
               }
               final film = films[i];
-              final poster =
-                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
-                      as String;
+              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
-
              return GestureDetector(
                 onTap: () {
                   if (title.isNotEmpty) {
@@ -942,11 +822,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       posterUrl: poster,
                       docId: docId,
                       target: ShelfTarget.watchlist,
-                      onItemDeleted: () {
-                        setState(() {
-                          _watchlistFutureCache.clear();
-                        });
-                      },
+                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
                     );
                   }
                 },
@@ -958,29 +834,19 @@ class _ProfilePageState extends State<ProfilePage> {
                     fit: StackFit.expand,
                     children: [
                       poster.isNotEmpty
-                          ? PosterImage(
-                              posterUrl: poster,
-                              title: title,
-                              fit: BoxFit.cover,
-                            )
+                          ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover)
                           : Container(color: Colors.grey.shade800),
                       if (title.isNotEmpty)
                         Align(
                           alignment: Alignment.bottomCenter,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 4,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                             color: Colors.black54,
                             child: Text(
                               _noYear(title),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white,
-                              ),
+                              style: const TextStyle(fontSize: 12, color: Colors.white),
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -996,21 +862,17 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // --- Generic shelf section ---
   Widget _shelfSectionFromUserField(
     String fieldName, {
     int maxItems = 30,
     String emptyText = 'Film bulunamadı.',
   }) {
     void onReturnFromSearch() {
-      setState(() {
-        _watchlistFutureCache.clear();
-      });
+      setState(() => _watchlistFutureCache.clear());
     }
 
-    final keys = List<dynamic>.from(
-      (_lastUserData?[fieldName] ?? const []),
-    ).map((e) => e.toString()).toList();
-
+    final keys = List<dynamic>.from((_lastUserData?[fieldName] ?? const [])).map((e) => e.toString()).toList();
     final ShelfTarget target = fieldName == 'favoritesKeys'
         ? ShelfTarget.favorites
         : fieldName == 'fiveStarKeys'
@@ -1026,10 +888,7 @@ class _ProfilePageState extends State<ProfilePage> {
           separatorBuilder: (_, __) => const SizedBox(width: 12),
           itemBuilder: (context, i) => AspectRatio(
             aspectRatio: 2 / 3,
-            child: _AddPosterTile(
-              target: target,
-              onRefresh: onReturnFromSearch,
-            ),
+            child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
           ),
         ),
       );
@@ -1037,27 +896,16 @@ class _ProfilePageState extends State<ProfilePage> {
 
     final limited = keys.take(maxItems).toList();
     final hash = '$fieldName:' + limited.join('|');
-
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
-        final col = FirebaseFirestore.instance
-            .collection('catalog_films')
-            .doc(k);
+        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
         try {
           final c = await col.get(const GetOptions(source: Source.cache));
-          if (c.exists) {
-            final data = c.data();
-            data?['docId'] = k; // ID EKLENDI
-            return data;
-          }
+          if (c.exists) { final d = c.data(); d?['docId'] = k; return d; }
         } catch (_) {}
         try {
           final s = await col.get(const GetOptions(source: Source.server));
-          if (s.exists) {
-            final data = s.data();
-            data?['docId'] = k; // ID EKLENDI
-            return data;
-          }
+          if (s.exists) { final d = s.data(); d?['docId'] = k; return d; }
         } catch (_) {}
         return null;
       }),
@@ -1068,10 +916,7 @@ class _ProfilePageState extends State<ProfilePage> {
       builder: (context, filmSnap) {
         if (filmSnap.connectionState == ConnectionState.waiting &&
             !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
-          return const SizedBox(
-            height: 180,
-            child: Center(child: CircularProgressIndicator()),
-          );
+          return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
         }
         if (!filmSnap.hasData) {
           return SizedBox(
@@ -1082,19 +927,12 @@ class _ProfilePageState extends State<ProfilePage> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, i) => AspectRatio(
                 aspectRatio: 2 / 3,
-                child: _AddPosterTile(
-                  target: target,
-                  onRefresh: onReturnFromSearch, 
-                ),
+                child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
               ),
             ),
           );
         }
-        final films = filmSnap.data!
-            .where((m) => m != null)
-            .map((m) => m!)
-            .toList();
-
+        final films = filmSnap.data!.where((m) => m != null).map((m) => m!).toList();
         if (films.isEmpty) {
           return SizedBox(
             height: 180,
@@ -1104,10 +942,7 @@ class _ProfilePageState extends State<ProfilePage> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, i) => AspectRatio(
                 aspectRatio: 2 / 3,
-                child: _AddPosterTile(
-                  target: target,
-                  onRefresh: onReturnFromSearch,
-                ),
+                child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
               ),
             ),
           );
@@ -1123,19 +958,13 @@ class _ProfilePageState extends State<ProfilePage> {
               if (i == films.length) {
                 return AspectRatio(
                   aspectRatio: 2 / 3,
-                  child: _AddPosterTile(
-                    target: target,
-                    onRefresh: onReturnFromSearch, 
-                  ),
+                  child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
                 );
               }
               final film = films[i];
-              final poster =
-                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
-                      as String;
+              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
-
               return GestureDetector(
                 onTap: () {
                   if (title.isNotEmpty) {
@@ -1145,11 +974,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       posterUrl: poster,
                       docId: docId,
                       target: target,
-                      onItemDeleted: () {
-                        setState(() {
-                          _watchlistFutureCache.clear();
-                        });
-                      },
+                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
                     );
                   }
                 },
@@ -1161,29 +986,19 @@ class _ProfilePageState extends State<ProfilePage> {
                     fit: StackFit.expand,
                     children: [
                       poster.isNotEmpty
-                          ? PosterImage(
-                              posterUrl: poster,
-                              title: title,
-                              fit: BoxFit.cover,
-                            )
+                          ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover)
                           : Container(color: Colors.grey.shade800),
                       if (title.isNotEmpty)
                         Align(
                           alignment: Alignment.bottomCenter,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 4,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                             color: Colors.black54,
                             child: Text(
                               _noYear(title),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.white,
-                              ),
+                              style: const TextStyle(fontSize: 12, color: Colors.white),
                               textAlign: TextAlign.center,
                             ),
                           ),
@@ -1200,13 +1015,124 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- BEGIN: Profile & Activities Tabs ---
-  // Widget _buildProfileTab(User user) {
-  //   // Deprecated/unused: see _buildProfileContentAfterHeader().
-  //   // If you want to use it, uncomment and use in TabBarView.
-  // }
-  /// Builds the Five Star shelf with an "add film" button at the start.
-  
+  // --- NEW: Custom Lists Tab Logic ---
+  Widget _buildListsTab() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return RefreshIndicator(
+      onRefresh: () async {
+         await Future.delayed(const Duration(milliseconds: 500));
+         setState(() {}); // Rebuild stream
+      },
+      child: StreamBuilder<List<CustomList>>(
+        stream: CustomListService.instance.getUserLists(uid),
+        builder: (context, snapshot) {
+           if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+           final lists = snapshot.data ?? [];
+           
+           return ListView.builder(
+             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+             itemCount: lists.length + 1,
+             itemBuilder: (context, index) {
+               if (index == 0) {
+                 return _CreateListTile(onTap: () => _showCreateListDialog(context));
+               }
+               final list = lists[index - 1];
+               return _CustomListCard(list: list, isMine: true);
+             }
+           );
+        }
+      )
+    );
+  }
+
+  // Şık Liste Oluşturma Penceresi
+  void _showCreateListDialog(BuildContext context) {
+    final titleCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    bool isPublic = true;
+    bool isLoading = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 24, left: 24, right: 24, top: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("Yeni Liste Oluştur", style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 24),
+              
+              TextField(
+                controller: titleCtrl,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: "Liste Adı",
+                  hintText: "Örn: En İyi Korku Filmleri",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.format_list_bulleted),
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              TextField(
+                controller: descCtrl,
+                decoration: InputDecoration(
+                  labelText: "Açıklama (İsteğe bağlı)",
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  prefixIcon: const Icon(Icons.description_outlined),
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 16),
+              
+              SwitchListTile(
+                title: const Text("Herkese Açık"),
+                subtitle: Text(isPublic ? "Herkes profilinizde görebilir" : "Sadece siz görebilirsiniz", style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                value: isPublic,
+                contentPadding: EdgeInsets.zero,
+                activeColor: Theme.of(ctx).colorScheme.primary,
+                onChanged: (val) => setSheetState(() => isPublic = val),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  onPressed: isLoading ? null : () async {
+                    final title = titleCtrl.text.trim();
+                    if (title.isEmpty) return;
+
+                    setSheetState(() => isLoading = true);
+                    try {
+                      await CustomListService.instance.createList(title, descCtrl.text.trim(), isPublic: isPublic);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    } catch (e) {
+                      // Hata yönetimi
+                    } finally {
+                      if (ctx.mounted) setSheetState(() => isLoading = false);
+                    }
+                  },
+                  style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  child: isLoading 
+                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text("Oluştur", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildActivitiesTab() {
     return RefreshIndicator(
@@ -1216,46 +1142,30 @@ class _ProfilePageState extends State<ProfilePage> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Row(
-            children: [
-              Text(
-                'Aktiviteler',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ],
-          ),
+          Row(children: [
+              Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium),
+          ]),
           const SizedBox(height: 10),
           if (_loadingActivities)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(child: CircularProgressIndicator()),
-            )
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
           else if (_activities.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('Henüz aktivite yok.'),
-            )
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
           else
             ListView.separated(
               itemCount: _activities.length,
               physics: const NeverScrollableScrollPhysics(),
               shrinkWrap: true,
               padding: EdgeInsets.zero,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 0.5, thickness: 0.5),
+              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
               itemBuilder: (context, i) {
                 final a = _activities[i];
                 final when = a.createdAt;
                 String timeLabel = '';
                 if (when != null) {
                   final diff = DateTime.now().difference(when);
-                  if (diff.inMinutes < 60) {
-                    timeLabel = '${diff.inMinutes}m';
-                  } else if (diff.inHours < 24) {
-                    timeLabel = '${diff.inHours}h';
-                  } else {
-                    timeLabel = '${diff.inDays}g';
-                  }
+                  if (diff.inMinutes < 60) { timeLabel = '${diff.inMinutes}m'; }
+                  else if (diff.inHours < 24) { timeLabel = '${diff.inHours}h'; }
+                  else { timeLabel = '${diff.inDays}g'; }
                 }
                 return Container(
                   margin: const EdgeInsets.symmetric(vertical: 6),
@@ -1263,10 +1173,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   decoration: BoxDecoration(
                     color: Colors.white10,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: const Color.fromARGB(3, 255, 255, 255),
-                      width: 1,
-                    ),
+                    border: Border.all(color: const Color.fromARGB(3, 255, 255, 255), width: 1),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1277,9 +1184,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           child: PosterImage(
                             posterUrl: a.posterUrl,
                             title: a.title,
-                            width: 44,
-                            height: 66,
-                            fit: BoxFit.cover,
+                            width: 44, height: 66, fit: BoxFit.cover,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1292,41 +1197,24 @@ class _ProfilePageState extends State<ProfilePage> {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    _shownName(
-                                      FirebaseAuth.instance.currentUser!,
-                                    ),
+                                    _shownName(FirebaseAuth.instance.currentUser!),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                               Text(
-                                  ' Paylaştı',
-                                style: Theme.of(context).textTheme.labelSmall,
-                                ),
+                                Text(' Paylaştı', style: Theme.of(context).textTheme.labelSmall),
                                 if (timeLabel.isNotEmpty) ...[
                                   const SizedBox(width: 6),
-                                  Text(
-                                    timeLabel,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.labelSmall,
-                                  ),
+                                  Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
                                 ],
                               ],
                             ),
                             if (a.text.isNotEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(top: 4.0),
-                                child: Text(
-                                  a.text,
-                                  maxLines: 4,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                                child: Text(a.text, maxLines: 4, overflow: TextOverflow.ellipsis),
                               ),
                             Padding(
                               padding: const EdgeInsets.only(top: 6.0),
@@ -1336,16 +1224,12 @@ class _ProfilePageState extends State<ProfilePage> {
                                   const SizedBox(width: 4),
                                   Text('${a.likeCount}'),
                                   const SizedBox(width: 12),
-                                  const Icon(
-                                    Icons.mode_comment_outlined,
-                                    size: 16,
-                                  ),
+                                  const Icon(Icons.mode_comment_outlined, size: 16),
                                   const SizedBox(width: 4),
                                   Text('${a.replyCount}'),
                                   const SizedBox(width: 12),
                                   const Icon(Icons.repeat, size: 16),
                                   const SizedBox(width: 4),
-                                  
                                 ],
                               ),
                             ),
@@ -1395,15 +1279,12 @@ class _ProfilePageState extends State<ProfilePage> {
             builder: (context) {
               final data = _lastUserData ?? const <String, dynamic>{};
               final bio = (data['bio'] ?? '').toString();
-
               if (bio.isNotEmpty) {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 16.0),
                   child: Text(
                     bio,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      height: 1.4, 
-                    ),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4),
                   ),
                 );
               }
@@ -1415,18 +1296,12 @@ class _ProfilePageState extends State<ProfilePage> {
               final data = _lastUserData ?? const <String, dynamic>{};
               final age = data['age'];
               final genres = List<String>.from(data['favGenres'] ?? const []);
-              final directors = List<String>.from(
-                data['favDirectors'] ?? const [],
-              );
+              final directors = List<String>.from(data['favDirectors'] ?? const []);
               final actors = List<String>.from(data['favActors'] ?? const []);
 
-              if ((age == null || (age is int && age <= 0)) &&
-                  genres.isEmpty &&
-                  directors.isEmpty &&
-                  actors.isEmpty) {
+              if ((age == null || (age is int && age <= 0)) && genres.isEmpty && directors.isEmpty && actors.isEmpty) {
                 return const SizedBox.shrink();
               }
-
               Widget chipWrap(String title, List<String> items) {
                 if (items.isEmpty) return const SizedBox.shrink();
                 return Padding(
@@ -1434,23 +1309,16 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
+                      Text(title, style: Theme.of(context).textTheme.titleSmall),
                       const SizedBox(height: 8),
                       Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: items
-                            .map((e) => Chip(label: Text(e)))
-                            .toList(),
+                        spacing: 8, runSpacing: 8,
+                        children: items.map((e) => Chip(label: Text(e))).toList(),
                       ),
                     ],
                   ),
                 );
               }
-
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1472,68 +1340,50 @@ class _ProfilePageState extends State<ProfilePage> {
               );
             },
           ),
-          
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: Text(
-                'Favori Filmler',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Text(
+              'Favori Filmler',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 8),
-            _shelfSectionFromUserField(
-              'favoritesKeys',
-              emptyText: 'Favori film bulunamadı.',
-              maxItems: 30,
+          ),
+          const SizedBox(height: 8),
+          _shelfSectionFromUserField(
+            'favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 30,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+            child: Text(
+              'Sevdiği Filmler',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
-            Padding(
-              padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-              child: Text(
-                'Sevdiği Filmler',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
+          ),
+          const SizedBox(height: 8),
+          _shelfSectionFromUserField(
+            'fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 30,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+            child: Text(
+              'Sevmediği Filmler',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 8),
-            _shelfSectionFromUserField(
-              'fiveStarKeys',
-              emptyText: '5★ film bulunamadı.',
-              maxItems: 30,
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-              child: Text(
-                'Sevmediği Filmler',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ),
-            const SizedBox(height: 8),
-            _shelfSectionFromUserField(
-              'dislikedKeys',
-              emptyText: 'Sevmediği film bulunamadı.',
-              maxItems: 30,
-            ),
-          
+          ),
+          const SizedBox(height: 8),
+          _shelfSectionFromUserField(
+            'dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 30,
+          ),
           Padding(
             padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
             child: Text(
               'Watchlist',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
           const SizedBox(height: 8),
           _watchlistSectionFromKeys(
-            List<dynamic>.from(
-              (_lastUserData?['watchlistKeys'] ?? const []),
-            ).map((e) => e.toString()).toList(),
+            List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(),
             maxItems: 30,
           ),
         ],
@@ -1541,23 +1391,17 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
- @override
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.userChanges(),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+        if (snap.connectionState == ConnectionState.waiting) return const Scaffold(body: Center(child: CircularProgressIndicator()));
         final user = snap.data;
-        if (user == null) {
-          return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
-        }
+        if (user == null) return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
 
         return DefaultTabController(
-          length: 2,
+          length: 3, // 3 SEKMEYE ÇIKTIK
           child: Scaffold(
             extendBodyBehindAppBar: true,
             body: Stack(
@@ -1578,16 +1422,11 @@ class _ProfilePageState extends State<ProfilePage> {
                             tooltip: 'Düzenle',
                             icon: const Icon(Icons.edit_outlined),
                             onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => EditProfilePage(
-                                    initialUserData: _lastUserData,
-                                  ),
-                                ),
-                              );
+                              Navigator.of(context).push(MaterialPageRoute(
+                                builder: (_) => EditProfilePage(initialUserData: _lastUserData),
+                              ));
                             },
                           ),
-                          
                           IconButton(
                             tooltip: 'Yenile',
                             icon: const Icon(Icons.refresh),
@@ -1597,16 +1436,11 @@ class _ProfilePageState extends State<ProfilePage> {
                               await _bootstrapCounts();
                             },
                           ),
-                          
                           IconButton(
                             tooltip: 'Ayarlar',
                             icon: const Icon(Icons.settings_outlined),
                             onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const SettingsPage(),
-                                ),
-                              );
+                              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
                             },
                           ),
                         ],
@@ -1621,9 +1455,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             Column(
                               children: [
                                 SizedBox(
-                                  height:
-                                      MediaQuery.of(context).padding.top +
-                                      kToolbarHeight,
+                                  height: MediaQuery.of(context).padding.top + kToolbarHeight,
                                 ),
                                 _profileHeaderSection(
                                   context: context,
@@ -1635,38 +1467,23 @@ class _ProfilePageState extends State<ProfilePage> {
                                 ),
                                 const SizedBox(height: 12),
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
                                   child: TabBar(
                                     isScrollable: false,
                                     indicator: UnderlineTabIndicator(
-                                      borderSide: BorderSide(
-                                        width: 2,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
+                                      borderSide: BorderSide(width: 2, color: Theme.of(context).colorScheme.primary),
                                     ),
                                     indicatorSize: TabBarIndicatorSize.tab,
-                                    overlayColor: WidgetStateProperty.all(
-                                      Colors.transparent,
-                                    ),
-                                    labelPadding: const EdgeInsets.symmetric(
-                                      vertical: 6,
-                                    ),
-                                    labelStyle: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                    unselectedLabelStyle: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall,
+                                    overlayColor: WidgetStateProperty.all(Colors.transparent),
+                                    labelPadding: const EdgeInsets.symmetric(vertical: 6),
+                                    labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                                    unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
                                     labelColor: Theme.of(context).colorScheme.onSurface,
                                     unselectedLabelColor: Colors.white70,
                                     tabs: const [
                                       Tab(text: 'Filmler'),
                                       Tab(text: 'Aktiviteler'),
+                                      Tab(text: 'Listeler'), // YENİ TAB
                                     ],
                                   ),
                                 ),
@@ -1682,6 +1499,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     children: [
                       _buildProfileContentAfterHeader(),
                       _buildActivitiesTab(),
+                      _buildListsTab(), // YENİ TAB İÇERİĞİ
                     ],
                   ),
                 ),
@@ -1690,7 +1508,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   valueListenable: _showGuideNotifier,
                   builder: (context, isVisible, child) {
                     if (!isVisible) return const SizedBox.shrink();
-                    
                     return GuideCharacterOverlay(
                       message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.",
                       isVisible: isVisible,
@@ -1707,12 +1524,104 @@ class _ProfilePageState extends State<ProfilePage> {
       },
     );
   }
- 
 }
+
+// --- UI HELPERS FOR CUSTOM LISTS ---
+
+class _CreateListTile extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CreateListTile({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.5), style: BorderStyle.solid),
+          borderRadius: BorderRadius.circular(12),
+          color: Colors.white.withOpacity(0.05),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.add_circle_outline),
+            SizedBox(width: 8),
+            Text("Yeni Liste Oluştur", style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomListCard extends StatelessWidget {
+  final CustomList list;
+  final bool isMine;
+
+  const _CustomListCard({required this.list, this.isMine = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => CustomListDetailScreen(list: list, isMyList: isMine)));
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        height: 100,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            // Cover Image
+            ClipRRect(
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
+              child: SizedBox(
+                width: 70,
+                height: double.infinity,
+                child: list.coverImageUrl != null
+                    ? PosterImage(posterUrl: list.coverImageUrl!, title: list.title, fit: BoxFit.cover)
+                    : Container(color: Colors.grey.shade800, child: const Icon(Icons.list, color: Colors.white24)),
+              ),
+            ),
+            const SizedBox(width: 16),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Text('${list.movieCount} film', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                  if (!list.isPublic)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Icon(Icons.lock, size: 12, color: Colors.grey),
+                    )
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+            const SizedBox(width: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ... (Geri kalan mevcut sınıflar: _AddPosterTile, _AddFilmDialog) ...
 
 class _AddPosterTile extends StatelessWidget {
   final ShelfTarget target;
-  final VoidCallback? onRefresh; 
+  final VoidCallback? onRefresh;
 
   const _AddPosterTile({
     required this.target, 
@@ -1727,7 +1636,6 @@ class _AddPosterTile extends StatelessWidget {
           context,
           MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)),
         );
-        
         if (result == true) {
           onRefresh?.call();
         }
@@ -1735,7 +1643,7 @@ class _AddPosterTile extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          color: Colors.white10, 
+          color: Colors.white10,
           alignment: Alignment.center,
           child: const Icon(Icons.add, size: 40, color: Colors.white70),
         ),
@@ -1770,11 +1678,7 @@ class _AddFilmDialogState extends State<_AddFilmDialog> {
         ElevatedButton(
           onPressed: _submitting ? null : () => _submit(_controller.text),
           child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Ekle'),
         ),
       ],
