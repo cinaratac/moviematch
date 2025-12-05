@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'dart:math' as math;
 import 'package:fluttergirdi/services/match_service.dart'
-    as global_match; // services/match_service.dart kullanılıyor
+    as global_match;
 import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/likes_page.dart';
@@ -12,6 +12,7 @@ import 'package:fluttergirdi/screens/passes_page.dart';
 import 'package:swipe_cards/swipe_cards.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
+import 'package:fluttergirdi/widgets/match_card.dart'; // MatchCard ve FilmItem buradan geliyor
 
 // Simple in-memory cache to persist match list within app session
 class _MatchListSessionCache {
@@ -33,7 +34,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
   bool _finished = false;
   static final PageStorageBucket _bucket = PageStorageBucket();
 
-  // 1. Karakterin görünürlüğünü yönetecek Notifier
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
 
   @override
@@ -44,7 +44,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
   @override
   void dispose() {
-    _showGuideNotifier.dispose(); // Bellek sızıntısını önlemek için dispose ediyoruz
+    _showGuideNotifier.dispose();
     super.dispose();
   }
 
@@ -55,7 +55,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
       return;
     }
 
-    // 1) Cache kontrolü
     if (_MatchListSessionCache.results != null &&
         _MatchListSessionCache.results!.isNotEmpty) {
       _all = _MatchListSessionCache.results!;
@@ -69,7 +68,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
       return;
     }
 
-    // 2) Servisten çekme
     try {
       final results =
           await global_match.MatchService.instance.findMatches(me.uid);
@@ -85,9 +83,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
         _loading = false;
       });
 
-      // EĞER LİSTE BOŞSA KARAKTERİ TETİKLE
       if (_swipeItems.isEmpty) {
-        // Küçük bir gecikme ekleyerek sayfa geçişinin bitmesini bekleyelim
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) _showGuideNotifier.value = true;
         });
@@ -99,7 +95,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
         _loading = false;
         _all = const [];
       });
-      // Hata durumunda da liste boş kalacağı için karakteri gösterebiliriz
       Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) _showGuideNotifier.value = true;
       });
@@ -108,14 +103,12 @@ class _MatchListScreenState extends State<MatchListScreen> {
           .showSnackBar(SnackBar(content: Text('Eşleşmeler alınamadı: $e')));
     }
   }
-  // [YENİ] Kart kaydırılınca o kişiyi hafızadan silen fonksiyon
+
   void _removeUserFromLocalCache(String otherUid) {
-    // 1. Ekrandaki geçici listeden sil (Hot Reload yapınca gelmesin diye)
     if (_MatchListSessionCache.results != null) {
       _MatchListSessionCache.results!.removeWhere((m) => m.uid == otherUid);
     }
     
-    // 2. Arka plandaki Servis Cache'inden sil (5 dk süresi dolmadan gelmesin diye)
     final me = FirebaseAuth.instance.currentUser?.uid;
     if (me != null) {
       global_match.MatchService.instance.removeUserFromCache(me, otherUid);
@@ -128,19 +121,15 @@ class _MatchListScreenState extends State<MatchListScreen> {
       _swipeItems.add(SwipeItem(
         content: m,
         likeAction: () async {
-          // Firebase'e gönder
           await LikeService.instance.likeUser(
             m.uid,
             commonFavoritesCount: m.commonFavCount,
             commonFiveStarsCount: m.commonFiveCount,
           );
-          // [GÜNCELLEME] Hafızadan sil
           _removeUserFromLocalCache(m.uid);
         },
         nopeAction: () async {
-          // Firebase'e gönder
           await LikeService.instance.passUser(m.uid);
-          // [GÜNCELLEME] Hafızadan sil
           _removeUserFromLocalCache(m.uid);
         },
       ));
@@ -185,17 +174,13 @@ class _MatchListScreenState extends State<MatchListScreen> {
               ),
             ],
           ),
-          // BURASI GÜNCELLENDİ: TabBarView Stack içine alındı
           body: Stack(
             children: [
-              // 1. KATMAN: Tab İçerikleri
               TabBarView(
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  // --- Tab 1: Geçilenler ---
                   const PassesListBody(),
-
-                  // --- Tab 2: Eşleşme Kartları ---
+                  
                   _loading
                       ? const Center(child: CircularProgressIndicator())
                       : (_swipeItems.isEmpty || _finished
@@ -208,7 +193,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
                                 itemBuilder: (context, index) {
                                   final m = _swipeItems[index].content
                                       as global_match.MatchResult;
-                                  return _MatchCard(
+                                  return MatchCard(
                                     key: ValueKey(m.uid),
                                     result: m,
                                     onOpen: () {
@@ -229,7 +214,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
                                 },
                                 onStackFinished: () {
                                   setState(() => _finished = true);
-                                  // KARTLAR BİTİNCE KARAKTERİ TETİKLE
                                   _showGuideNotifier.value = true;
                                 },
                                 upSwipeAllowed: false,
@@ -237,12 +221,10 @@ class _MatchListScreenState extends State<MatchListScreen> {
                               ),
                             )),
 
-                  // --- Tab 3: Beğenilenler ---
                   const LikesListBody(),
                 ],
               ),
 
-              // 2. KATMAN: REHBER KARAKTER
               ValueListenableBuilder<bool>(
                 valueListenable: _showGuideNotifier,
                 builder: (context, isVisible, child) {
@@ -265,7 +247,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
   }
 
   Future<void> _openIncomingLikes() async {
-    // (Orijinal incoming likes logic'i korundu)
     final me = FirebaseAuth.instance.currentUser?.uid;
     if (me == null) return;
     final db = FirebaseFirestore.instance;
@@ -301,7 +282,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
       for (final d in qb.docs) pushFromDoc(d);
       items.sort((a, b) => b.when.compareTo(a.when));
 
-      // Mark seen logic...
       if (items.isNotEmpty) {
         final batch = db.batch();
         for (final it in items) {
@@ -317,384 +297,10 @@ class _MatchListScreenState extends State<MatchListScreen> {
     } catch (_) {}
 
     if (!mounted) return;
-    // Bottom Sheet UI
     showModalBottomSheet(
         context: context,
         isScrollControlled: true,
         builder: (_) => _IncomingLikesSheet(items: items));
-  }
-}
-
-// --- Modern Match Card ---
-
-class _MatchCard extends StatefulWidget {
-  final global_match.MatchResult result;
-  final VoidCallback onOpen;
-  final VoidCallback onLike;
-  final VoidCallback onPass;
-
-  const _MatchCard({
-    required this.result,
-    required this.onOpen,
-    required this.onLike,
-    required this.onPass,
-    super.key,
-  });
-
-  @override
-  State<_MatchCard> createState() => _MatchCardState();
-}
-
-class _MatchCardState extends State<_MatchCard>
-    with AutomaticKeepAliveClientMixin {
-  late final Future<_CardData> _future;
-
-  @override
-  void initState() {
-    super.initState();
-    _future = _loadCardData(widget.result);
-  }
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    final m = widget.result;
-    final theme = Theme.of(context);
-    final pct = m.score.clamp(0, 100).toStringAsFixed(0);
-
-    final title = (m.displayName != null && m.displayName!.isNotEmpty)
-        ? m.displayName!
-        : (m.letterboxdUsername != null ? '@${m.letterboxdUsername}' : 'Kullanıcı');
-
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow, // Flutter 3.22+
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          )
-        ],
-        border: Border.all(color: theme.colorScheme.outlineVariant.withOpacity(0.3)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Content Scroll
-          Positioned.fill(
-            bottom: 80, // Space for buttons
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header: Photo & Name
-                  Row(
-  children: [
-    // Fotoğraf ve İsim/Skor alanını tıklanabilir Expanded widget'ı ile sarıyoruz.
-    Expanded( 
-      child: InkWell(
-        borderRadius: BorderRadius.circular(50), 
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              // Hedef: PublicProfileScreen(uid)
-              builder: (_) => PublicProfileScreen(uid: m.uid),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0), // Tıklama alanını rahatlatmak için
-          child: Row(
-            children: [
-              // Fotoğraf (Original Container)
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: theme.colorScheme.primary, width: 2),
-                  image: (m.photoURL != null && m.photoURL!.isNotEmpty)
-                      ? DecorationImage(
-                          image: NetworkImage(m.photoURL!),
-                          fit: BoxFit.cover)
-                      : null,
-                ),
-                child: (m.photoURL == null || m.photoURL!.isEmpty)
-                    ? Icon(Icons.person, size: 40, color: theme.primaryColor)
-                    : null,
-              ),
-              const SizedBox(width: 16),
-              // İsim & Skor (Original Expanded Column)
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold, fontSize: 22)),
-                    const SizedBox(height: 4),
-                    // Score Badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '%$pct Uyum',
-                        style: TextStyle(
-                            color: theme.colorScheme.onPrimaryContainer,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-    // Detay butonu (Original IconButton) - Tıklanabilir alan dışında kalır.
-    IconButton(
-        onPressed: widget.onOpen,
-        icon: const Icon(Icons.info_outline_rounded))
-  ],
-),
-                  const SizedBox(height: 24),
-
-                  // Stats Row
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        if (m.commonFiveCount > 0)
-                          _StatBox(
-                              icon: Icons.star_rounded,
-                              val: '${m.commonFiveCount}',
-                              label: '5★',
-                              color: Colors.amber),
-                        if (m.commonFavCount > 0)
-                          _StatBox(
-                              icon: Icons.favorite_rounded,
-                              val: '${m.commonFavCount}',
-                              label: 'Fav',
-                              color: Colors.redAccent),
-                        if (m.commonWatchCount > 0)
-                          _StatBox(
-                              icon: Icons.visibility_rounded,
-                              val: '${m.commonWatchCount}',
-                              label: 'Watch',
-                              color: Colors.blueAccent),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Async Data: Genres & Posters
-                  // Async Data: Genres & Posters
-                  FutureBuilder<_CardData>(
-                    future: _future,
-                    builder: (context, snap) {
-                      final cd = snap.data;
-                      // Loading state for content
-                      if (snap.connectionState == ConnectionState.waiting) {
-                        return const _SkeletonContent();
-                      }
-                      
-                      final commonGenres = m.commonGenres;
-                      final commonDirectors = m.commonDirectors;
-                      // Veri var mı ve film listesi dolu mu kontrolü
-                      final hasFilms = cd != null && cd.allFilms.isNotEmpty;
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Common Genres / Directors
-                          if (commonGenres.isNotEmpty || commonDirectors.isNotEmpty) ...[
-                             Text('ORTAK ZEVKLER', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)),
-                             const SizedBox(height: 8),
-                             Wrap(
-                               spacing: 8,
-                               runSpacing: 8,
-                               children: [
-                                 ...commonGenres.take(4).map((g) => Chip(
-                                   label: Text(g), 
-                                   visualDensity: VisualDensity.compact,
-                                   backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                                   side: BorderSide.none,
-                                 )),
-                                 ...commonDirectors.take(2).map((d) => Chip(
-                                   label: Text(d), 
-                                   avatar: const Icon(Icons.movie_creation_outlined, size: 14),
-                                   visualDensity: VisualDensity.compact,
-                                   side: BorderSide.none,
-                                 ))
-                               ],
-                             ),
-                             const SizedBox(height: 20),
-                          ],
-
-                          // Posters
-                          if (hasFilms) ...[
-                            Text('ORTAK FİLMLER', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: theme.hintColor)),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              height: 140,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: cd.allFilms.length, // allPosters yerine allFilms
-                                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                                itemBuilder: (ctx, i) {
-                                  final film = cd.allFilms[i]; // Film objesini al
-                                  return ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: AspectRatio(
-                                      aspectRatio: 2 / 3,
-                                      child: PosterImage(
-                                        posterUrl: film.posterUrl,
-                                        title: film.title, // Title parametresi eklendi
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            )
-                          ] else ...[
-                            // Eğer film yoksa gösterilecek kutu (Spread operatörü ile listeye eklendi)
-                            Container(
-                               padding: const EdgeInsets.all(16),
-                               width: double.infinity,
-                               decoration: BoxDecoration(
-                                 color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                                 borderRadius: BorderRadius.circular(12)
-                               ),
-                               child: const Text('Ortak film detayı yükleniyor veya yok...', textAlign: TextAlign.center, style: TextStyle(fontSize: 12))
-                            )
-                          ]
-                        ],
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Fixed Bottom Buttons
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: 20,
-            child: Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 56,
-                    child: OutlinedButton.icon(
-                      onPressed: widget.onPass,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.error,
-                        side: BorderSide(color: theme.colorScheme.error, width: 1.5),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))
-                      ),
-                      icon: const Icon(Icons.close_rounded),
-                      label: const Text('Pas'),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: SizedBox(
-                    height: 56,
-                    child: FilledButton.icon(
-                      onPressed: widget.onLike,
-                       style: FilledButton.styleFrom(
-                        backgroundColor: theme.colorScheme.primary,
-                        foregroundColor: theme.colorScheme.onPrimary,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        elevation: 4,
-                        shadowColor: theme.colorScheme.primary.withOpacity(0.4),
-                      ),
-                      icon: const Icon(Icons.favorite_rounded),
-                      label: const Text('Beğen'),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-}
-
-class _StatBox extends StatelessWidget {
-  final IconData icon;
-  final String val;
-  final String label;
-  final Color color;
-  const _StatBox(
-      {required this.icon,
-      required this.val,
-      required this.label,
-      required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 4),
-          Text(val, style: const TextStyle(fontWeight: FontWeight.bold)),
-          Text(label, style: TextStyle(fontSize: 10, color: theme.hintColor)),
-        ],
-      ),
-    );
-  }
-}
-
-class _SkeletonContent extends StatelessWidget {
-  const _SkeletonContent();
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(width: 100, height: 12, color: Colors.black12),
-        const SizedBox(height: 8),
-        Container(width: double.infinity, height: 30, color: Colors.black12),
-        const SizedBox(height: 20),
-        Container(width: 100, height: 12, color: Colors.black12),
-        const SizedBox(height: 8),
-        Row(
-          children: List.generate(3, (i) => Container(
-            width: 80, height: 120, 
-            margin: const EdgeInsets.only(right: 8),
-            decoration: BoxDecoration(
-              color: Colors.black12,
-              borderRadius: BorderRadius.circular(8)
-            ),
-          )),
-        )
-      ],
-    );
   }
 }
 
@@ -751,7 +357,6 @@ class _MatchScreenState extends State<MatchScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Semantic Tags
                   if (m.commonGenres.isNotEmpty)
                     _ChipsSection(label: 'Ortak Türler', values: m.commonGenres),
                   if (m.commonDirectors.isNotEmpty)
@@ -766,7 +371,6 @@ class _MatchScreenState extends State<MatchScreen> {
           FutureBuilder<_Resolved>(
             future: _future,
             builder: (context, snap) {
-              // Yükleniyor durumu
               if (snap.connectionState == ConnectionState.waiting) {
                 return const SliverFillRemaining(
                   child: Center(child: CircularProgressIndicator()),
@@ -775,11 +379,8 @@ class _MatchScreenState extends State<MatchScreen> {
               
               final data = snap.data ?? const _Resolved();
 
-              // SliverMainAxisGroup: Birden fazla Sliver'ı tek bir grup gibi döndürmemizi sağlar.
-              // Böylece "Header" (Başlık) ve "Grid" (Liste) birbirinden bağımsız ama sıralı çalışır.
               return SliverMainAxisGroup(
                 slivers: [
-                  // 1. ORTAK 5 YILDIZ
                   if (data.fiveStars.isNotEmpty) ...[
                     const SliverToBoxAdapter(
                       child: Padding(
@@ -797,7 +398,6 @@ class _MatchScreenState extends State<MatchScreen> {
                           crossAxisSpacing: 8, 
                           mainAxisSpacing: 8,
                         ),
-                        // Lazy Loading: Sadece ekranda görünenler oluşturulur
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.fiveStars[i];
@@ -815,7 +415,6 @@ class _MatchScreenState extends State<MatchScreen> {
                     ),
                   ],
 
-                  // 2. ORTAK FAVORİLER
                   if (data.favorites.isNotEmpty) ...[
                     const SliverToBoxAdapter(
                       child: Padding(
@@ -850,7 +449,6 @@ class _MatchScreenState extends State<MatchScreen> {
                     ),
                   ],
 
-                  // 3. ORTAK İZLEME LİSTESİ
                   if (data.watchlist.isNotEmpty) ...[
                     const SliverToBoxAdapter(
                       child: Padding(
@@ -885,7 +483,6 @@ class _MatchScreenState extends State<MatchScreen> {
                     ),
                   ],
 
-                  // Alt boşluk
                   const SliverToBoxAdapter(child: SizedBox(height: 40)),
                 ],
               );
@@ -926,14 +523,6 @@ class _ChipsSection extends StatelessWidget {
   }
 }
 
-// --- Helper Classes & Functions ---
-
-class FilmItem {
-  final String title;
-  final String posterUrl;
-  const FilmItem({required this.title, required this.posterUrl});
-}
-
 class _Resolved {
   final List<FilmItem> favorites;
   final List<FilmItem> fiveStars;
@@ -944,7 +533,6 @@ class _Resolved {
 Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
   final db = FirebaseFirestore.instance;
   
-  // Robust Fetcher
   Future<List<FilmItem>> readChunk(List<String> keys) async {
     if (keys.isEmpty) return const [];
     final cleanKeys = keys.where((k) => k.trim().isNotEmpty).toList();
@@ -957,10 +545,8 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
       await Future.delayed(const Duration(milliseconds: 5));
       final chunk = cleanKeys.sublist(i, math.min(i + chunkSize, cleanKeys.length));
       
-      // 1. Try by Doc ID
       var qs = await db.collection('catalog_films').where(FieldPath.documentId, whereIn: chunk).get();
       
-      // 2. Fallback by 'key' field
       if (qs.docs.isEmpty) {
         qs = await db.collection('catalog_films').where('key', whereIn: chunk).get();
       }
@@ -969,7 +555,8 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
         final d = doc.data();
         final t = (d['title'] ?? d['name'] ?? '').toString();
         final p = (d['posterUrl'] ?? d['poster'] ?? d['poster_path'] ?? '').toString();
-        items.add(FilmItem(title: t.isNotEmpty ? t : 'İsimsiz', posterUrl: p));
+        // DÜZELTME: FilmItem'a ID parametresi eklendi
+        items.add(FilmItem(id: doc.id, title: t.isNotEmpty ? t : 'İsimsiz', posterUrl: p));
       }
     }
     return items;
@@ -984,54 +571,6 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
     fiveStars: await fiveF,
     watchlist: await watchF,
   );
-}
-
-// --- Card Data Fetcher for Swipe Card Preview ---
-
-// --- GÜNCELLENMİŞ VERSİYON ---
-
-class _CardData {
-  // Artık sadece String listesi değil, FilmItem listesi tutuyoruz (Title + Poster)
-  final List<FilmItem> allFilms; 
-  const _CardData({this.allFilms = const []});
-}
-
-Future<_CardData> _loadCardData(global_match.MatchResult m) async {
-  final db = FirebaseFirestore.instance;
-  
-  // Öncelik sırası: 5 yıldız -> favoriler -> watchlist
-  final allKeys = <String>{
-    ...m.commonFiveStars.take(4),
-    ...m.commonFavorites.take(4),
-    ...m.commonWatchlist.take(2)
-  }.take(6).toList(); 
-
-  if(allKeys.isEmpty) return const _CardData();
-
-  final films = <FilmItem>[];
-  
-  try {
-     // Doc ID ile ara
-     var qs = await db.collection('catalog_films').where(FieldPath.documentId, whereIn: allKeys).get();
-     
-     // Bulamazsa 'key' alanı ile ara (Yedek)
-     if (qs.docs.isEmpty) {
-       qs = await db.collection('catalog_films').where('key', whereIn: allKeys).get();
-     }
-
-     for(final d in qs.docs) {
-       final data = d.data();
-       final p = (data['posterUrl'] ?? data['poster'] ?? '').toString();
-       final t = (data['title'] ?? data['name'] ?? '').toString(); // Title'ı da alıyoruz!
-       
-       // Poster boş olsa bile listeye ekle, çünkü PosterImage widget'ı title ile bulacak.
-       if (t.isNotEmpty) {
-         films.add(FilmItem(title: t, posterUrl: p));
-       }
-     }
-  } catch(_) {}
-
-  return _CardData(allFilms: films);
 }
 
 // --- Components for Incoming Likes Bottom Sheet ---
@@ -1082,11 +621,9 @@ class _IncomingLikeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // UID yerine gerçek kullanıcı verisini çekiyoruz
     return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       future: FirebaseFirestore.instance.collection('users').doc(item.otherUid).get(),
       builder: (context, snapshot) {
-        // Veri yüklenirken basit bir görünüm
         if (!snapshot.hasData) {
           return ListTile(
             leading: const CircleAvatar(child: Icon(Icons.person, color: Colors.grey)),
@@ -1099,7 +636,6 @@ class _IncomingLikeTile extends StatelessWidget {
         final photo = data?['photoURL'] as String?;
         final lbUsername = data?['letterboxdUsername'] as String?;
         
-        // Eğer isim yoksa Letterboxd adını, o da yoksa 'Kullanıcı'yı göster
         final displayName = (name != null && name.isNotEmpty) 
             ? name 
             : (lbUsername != null ? '@$lbUsername' : 'Kullanıcı');
@@ -1139,7 +675,6 @@ class _IncomingLikeTile extends StatelessWidget {
     );
   }
 
-  // Tarihi daha okunaklı gösteren yardımcı metod
   String _formatDate(DateTime d) {
     final now = DateTime.now();
     final diff = now.difference(d);
@@ -1176,7 +711,6 @@ class _LikesIndicatorHeart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // LikeService üzerinden okunmamış beğeni sayısını dinliyoruz
     return StreamBuilder<int>(
       stream: LikeService.instance.incomingLikesUnreadCount(),
       builder: (context, snapshot) {
@@ -1190,10 +724,9 @@ class _LikesIndicatorHeart extends StatelessWidget {
               onPressed: onPressed,
               icon: Icon(
                 hasUnread ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: hasUnread ? Colors.red : null, // Okunmamış varsa Kırmızı
+                color: hasUnread ? Colors.red : null,
               ),
             ),
-            // Opsiyonel: Kırmızı nokta (Badge) eklemek isterseniz
             if (hasUnread)
               Positioned(
                 right: 8,
@@ -1214,5 +747,3 @@ class _LikesIndicatorHeart extends StatelessWidget {
     );
   }
 }
-
-
