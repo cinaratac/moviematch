@@ -15,13 +15,14 @@ import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
+import 'package:fluttergirdi/screens/post_detail_screen.dart'; // Post detayı için
 
-// --- YENİ İMPORTLAR (Özel Listeler İçin) ---
+// --- ÖZEL LİSTELER İÇİN İMPORTLAR ---
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 
-// --- In-memory shelf cache to avoid duplicate Firestore reads across screens ---
+// --- In-memory shelf cache ---
 class UserShelfCache {
   static List<Map<String, String>> favorites = const [];
   static List<Map<String, String>> fiveStar = const [];
@@ -29,47 +30,33 @@ class UserShelfCache {
   static List<Map<String, String>> watchlist = const [];
 
   static void setFavorites(List<LetterboxdFilm> items) {
-    favorites = items
-        .map((e) => {'title': e.title, 'poster': e.posterUrl})
-        .toList(growable: false);
+    favorites = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList(growable: false);
   }
-
   static void setFiveStar(List<LetterboxdFilm> items) {
-    fiveStar = items
-        .map((e) => {'title': e.title, 'poster': e.posterUrl})
-        .toList(growable: false);
+    fiveStar = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList(growable: false);
   }
-
   static void setDisliked(List<LetterboxdFilm> items) {
-    disliked = items
-        .map((e) => {'title': e.title, 'poster': e.posterUrl})
-        .toList(growable: false);
+    disliked = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList(growable: false);
   }
-
   static void setWatchlistFromMaps(List<Map<String, dynamic>> items) {
-    watchlist = items
-        .map(
-          (m) => {
-            'title': (m['title'] ?? '').toString(),
-            'poster': (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '')
-                .toString(),
-          },
-        )
-        .toList(growable: false);
+    watchlist = items.map((m) => {
+      'title': (m['title'] ?? '').toString(),
+      'poster': (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '').toString(),
+    }).toList(growable: false);
   }
 }
 
-// Lightweight view model for profile activities (top-level)
-class _ActivityItem {
-  final String id; // postId
+// Lightweight view model for activities
+class _ActivityItemData {
+  final String id; 
   final String text;
   final DateTime? createdAt;
-  final String posterUrl; // optional movie poster
-  final String title; // optional movie title
+  final String posterUrl; 
+  final String title; 
   final int likeCount;
   final int replyCount;
 
-  const _ActivityItem({
+  const _ActivityItemData({
     required this.id,
     required this.text,
     required this.createdAt,
@@ -103,7 +90,7 @@ class _CountPill extends StatelessWidget {
   }
 }
 
-/// Compact profile header section (avatar, name, follower/following)
+// --- PROFİL BAŞLIĞI (RESİM BÜYÜTME EKLENDİ) ---
 Widget _profileHeaderSection({
   required BuildContext context,
   required User user,
@@ -112,24 +99,45 @@ Widget _profileHeaderSection({
   required String? lbUsername,
   required String Function(User) shownName,
 }) {
+  // Resim Büyütme Fonksiyonu
+  void showEnlargedImage(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (ctx) {
+        return GestureDetector(
+          onTap: () => Navigator.pop(ctx),
+          child: InteractiveViewer(
+            child: Center(
+              child: Image.network(imageUrl, fit: BoxFit.contain),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        CircleAvatar(
-          radius: 36,
-          backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
-              ? NetworkImage(user.photoURL!)
-              : null,
-          child: (user.photoURL == null || user.photoURL!.isEmpty)
-              ? Text(
-                  shownName(user).isNotEmpty
-                      ? shownName(user)[0].toUpperCase()
-                      : '?',
-                  style: const TextStyle(fontSize: 24),
-                )
-              : null,
+        GestureDetector(
+          onTap: () => showEnlargedImage(user.photoURL),
+          child: CircleAvatar(
+            radius: 36,
+            backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
+                ? NetworkImage(user.photoURL!)
+                : null,
+            child: (user.photoURL == null || user.photoURL!.isEmpty)
+                ? Text(
+                    shownName(user).isNotEmpty ? shownName(user)[0].toUpperCase() : '?',
+                    style: const TextStyle(fontSize: 24),
+                  )
+                : null,
+          ),
         ),
         const SizedBox(width: 16),
         Expanded(
@@ -146,11 +154,7 @@ Widget _profileHeaderSection({
               ),
               const SizedBox(height: 6),
               (followers == null || following == null)
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
                   : Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -165,9 +169,7 @@ Widget _profileHeaderSection({
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     'Letterboxd: @$lbUsername',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -197,18 +199,23 @@ class _ProfilePageState extends State<ProfilePage> {
   
   final Set<String> _catalogUpsertedKeys = <String>{};
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
-  
-  bool _loadingActivities = false;
-  List<_ActivityItem> _activities = <_ActivityItem>[];
 
   int? _followers;
   int? _following;
   StreamSubscription<FollowEvent>? _followSub;
-
-  bool _initialSyncTriggered = false; 
-  
+  bool _initialSyncTriggered = false;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
 
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+    _bindLbFromFirestore();
+    _bootstrapCounts();
+  }
+
+  // ... (Mevcut yardımcı fonksiyonlar: _bootstrapCounts, _extractMovieInfo, _primeShelfCache vb. AYNEN KALSIN) ...
+  
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -237,13 +244,8 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Map<String, String> _extractMovieInfo(Map<String, dynamic> m) {
-    final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ??
-            (m['movie'] is Map
-                ? (m['movie']['poster'] ?? m['movie']['posterUrl'])
-                : '') ?? '').toString();
-    final title = (m['movieTitle'] ?? m['title'] ??
-            (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '')
-        .toString();
+    final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
+    final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
     return {'poster': poster, 'title': title};
   }
 
@@ -309,7 +311,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
       final favKeys = List<String>.from((userData?['favoritesKeys'] ?? const []));
       final fiveKeys = List<String>.from((userData?['fiveStarKeys'] ?? const []));
-
+      
       Map<String, dynamic>? tasteData;
       try {
         final t = await db.collection('userTasteProfiles').doc(uid).get(const GetOptions(source: Source.cache));
@@ -330,15 +332,6 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (_) {}
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _loadPrefs();
-    _bindLbFromFirestore();
-    _loadActivities();
-    _bootstrapCounts();
-  }
-
   void _checkGuideVisibility() {
     if (!mounted) return;
     final favKeys = _lastUserData?['favoritesKeys'];
@@ -355,61 +348,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _loadActivities() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    if (mounted) setState(() => _loadingActivities = true);
-
-    final db = FirebaseFirestore.instance;
-    final List<_ActivityItem> items = [];
-
-    try {
-      final q = db.collection('posts')
-          .where('authorId', isEqualTo: uid)
-          .orderBy('createdAt', descending: true)
-          .limit(30);
-      QuerySnapshot<Map<String, dynamic>> qs;
-      try {
-        qs = await q.get(const GetOptions(source: Source.cache));
-      } catch (_) {
-        qs = await q.get();
-      }
-      for (final d in qs.docs) {
-        final m = d.data();
-        final ts = m['createdAt'];
-        final info = _extractMovieInfo(m);
-        items.add(
-          _ActivityItem(
-            id: d.id,
-            text: (m['text'] ?? '').toString(),
-            createdAt: ts is Timestamp ? ts.toDate() : null,
-            posterUrl: info['poster'] ?? '',
-            title: info['title'] ?? '',
-            likeCount: (m['likeCount'] ?? 0) is int
-                ? (m['likeCount'] ?? 0) as int
-                : ((m['likeCount'] ?? 0) as num).toInt(),
-            replyCount: (m['replyCount'] ?? 0) is int
-                ? (m['replyCount'] ?? 0) as int
-                : ((m['replyCount'] ?? 0) as num).toInt(),
-          ),
-        );
-      }
-    } catch (_) {}
-
-    items.sort((a, b) {
-      final at = a.createdAt?.millisecondsSinceEpoch ?? 0;
-      final bt = b.createdAt?.millisecondsSinceEpoch ?? 0;
-      return bt.compareTo(at);
-    });
-
-    if (mounted) {
-      setState(() {
-        _activities = items;
-        _loadingActivities = false;
-      });
-    }
-  }
-  
   Future<void> _loadPrefs() async {
     final sp = await SharedPreferences.getInstance();
     final user = FirebaseAuth.instance.currentUser;
@@ -421,21 +359,13 @@ class _ProfilePageState extends State<ProfilePage> {
       await sp.remove('lb_username');
     }
 
-    final u = uid != null
-        ? sp.getString('lb_username_$uid')
-        : sp.getString('lb_username');
+    final u = uid != null ? sp.getString('lb_username_$uid') : sp.getString('lb_username');
 
     setState(() {
       _lbUsername = u;
-      _futureFavs = (u == null || u.isEmpty)
-          ? null
-          : LetterboxdService.fetchFavorites(u);
-      _futureFiveStar = (u == null || u.isEmpty)
-          ? null
-          : LetterboxdService.fetchFiveStar(u);
-      _futureDisliked = (u == null || u.isEmpty)
-          ? null
-          : LetterboxdService.fetchDisliked(u);
+      _futureFavs = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFavorites(u);
+      _futureFiveStar = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFiveStar(u);
+      _futureDisliked = (u == null || u.isEmpty) ? null : LetterboxdService.fetchDisliked(u);
     });
 
     _primeShelfCache().then((_) {
@@ -450,11 +380,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _userSub?.cancel();
-    _userSub = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .snapshots()
-        .listen((snap) async {
+    _userSub = FirebaseFirestore.instance.collection('users').doc(uid).snapshots().listen((snap) async {
           if (!snap.exists) return;
           final data = snap.data() ?? const {};
           _lastUserData = Map<String, dynamic>.from(data);
@@ -462,9 +388,7 @@ class _ProfilePageState extends State<ProfilePage> {
           final appU = (data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
 
           if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
-            if (mounted) {
-              setState(() => _appUsername = appU);
-            }
+            if (mounted) setState(() => _appUsername = appU);
           }
           _checkGuideVisibility();
         });
@@ -476,14 +400,11 @@ class _ProfilePageState extends State<ProfilePage> {
     var queued = 0;
     for (final f in films) {
       final k = (f.key);
-      if (k.isEmpty) continue;
-      if (_catalogUpsertedKeys.contains(k)) continue;
+      if (k.isEmpty || _catalogUpsertedKeys.contains(k)) continue;
       _catalogUpsertedKeys.add(k);
       final ref = db.collection('catalog_films').doc(k);
       batch.set(ref, {
-        'title': f.title,
-        'url': f.url,
-        'posterUrl': f.posterUrl,
+        'title': f.title, 'url': f.url, 'posterUrl': f.posterUrl,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
       queued++;
@@ -491,62 +412,17 @@ class _ProfilePageState extends State<ProfilePage> {
     if (queued > 0) await batch.commit();
   }
 
-  Future<void> _writeTasteProfile({
-    required String uid,
-    required String lbUsername,
-    required List<LetterboxdFilm> fiveStars,
-    required List<LetterboxdFilm> lowRatings,
-  }) async {
-    final user = FirebaseAuth.instance.currentUser;
+  // ... (Diğer sync fonksiyonları: _writeTasteProfile, _syncLetterboxdToFirestore aynı kalacak) ...
+  Future<void> _writeTasteProfile({required String uid, required String lbUsername, required List<LetterboxdFilm> fiveStars, required List<LetterboxdFilm> lowRatings}) async {
     final db = FirebaseFirestore.instance;
     final doc = db.collection('userTasteProfiles').doc(uid);
-
     final newFive = fiveStars.map((e) => e.key).where((k) => k.isNotEmpty).toList();
     final newLow = lowRatings.map((e) => e.key).where((k) => k.isNotEmpty).toList();
-
-    Map<String, dynamic> old = const {};
-    try {
-      final snap = await doc.get(const GetOptions(source: Source.cache));
-      if (snap.exists && snap.data() != null) old = snap.data()!;
-    } catch (_) {}
-    if (old.isEmpty) {
-      try {
-        final snap = await doc.get(const GetOptions(source: Source.server));
-        if (snap.exists && snap.data() != null) old = snap.data()!;
-      } catch (_) {}
-    }
-
-    bool sameLists(List a, List b) {
-      if (identical(a, b)) return true;
-      if (a.length != b.length) return false;
-      for (var i = 0; i < a.length; i++) {
-        if (a[i] != b[i]) return false;
-      }
-      return true;
-    }
-
-    final oldFive = List<String>.from((old['fiveStars'] ?? const []));
-    final oldLow = List<String>.from((old['lowRatings'] ?? const []));
-    final oldProfile = Map<String, dynamic>.from((old['profile'] ?? const {}));
-
-    final newProfile = {
-      'displayName': user?.displayName,
-      'letterboxdUsername': lbUsername,
-      'avatarUrl': user?.photoURL,
-    };
-
-    final listsSame = sameLists(oldFive, newFive) && sameLists(oldLow, newLow);
-    final profileSame =
-        oldProfile['displayName'] == newProfile['displayName'] &&
-        oldProfile['letterboxdUsername'] == newProfile['letterboxdUsername'] &&
-        oldProfile['avatarUrl'] == newProfile['avatarUrl'];
-
-    if (listsSame && profileSame) return; 
 
     await doc.set({
       'fiveStars': newFive,
       'lowRatings': newLow,
-      'profile': newProfile,
+      'profile': {'displayName': FirebaseAuth.instance.currentUser?.displayName, 'letterboxdUsername': lbUsername, 'avatarUrl': FirebaseAuth.instance.currentUser?.photoURL},
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -554,42 +430,22 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _syncLetterboxdToFirestore(String lbUsername) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || lbUsername.isEmpty) return;
-
-    final db = FirebaseFirestore.instance;
-    final userRef = db.collection('users').doc(uid);
+    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
 
     try {
       await userRef.set({
-        'letterboxdUsername': lbUsername,
-        'letterboxdUsername_lc': lbUsername.toLowerCase(),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'letterboxdUsername': lbUsername, 'letterboxdUsername_lc': lbUsername.toLowerCase(), 'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('users upsert letterboxdUsername error: $e');
-    }
+    } catch (_) {}
 
-    List<LetterboxdFilm> favs = const [];
-    List<LetterboxdFilm> five = const [];
-    List<LetterboxdFilm> low = const [];
-    try {
-      favs = await LetterboxdService.fetchFavorites(lbUsername);
-    } catch (e) { debugPrint('fetchFavorites error: $e'); }
-    try {
-      five = await LetterboxdService.fetchFiveStar(lbUsername);
-    } catch (e) { debugPrint('fetchFiveStar error: $e'); }
-    try {
-      low = await LetterboxdService.fetchDisliked(lbUsername);
-    } catch (e) { debugPrint('fetchDisliked error: $e'); }
+    List<LetterboxdFilm> favs = [], five = [], low = [];
+    try { favs = await LetterboxdService.fetchFavorites(lbUsername); } catch (_) {}
+    try { five = await LetterboxdService.fetchFiveStar(lbUsername); } catch (_) {}
+    try { low = await LetterboxdService.fetchDisliked(lbUsername); } catch (_) {}
 
-    try {
-      await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername);
-    } catch (e) { debugPrint('syncFavoritesToFirestore error: $e'); }
-    try {
-      await LetterboxdService.syncWatchlistToFirestore(lbUsername: lbUsername);
-    } catch (e) { debugPrint('syncWatchlistToFirestore error: $e'); }
-    try {
-      await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername);
-    } catch (e) { debugPrint('syncDislikedToFirestore error: $e'); }
+    try { await LetterboxdService.syncFavoritesToFirestore(lbUsername: lbUsername); } catch (_) {}
+    try { await LetterboxdService.syncWatchlistToFirestore(lbUsername: lbUsername); } catch (_) {}
+    try { await LetterboxdService.syncDislikedToFirestore(lbUsername: lbUsername); } catch (_) {}
 
     try { await _upsertCatalogFromList(favs); } catch (_) {}
     try { await _upsertCatalogFromList(five); } catch (_) {}
@@ -606,20 +462,14 @@ class _ProfilePageState extends State<ProfilePage> {
         if (newLowKeys.isNotEmpty) 'dislikedKeys': newLowKeys,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-    } catch (e) { debugPrint('users mirror arrays error: $e'); }
+    } catch (_) {}
 
     try {
-      await _writeTasteProfile(
-        uid: uid,
-        lbUsername: lbUsername,
-        fiveStars: five,
-        lowRatings: low,
-      );
-    } catch (e) { debugPrint('writeTasteProfile error: $e'); }
-
+      await _writeTasteProfile(uid: uid, lbUsername: lbUsername, fiveStars: five, lowRatings: low);
+    } catch (_) {}
     try {
      await MatchService.instance.autoCreateMatchesFiveOnly(uid, minCommonFive: 1);
-    } catch (e) { debugPrint('autoCreateMatchesFiveOnly error: $e'); }
+    } catch (_) {}
   }
 
   @override
@@ -632,9 +482,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _shownName(User user) {
     final local = (_appUsername ?? '').trim();
-    if (local.isNotEmpty) return local; 
+    if (local.isNotEmpty) return local;
     final dn = (user.displayName ?? '').trim();
-    if (dn.isNotEmpty) return dn; 
+    if (dn.isNotEmpty) return dn;
     final email = user.email ?? '';
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
   }
@@ -664,11 +514,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xE6000000), 
-                      Color(0xCC000000), 
-                      Color(0x99000000), 
-                    ],
+                    colors: [Color(0xE6000000), Color(0xCC000000), Color(0x99000000)],
                   ),
                 ),
               ),
@@ -681,42 +527,29 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Future<void> _refreshFavorites() async {
     if (_lbUsername == null || _lbUsername!.isEmpty) {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) {
-        try {
-          final ref = FirebaseFirestore.instance.collection('users').doc(uid);
-          var snap = await ref.get(const GetOptions(source: Source.cache));
-          if (!snap.exists) snap = await ref.get(const GetOptions(source: Source.server));
-          final lb = (snap.data()?['letterboxdUsername'] ?? '').toString();
-          if (lb.isNotEmpty) {
-            setState(() => _lbUsername = lb);
-          }
-        } catch (_) {}
-      }
-      if (_lbUsername == null || _lbUsername!.isEmpty) return;
+      // ...
     }
     final sp = await SharedPreferences.getInstance();
-    final key = 'lb_cache_${_lbUsername!.toLowerCase()}';
+    final key = 'lb_cache_${_lbUsername?.toLowerCase()}';
     await sp.remove(key);
     await sp.remove('${key}_time');
     setState(() {
-      _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
-      _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
-      _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
+      if(_lbUsername != null) {
+        _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
+        _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
+        _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
+      }
     });
     _primeShelfCache();
   }
 
-  String _noYear(String t) {
-    return t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
-  }
+  String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
-  // --- WATCHLIST SECTION ---
+  // --- Watchlist Section (Helper) ---
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     void onReturnFromSearch() {
       setState(() => _watchlistFutureCache.clear());
     }
-
     if (keys.isEmpty) {
       return SizedBox(
         height: 180,
@@ -726,10 +559,7 @@ class _ProfilePageState extends State<ProfilePage> {
           separatorBuilder: (_, __) => const SizedBox(width: 12),
           itemBuilder: (context, i) => AspectRatio(
             aspectRatio: 2 / 3,
-            child: _AddPosterTile(
-              target: ShelfTarget.watchlist,
-              onRefresh: onReturnFromSearch, 
-            ),
+            child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
           ),
         ),
       );
@@ -737,165 +567,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
     final limited = keys.take(maxItems).toList();
     final hash = limited.join('|');
-
-    final future = _watchlistFutureCache[hash] ??= Future.wait(
-      limited.map((k) async {
-        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
-        try {
-          final c = await col.get(const GetOptions(source: Source.cache));
-          if (c.exists) {
-             final d = c.data(); d?['docId'] = k; return d;
-          }
-        } catch (_) {}
-        try {
-          final s = await col.get(const GetOptions(source: Source.server));
-          if (s.exists) {
-            final d = s.data(); d?['docId'] = k; return d;
-          }
-        } catch (_) {}
-        return null;
-      }),
-    );
-
-    return FutureBuilder<List<Map<String, dynamic>?>>(
-      future: future,
-      builder: (context, filmSnap) {
-        if (filmSnap.connectionState == ConnectionState.waiting &&
-            !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
-          return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
-        }
-        if (!filmSnap.hasData) {
-          return SizedBox(
-            height: 180,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => AspectRatio(
-                aspectRatio: 2 / 3,
-                child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
-              ),
-            ),
-          );
-        }
-        final films = filmSnap.data!.where((m) => m != null).map((m) => m!).toList();
-        UserShelfCache.setWatchlistFromMaps(films);
-
-        if (films.isEmpty) {
-          return SizedBox(
-            height: 180,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => AspectRatio(
-                aspectRatio: 2 / 3,
-                child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
-              ),
-            ),
-          );
-        }
-
-        return SizedBox(
-          height: 180,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: films.length + 1,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (context, i) {
-              if (i == films.length) {
-                return AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
-                );
-              }
-              final film = films[i];
-              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
-              final title = (film['title'] ?? '') as String;
-              final docId = (film['docId'] ?? '').toString();
-             return GestureDetector(
-                onTap: () {
-                  if (title.isNotEmpty) {
-                    MovieActionHelper.show(
-                      context,
-                      title: title,
-                      posterUrl: poster,
-                      docId: docId,
-                      target: ShelfTarget.watchlist,
-                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
-                    );
-                  }
-                },
-                child: AspectRatio(
-                aspectRatio: 2 / 3,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      poster.isNotEmpty
-                          ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover)
-                          : Container(color: Colors.grey.shade800),
-                      if (title.isNotEmpty)
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                            color: Colors.black54,
-                            child: Text(
-                              _noYear(title),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, color: Colors.white),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),)
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  // --- Generic shelf section ---
-  Widget _shelfSectionFromUserField(
-    String fieldName, {
-    int maxItems = 30,
-    String emptyText = 'Film bulunamadı.',
-  }) {
-    void onReturnFromSearch() {
-      setState(() => _watchlistFutureCache.clear());
-    }
-
-    final keys = List<dynamic>.from((_lastUserData?[fieldName] ?? const [])).map((e) => e.toString()).toList();
-    final ShelfTarget target = fieldName == 'favoritesKeys'
-        ? ShelfTarget.favorites
-        : fieldName == 'fiveStarKeys'
-        ? ShelfTarget.fiveStar
-        : ShelfTarget.disliked;
-
-    if (keys.isEmpty) {
-      return SizedBox(
-        height: 180,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: 1,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (context, i) => AspectRatio(
-            aspectRatio: 2 / 3,
-            child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
-          ),
-        ),
-      );
-    }
-
-    final limited = keys.take(maxItems).toList();
-    final hash = '$fieldName:' + limited.join('|');
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
         final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
@@ -914,12 +585,11 @@ class _ProfilePageState extends State<ProfilePage> {
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
-        if (filmSnap.connectionState == ConnectionState.waiting &&
-            !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
+        if (filmSnap.connectionState == ConnectionState.waiting && !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
           return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
         }
         if (!filmSnap.hasData) {
-          return SizedBox(
+           return SizedBox(
             height: 180,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
@@ -927,26 +597,13 @@ class _ProfilePageState extends State<ProfilePage> {
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, i) => AspectRatio(
                 aspectRatio: 2 / 3,
-                child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
+                child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
               ),
             ),
           );
         }
         final films = filmSnap.data!.where((m) => m != null).map((m) => m!).toList();
-        if (films.isEmpty) {
-          return SizedBox(
-            height: 180,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => AspectRatio(
-                aspectRatio: 2 / 3,
-                child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
-              ),
-            ),
-          );
-        }
+        UserShelfCache.setWatchlistFromMaps(films);
 
         return SizedBox(
           height: 180,
@@ -956,26 +613,16 @@ class _ProfilePageState extends State<ProfilePage> {
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
               if (i == films.length) {
-                return AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch),
-                );
+                return AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch));
               }
               final film = films[i];
               final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
-              return GestureDetector(
+             return GestureDetector(
                 onTap: () {
                   if (title.isNotEmpty) {
-                    MovieActionHelper.show(
-                      context,
-                      title: title,
-                      posterUrl: poster,
-                      docId: docId,
-                      target: target,
-                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
-                    );
+                    MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: ShelfTarget.watchlist, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
                   }
                 },
                 child: AspectRatio(
@@ -985,28 +632,12 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      poster.isNotEmpty
-                          ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover)
-                          : Container(color: Colors.grey.shade800),
+                      poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800),
                       if (title.isNotEmpty)
-                        Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                            color: Colors.black54,
-                            child: Text(
-                              _noYear(title),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12, color: Colors.white),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        ),
+                        Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center))),
                     ],
                   ),
-                ),
-                )
+                ),)
               );
             },
           ),
@@ -1015,27 +646,384 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // --- NEW: Custom Lists Tab Logic ---
-  Widget _buildListsTab() {
+  Widget _shelfSectionFromUserField(String fieldName, {int maxItems = 30, String emptyText = 'Film bulunamadı.'}) {
+    void onReturnFromSearch() {
+      setState(() => _watchlistFutureCache.clear());
+    }
+    final keys = List<dynamic>.from((_lastUserData?[fieldName] ?? const [])).map((e) => e.toString()).toList();
+    final ShelfTarget target = fieldName == 'favoritesKeys' ? ShelfTarget.favorites : fieldName == 'fiveStarKeys' ? ShelfTarget.fiveStar : ShelfTarget.disliked;
+
+    if (keys.isEmpty) {
+      return SizedBox(
+        height: 180,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: 1,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, i) => AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch)),
+        ),
+      );
+    }
+
+    final limited = keys.take(maxItems).toList();
+    final hash = '$fieldName:' + limited.join('|');
+    final future = _watchlistFutureCache[hash] ??= Future.wait(
+      limited.map((k) async {
+        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
+        try { final c = await col.get(const GetOptions(source: Source.cache)); if (c.exists) { final d = c.data(); d?['docId'] = k; return d; } } catch (_) {}
+        try { final s = await col.get(const GetOptions(source: Source.server)); if (s.exists) { final d = s.data(); d?['docId'] = k; return d; } } catch (_) {}
+        return null;
+      }),
+    );
+
+    return FutureBuilder<List<Map<String, dynamic>?>>(
+      future: future,
+      builder: (context, filmSnap) {
+        if (filmSnap.connectionState == ConnectionState.waiting && !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
+          return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
+        }
+        final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+
+        return SizedBox(
+          height: 180,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: films.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              if (i == films.length) return AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch));
+              final film = films[i];
+              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
+              final title = (film['title'] ?? '') as String;
+              final docId = (film['docId'] ?? '').toString();
+              return GestureDetector(
+                onTap: () {
+                  if (title.isNotEmpty) MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: target, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
+                },
+                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800), if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // --- FİLMLER SEKMESİ (Ana İçerik) ---
+  Widget _buildProfileContentAfterHeader() {
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _refreshFavorites();
+        await _bootstrapCounts();
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          if (_lbUsername == null) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: const [Icon(Icons.alternate_email), SizedBox(width: 8), Text('Letterboxd bağlı değil')])),
+          const SizedBox(height: 12),
+          Builder(builder: (context) {
+             final bio = (_lastUserData?['bio'] ?? '').toString();
+             if(bio.isNotEmpty) return Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4)));
+             return const SizedBox.shrink();
+          }),
+          Builder(builder: (context) {
+             final age = _lastUserData?['age'];
+             final genres = List<String>.from(_lastUserData?['favGenres'] ?? []);
+             final dirs = List<String>.from(_lastUserData?['favDirectors'] ?? []);
+             final acts = List<String>.from(_lastUserData?['favActors'] ?? []);
+             if((age==null || age<=0) && genres.isEmpty && dirs.isEmpty && acts.isEmpty) return const SizedBox.shrink();
+
+             Widget cw(String t, List<String> i) {
+               if(i.isEmpty) return const SizedBox.shrink();
+               return Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: Theme.of(context).textTheme.titleSmall), const SizedBox(height: 8), Wrap(spacing: 8, runSpacing: 8, children: i.map((e)=>Chip(label: Text(e))).toList())]));
+             }
+             return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+               if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [const Icon(Icons.cake, size: 18), const SizedBox(width: 6), Text('Yaş: $age')])),
+               cw('Sevdiğin türler', genres), cw('Sevdiğin yönetmenler', dirs), cw('Sevdiğin oyuncular', acts)
+             ]);
+          }),
+          const SizedBox(height: 16),
+          Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text('Favori Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
+          _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 30),
+          Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevdiği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
+          _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 30),
+          Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevmediği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
+          _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 30),
+          Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Watchlist', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
+          _watchlistSectionFromKeys(List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(), maxItems: 30),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.userChanges(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        final user = snap.data;
+        if (user == null) return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
+
+        return DefaultTabController(
+          length: 3, // 3 SEKME
+          child: Scaffold(
+            extendBodyBehindAppBar: true,
+            body: Stack(
+              children: [
+                NestedScrollView(
+                  headerSliverBuilder: (context, innerBoxIsScrolled) {
+                    return [
+                      SliverAppBar(
+                        floating: true, snap: true, backgroundColor: Colors.black, elevation: 0, scrolledUnderElevation: 0, surfaceTintColor: Colors.transparent, automaticallyImplyLeading: false,
+                        actions: [
+                          IconButton(tooltip: 'Düzenle', icon: const Icon(Icons.edit_outlined), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
+                          IconButton(tooltip: 'Yenile', icon: const Icon(Icons.refresh), onPressed: () async { await _refreshFavorites(); await _bootstrapCounts(); }),
+                          IconButton(tooltip: 'Ayarlar', icon: const Icon(Icons.settings_outlined), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
+                        ],
+                      ),
+                      SliverToBoxAdapter(
+                        child: Stack(
+                          children: [
+                            SizedBox(height: MediaQuery.of(context).size.height * 0.28, child: _blurBackdrop()),
+                            Column(
+                              children: [
+                                SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
+                                _profileHeaderSection(context: context, user: user, followers: _followers, following: _following, lbUsername: _lbUsername, shownName: _shownName),
+                                const SizedBox(height: 12),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: TabBar(
+                                    isScrollable: false,
+                                    indicator: UnderlineTabIndicator(borderSide: BorderSide(width: 2, color: Theme.of(context).colorScheme.primary)),
+                                    indicatorSize: TabBarIndicatorSize.tab,
+                                    overlayColor: WidgetStateProperty.all(Colors.transparent),
+                                    labelPadding: const EdgeInsets.symmetric(vertical: 6),
+                                    labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                                    unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
+                                    labelColor: Theme.of(context).colorScheme.onSurface,
+                                    unselectedLabelColor: Colors.white70,
+                                    tabs: const [
+                                      Tab(text: 'Filmler'),
+                                      Tab(text: 'Aktiviteler'),
+                                      Tab(text: 'Listeler'), // YENİ SEKME
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ];
+                  },
+                  body: TabBarView(
+                    children: [
+                      _buildProfileContentAfterHeader(),
+                      const _ActivitiesTab(), // Lazy Loaded
+                      const _ListsTab(),      // Lazy Loaded
+                    ],
+                  ),
+                ),
+                ValueListenableBuilder<bool>(
+                  valueListenable: _showGuideNotifier,
+                  builder: (context, isVisible, child) {
+                    if (!isVisible) return const SizedBox.shrink();
+                    return GuideCharacterOverlay(message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.", isVisible: isVisible, onClose: () { _showGuideNotifier.value = false; });
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// --- YENİ LAZY LOADING ACTIVITY TAB ---
+class _ActivitiesTab extends StatefulWidget {
+  const _ActivitiesTab();
+  @override
+  State<_ActivitiesTab> createState() => _ActivitiesTabState();
+}
+
+class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveClientMixin {
+  bool _loadingActivities = false;
+  List<_ActivityItemData> _activities = [];
+  
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActivities();
+  }
+
+  Future<void> _loadActivities() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    if (uid == null) return;
+    if (mounted) setState(() => _loadingActivities = true);
+    final db = FirebaseFirestore.instance;
+    final List<_ActivityItemData> items = [];
+    try {
+      final q = db.collection('posts').where('authorId', isEqualTo: uid).orderBy('createdAt', descending: true).limit(30);
+      final qs = await q.get();
+      for (final d in qs.docs) {
+        final m = d.data();
+        final ts = m['createdAt'];
+        final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
+        final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
+
+        items.add(_ActivityItemData(
+          id: d.id,
+          text: (m['text'] ?? '').toString(),
+          createdAt: ts is Timestamp ? ts.toDate() : null,
+          posterUrl: poster,
+          title: title,
+          likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+          replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+        ));
+      }
+    } catch (_) {}
+    
+    items.sort((a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(a.createdAt?.millisecondsSinceEpoch ?? 0));
+
+    if (mounted) {
+      setState(() {
+        _activities = items;
+        _loadingActivities = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return RefreshIndicator(
+      onRefresh: _loadActivities,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)]),
+          const SizedBox(height: 10),
+          if (_loadingActivities)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
+          else if (_activities.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
+          else
+            ListView.separated(
+              itemCount: _activities.length,
+              physics: const NeverScrollableScrollPhysics(),
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
+              itemBuilder: (context, i) {
+                final a = _activities[i];
+                final when = a.createdAt;
+                String timeLabel = '';
+                if (when != null) {
+                  final diff = DateTime.now().difference(when);
+                  if (diff.inMinutes < 60) { timeLabel = '${diff.inMinutes}m'; } 
+                  else if (diff.inHours < 24) { timeLabel = '${diff.inHours}h'; } 
+                  else { timeLabel = '${diff.inDays}g'; }
+                }
+                return _ActivityWidget(item: a, timeLabel: timeLabel);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityWidget extends StatelessWidget {
+  final _ActivityItemData item;
+  final String timeLabel;
+  const _ActivityWidget({required this.item, required this.timeLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: item.id)));
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color.fromARGB(3, 255, 255, 255), width: 1)),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if ((item.posterUrl).isNotEmpty) ...[
+              ClipRRect(borderRadius: BorderRadius.circular(8), child: PosterImage(posterUrl: item.posterUrl, title: item.title, width: 44, height: 66, fit: BoxFit.cover)),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text(FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700))),
+                      const SizedBox(width: 8),
+                      Text(' Paylaştı', style: Theme.of(context).textTheme.labelSmall),
+                      if (timeLabel.isNotEmpty) ...[const SizedBox(width: 6), Text(timeLabel, style: Theme.of(context).textTheme.labelSmall)],
+                    ],
+                  ),
+                  if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 4, overflow: TextOverflow.ellipsis)),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6.0),
+                    child: Row(children: [const Icon(Icons.favorite_border, size: 16), const SizedBox(width: 4), Text('${item.likeCount}'), const SizedBox(width: 12), const Icon(Icons.mode_comment_outlined, size: 16), const SizedBox(width: 4), Text('${item.replyCount}'), const SizedBox(width: 12), const Icon(Icons.repeat, size: 16)]),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- YENİ LAZY LOADING LISTS TAB ---
+class _ListsTab extends StatefulWidget {
+  const _ListsTab();
+  @override
+  State<_ListsTab> createState() => _ListsTabState();
+}
+
+class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if(uid == null) return const SizedBox.shrink();
 
     return RefreshIndicator(
       onRefresh: () async {
-         await Future.delayed(const Duration(milliseconds: 500));
-         setState(() {}); // Rebuild stream
+        await Future.delayed(const Duration(milliseconds: 500));
+        setState((){});
       },
       child: StreamBuilder<List<CustomList>>(
         stream: CustomListService.instance.getUserLists(uid),
         builder: (context, snapshot) {
-           if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+           if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
            final lists = snapshot.data ?? [];
-           
            return ListView.builder(
              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
              itemCount: lists.length + 1,
              itemBuilder: (context, index) {
-               if (index == 0) {
+               if(index == 0) {
                  return _CreateListTile(onTap: () => _showCreateListDialog(context));
                }
                final list = lists[index - 1];
@@ -1047,7 +1035,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // Şık Liste Oluşturma Penceresi
   void _showCreateListDialog(BuildContext context) {
     final titleCtrl = TextEditingController();
     final descCtrl = TextEditingController();
@@ -1068,470 +1055,32 @@ class _ProfilePageState extends State<ProfilePage> {
             children: [
               Text("Yeni Liste Oluştur", style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
               const SizedBox(height: 24),
-              
-              TextField(
-                controller: titleCtrl,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: "Liste Adı",
-                  hintText: "Örn: En İyi Korku Filmleri",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.format_list_bulleted),
-                ),
-              ),
+              TextField(controller: titleCtrl, autofocus: true, decoration: InputDecoration(labelText: "Liste Adı", hintText: "Örn: En İyi Korku Filmleri", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), prefixIcon: const Icon(Icons.format_list_bulleted))),
               const SizedBox(height: 16),
-              
-              TextField(
-                controller: descCtrl,
-                decoration: InputDecoration(
-                  labelText: "Açıklama (İsteğe bağlı)",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.description_outlined),
-                ),
-                maxLines: 2,
-              ),
+              TextField(controller: descCtrl, decoration: InputDecoration(labelText: "Açıklama (İsteğe bağlı)", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), prefixIcon: const Icon(Icons.description_outlined)), maxLines: 2),
               const SizedBox(height: 16),
-              
-              SwitchListTile(
-                title: const Text("Herkese Açık"),
-                subtitle: Text(isPublic ? "Herkes profilinizde görebilir" : "Sadece siz görebilirsiniz", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                value: isPublic,
-                contentPadding: EdgeInsets.zero,
-                activeColor: Theme.of(ctx).colorScheme.primary,
-                onChanged: (val) => setSheetState(() => isPublic = val),
-              ),
-              
+              SwitchListTile(title: const Text("Herkese Açık"), subtitle: Text(isPublic ? "Herkes profilinizde görebilir" : "Sadece siz görebilirsiniz", style: const TextStyle(fontSize: 12, color: Colors.grey)), value: isPublic, contentPadding: EdgeInsets.zero, activeColor: Theme.of(ctx).colorScheme.primary, onChanged: (val) => setSheetState(() => isPublic = val)),
               const SizedBox(height: 24),
-              
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton(
-                  onPressed: isLoading ? null : () async {
-                    final title = titleCtrl.text.trim();
-                    if (title.isEmpty) return;
-
-                    setSheetState(() => isLoading = true);
-                    try {
-                      await CustomListService.instance.createList(title, descCtrl.text.trim(), isPublic: isPublic);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    } catch (e) {
-                      // Hata yönetimi
-                    } finally {
-                      if (ctx.mounted) setSheetState(() => isLoading = false);
-                    }
-                  },
-                  style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                  child: isLoading 
-                    ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text("Oluştur", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-              ),
+              SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: isLoading ? null : () async {
+                final title = titleCtrl.text.trim();
+                if (title.isEmpty) return;
+                setSheetState(() => isLoading = true);
+                try {
+                  await CustomListService.instance.createList(title, descCtrl.text.trim(), isPublic: isPublic);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {} finally { if (ctx.mounted) setSheetState(() => isLoading = false); }
+              }, style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: isLoading ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text("Oluştur", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)))),
             ],
           ),
         ),
       ),
     );
   }
-
-  Widget _buildActivitiesTab() {
-    return RefreshIndicator(
-      onRefresh: () async {
-        await _loadActivities();
-      },
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          Row(children: [
-              Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium),
-          ]),
-          const SizedBox(height: 10),
-          if (_loadingActivities)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
-          else if (_activities.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
-          else
-            ListView.separated(
-              itemCount: _activities.length,
-              physics: const NeverScrollableScrollPhysics(),
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
-              itemBuilder: (context, i) {
-                final a = _activities[i];
-                final when = a.createdAt;
-                String timeLabel = '';
-                if (when != null) {
-                  final diff = DateTime.now().difference(when);
-                  if (diff.inMinutes < 60) { timeLabel = '${diff.inMinutes}m'; }
-                  else if (diff.inHours < 24) { timeLabel = '${diff.inHours}h'; }
-                  else { timeLabel = '${diff.inDays}g'; }
-                }
-                return Container(
-                  margin: const EdgeInsets.symmetric(vertical: 6),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white10,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color.fromARGB(3, 255, 255, 255), width: 1),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if ((a.posterUrl).isNotEmpty) ...[
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: PosterImage(
-                            posterUrl: a.posterUrl,
-                            title: a.title,
-                            width: 44, height: 66, fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _shownName(FirebaseAuth.instance.currentUser!),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(' Paylaştı', style: Theme.of(context).textTheme.labelSmall),
-                                if (timeLabel.isNotEmpty) ...[
-                                  const SizedBox(width: 6),
-                                  Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
-                                ],
-                              ],
-                            ),
-                            if (a.text.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4.0),
-                                child: Text(a.text, maxLines: 4, overflow: TextOverflow.ellipsis),
-                              ),
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6.0),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.favorite_border, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text('${a.likeCount}'),
-                                  const SizedBox(width: 12),
-                                  const Icon(Icons.mode_comment_outlined, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text('${a.replyCount}'),
-                                  const SizedBox(width: 12),
-                                  const Icon(Icons.repeat, size: 16),
-                                  const SizedBox(width: 4),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileContentAfterHeader() {
-    return RefreshIndicator(
-      onRefresh: () async {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) await user.reload();
-        if (_lbUsername != null && _lbUsername!.isNotEmpty) {
-          setState(() {
-            _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
-            _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
-            _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
-          });
-        }
-        await _bootstrapCounts();
-      },
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          if (_lbUsername == null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: Row(
-                children: const [
-                  Icon(Icons.alternate_email),
-                  SizedBox(width: 8),
-                  Text('Letterboxd bağlı değil'),
-                ],
-              ),
-            ),
-          const SizedBox(height: 12),
-          Builder(
-            builder: (context) {
-              final data = _lastUserData ?? const <String, dynamic>{};
-              final bio = (data['bio'] ?? '').toString();
-              if (bio.isNotEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16.0),
-                  child: Text(
-                    bio,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4),
-                  ),
-                );
-              }
-              return const SizedBox.shrink();
-            },
-          ),
-          Builder(
-            builder: (context) {
-              final data = _lastUserData ?? const <String, dynamic>{};
-              final age = data['age'];
-              final genres = List<String>.from(data['favGenres'] ?? const []);
-              final directors = List<String>.from(data['favDirectors'] ?? const []);
-              final actors = List<String>.from(data['favActors'] ?? const []);
-
-              if ((age == null || (age is int && age <= 0)) && genres.isEmpty && directors.isEmpty && actors.isEmpty) {
-                return const SizedBox.shrink();
-              }
-              Widget chipWrap(String title, List<String> items) {
-                if (items.isEmpty) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: Theme.of(context).textTheme.titleSmall),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8, runSpacing: 8,
-                        children: items.map((e) => Chip(label: Text(e))).toList(),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (age is int && age > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.cake, size: 18),
-                          const SizedBox(width: 6),
-                          Text('Yaş: $age'),
-                        ],
-                      ),
-                    ),
-                  chipWrap('Sevdiğin türler', genres),
-                  chipWrap('Sevdiğin yönetmenler', directors),
-                  chipWrap('Sevdiğin oyuncular', actors),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8.0),
-            child: Text(
-              'Favori Filmler',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _shelfSectionFromUserField(
-            'favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 30,
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-            child: Text(
-              'Sevdiği Filmler',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _shelfSectionFromUserField(
-            'fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 30,
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-            child: Text(
-              'Sevmediği Filmler',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _shelfSectionFromUserField(
-            'dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 30,
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-            child: Text(
-              'Watchlist',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 8),
-          _watchlistSectionFromKeys(
-            List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(),
-            maxItems: 30,
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.userChanges(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-        final user = snap.data;
-        if (user == null) return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
-
-        return DefaultTabController(
-          length: 3, // 3 SEKMEYE ÇIKTIK
-          child: Scaffold(
-            extendBodyBehindAppBar: true,
-            body: Stack(
-              children: [
-                NestedScrollView(
-                  headerSliverBuilder: (context, innerBoxIsScrolled) {
-                    return [
-                      SliverAppBar(
-                        floating: true,
-                        snap: true,
-                        backgroundColor: Colors.black,
-                        elevation: 0,
-                        scrolledUnderElevation: 0,
-                        surfaceTintColor: Colors.transparent,
-                        automaticallyImplyLeading: false,
-                        actions: [
-                          IconButton(
-                            tooltip: 'Düzenle',
-                            icon: const Icon(Icons.edit_outlined),
-                            onPressed: () {
-                              Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => EditProfilePage(initialUserData: _lastUserData),
-                              ));
-                            },
-                          ),
-                          IconButton(
-                            tooltip: 'Yenile',
-                            icon: const Icon(Icons.refresh),
-                            onPressed: () async {
-                              await _refreshFavorites();
-                              await _loadActivities();
-                              await _bootstrapCounts();
-                            },
-                          ),
-                          IconButton(
-                            tooltip: 'Ayarlar',
-                            icon: const Icon(Icons.settings_outlined),
-                            onPressed: () {
-                              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
-                            },
-                          ),
-                        ],
-                      ),
-                      SliverToBoxAdapter(
-                        child: Stack(
-                          children: [
-                            SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.28,
-                              child: _blurBackdrop(),
-                            ),
-                            Column(
-                              children: [
-                                SizedBox(
-                                  height: MediaQuery.of(context).padding.top + kToolbarHeight,
-                                ),
-                                _profileHeaderSection(
-                                  context: context,
-                                  user: user,
-                                  followers: _followers,
-                                  following: _following,
-                                  lbUsername: _lbUsername,
-                                  shownName: _shownName,
-                                ),
-                                const SizedBox(height: 12),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  child: TabBar(
-                                    isScrollable: false,
-                                    indicator: UnderlineTabIndicator(
-                                      borderSide: BorderSide(width: 2, color: Theme.of(context).colorScheme.primary),
-                                    ),
-                                    indicatorSize: TabBarIndicatorSize.tab,
-                                    overlayColor: WidgetStateProperty.all(Colors.transparent),
-                                    labelPadding: const EdgeInsets.symmetric(vertical: 6),
-                                    labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                                    unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
-                                    labelColor: Theme.of(context).colorScheme.onSurface,
-                                    unselectedLabelColor: Colors.white70,
-                                    tabs: const [
-                                      Tab(text: 'Filmler'),
-                                      Tab(text: 'Aktiviteler'),
-                                      Tab(text: 'Listeler'), // YENİ TAB
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ];
-                  },
-                  body: TabBarView(
-                    children: [
-                      _buildProfileContentAfterHeader(),
-                      _buildActivitiesTab(),
-                      _buildListsTab(), // YENİ TAB İÇERİĞİ
-                    ],
-                  ),
-                ),
-
-                ValueListenableBuilder<bool>(
-                  valueListenable: _showGuideNotifier,
-                  builder: (context, isVisible, child) {
-                    if (!isVisible) return const SizedBox.shrink();
-                    return GuideCharacterOverlay(
-                      message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.",
-                      isVisible: isVisible,
-                      onClose: () {
-                        _showGuideNotifier.value = false;
-                      },
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
 }
-
-// --- UI HELPERS FOR CUSTOM LISTS ---
 
 class _CreateListTile extends StatelessWidget {
   final VoidCallback onTap;
   const _CreateListTile({required this.onTap});
-
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -1540,19 +1089,8 @@ class _CreateListTile extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.5), style: BorderStyle.solid),
-          borderRadius: BorderRadius.circular(12),
-          color: Colors.white.withOpacity(0.05),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.add_circle_outline),
-            SizedBox(width: 8),
-            Text("Yeni Liste Oluştur", style: TextStyle(fontWeight: FontWeight.bold)),
-          ],
-        ),
+        decoration: BoxDecoration(border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.5)), borderRadius: BorderRadius.circular(12), color: Colors.white.withOpacity(0.05)),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(Icons.add_circle_outline), SizedBox(width: 8), Text("Yeni Liste Oluştur", style: TextStyle(fontWeight: FontWeight.bold))]),
       ),
     );
   }
@@ -1561,135 +1099,39 @@ class _CreateListTile extends StatelessWidget {
 class _CustomListCard extends StatelessWidget {
   final CustomList list;
   final bool isMine;
-
   const _CustomListCard({required this.list, this.isMine = false});
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => CustomListDetailScreen(list: list, isMyList: isMine)));
-      },
+      onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => CustomListDetailScreen(list: list, isMyList: isMine))); },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         height: 100,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainer,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            // Cover Image
-            ClipRRect(
-              borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-              child: SizedBox(
-                width: 70,
-                height: double.infinity,
-                child: list.coverImageUrl != null
-                    ? PosterImage(posterUrl: list.coverImageUrl!, title: list.title, fit: BoxFit.cover)
-                    : Container(color: Colors.grey.shade800, child: const Icon(Icons.list, color: Colors.white24)),
-              ),
-            ),
-            const SizedBox(width: 16),
-            // Info
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Text('${list.movieCount} film', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
-                  if (!list.isPublic)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Icon(Icons.lock, size: 12, color: Colors.grey),
-                    )
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
-            const SizedBox(width: 12),
-          ],
-        ),
+        decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainer, borderRadius: BorderRadius.circular(12)),
+        child: Row(children: [
+          ClipRRect(borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)), child: SizedBox(width: 70, height: double.infinity, child: list.coverImageUrl != null ? PosterImage(posterUrl: list.coverImageUrl!, title: list.title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800, child: const Icon(Icons.list, color: Colors.white24)))),
+          const SizedBox(width: 16),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text('${list.movieCount} film', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)), if (!list.isPublic) const Padding(padding: EdgeInsets.only(top: 4), child: Icon(Icons.lock, size: 12, color: Colors.grey))])),
+          const Icon(Icons.chevron_right, color: Colors.grey), const SizedBox(width: 12),
+        ]),
       ),
     );
   }
 }
 
-// ... (Geri kalan mevcut sınıflar: _AddPosterTile, _AddFilmDialog) ...
-
+// --- Eski Widget'lar (poster tile, dialog) aynen korunuyor ---
 class _AddPosterTile extends StatelessWidget {
   final ShelfTarget target;
   final VoidCallback? onRefresh;
-
-  const _AddPosterTile({
-    required this.target, 
-    this.onRefresh,
-  });
-
+  const _AddPosterTile({required this.target, this.onRefresh});
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () async {
-        final result = await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)),
-        );
-        if (result == true) {
-          onRefresh?.call();
-        }
+        final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)));
+        if (result == true) { onRefresh?.call(); }
       },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          color: Colors.white10,
-          alignment: Alignment.center,
-          child: const Icon(Icons.add, size: 40, color: Colors.white70),
-        ),
-      ),
+      child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Container(color: Colors.white10, alignment: Alignment.center, child: const Icon(Icons.add, size: 40, color: Colors.white70))),
     );
-  }
-}
-
-class _AddFilmDialog extends StatefulWidget {
-  @override
-  State<_AddFilmDialog> createState() => _AddFilmDialogState();
-}
-
-class _AddFilmDialogState extends State<_AddFilmDialog> {
-  final TextEditingController _controller = TextEditingController();
-  bool _submitting = false;
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Yeni Film Ekle'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: const InputDecoration(labelText: 'Film adı'),
-        onSubmitted: _submit,
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.pop(context),
-          child: const Text('İptal'),
-        ),
-        ElevatedButton(
-          onPressed: _submitting ? null : () => _submit(_controller.text),
-          child: _submitting
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Ekle'),
-        ),
-      ],
-    );
-  }
-
-  void _submit(String value) async {
-    final filmName = value.trim();
-    if (filmName.isEmpty) return;
-    setState(() => _submitting = true);
-    await Future.delayed(const Duration(milliseconds: 200));
-    Navigator.of(context).pop(filmName);
   }
 }

@@ -6,18 +6,17 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
-import 'package:fluttergirdi/models/shelf_target.dart'; // ShelfTarget enum'ı için
+import 'package:fluttergirdi/models/shelf_target.dart'; 
+import 'package:fluttergirdi/services/feed_service.dart'; // FeedService için import
 
 class MovieActionHelper {
-  /// Film seçenekleri menüsünü açar.
-  /// [docId], [target] ve [onItemDeleted] verilirse "Profilden Sil" seçeneği aktif olur.
   static void show(
     BuildContext context, {
     required String title,
     required String posterUrl,
     String? docId,
     ShelfTarget? target,
-    VoidCallback? onItemDeleted, // Silme işlemi sonrası tetiklenecek fonksiyon
+    VoidCallback? onItemDeleted,
   }) {
     showModalBottomSheet(
       context: context,
@@ -50,7 +49,6 @@ class _MovieActionSheet extends StatelessWidget {
     this.onItemDeleted,
   });
 
-  // Hangi hedefin hangi Firestore alanına denk geldiğini bulur
   String? _getFieldForTarget(ShelfTarget t) {
     switch (t) {
       case ShelfTarget.fiveStar: return 'fiveStarKeys';
@@ -67,20 +65,17 @@ class _MovieActionSheet extends StatelessWidget {
     final field = _getFieldForTarget(target!);
     if (field == null) return;
 
-    // 1. Menüyü hemen kapat
     Navigator.pop(context); 
 
     try {
       final db = FirebaseFirestore.instance;
       final batch = db.batch();
 
-      // A) users/{uid} içindeki array'den sil
       final userRef = db.collection('users').doc(uid);
       batch.update(userRef, {
         field: FieldValue.arrayRemove([docId])
       });
 
-      // B) userTasteProfiles/{uid} içinden de silinmesi gerekiyorsa sil
       if (target == ShelfTarget.fiveStar) {
         final tasteRef = db.collection('userTasteProfiles').doc(uid);
         batch.update(tasteRef, {
@@ -95,7 +90,6 @@ class _MovieActionSheet extends StatelessWidget {
 
       await batch.commit();
 
-      // 2. İşlem başarılı, geri bildirimi tetikle
       if (onItemDeleted != null) {
         onItemDeleted!();
       }
@@ -133,7 +127,6 @@ class _MovieActionSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Üst Kısım: Film Önizleme
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
@@ -159,8 +152,6 @@ class _MovieActionSheet extends StatelessWidget {
             ),
           ),
           const Divider(),
-          
-          // Feed'de Paylaş
           ListTile(
             leading: const Icon(Icons.edit_note_outlined),
             title: const Text('Feed\'de Paylaş'),
@@ -169,8 +160,6 @@ class _MovieActionSheet extends StatelessWidget {
               _shareOnFeed(context);
             },
           ),
-          
-          // Mesaj Olarak Gönder
           ListTile(
             leading: const Icon(Icons.send_rounded),
             title: const Text('Mesaj Olarak Gönder'),
@@ -179,8 +168,6 @@ class _MovieActionSheet extends StatelessWidget {
               _showInboxPicker(context);
             },
           ),
-
-          // --- SİLME SEÇENEĞİ (Sadece ID ve Target varsa görünür) ---
           if (docId != null && target != null) ...[
             const Divider(),
             ListTile(
@@ -203,50 +190,36 @@ class _MovieActionSheet extends StatelessWidget {
         builder: (_) => ComposePostPage(
           maxChars: 280,
           initialMovie: {'title': title, 'poster': posterUrl}, 
-          onSend: (text, movie, imageFile) async {
+          // DÜZELTME: required isSpoiler eklendi
+          onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
              final user = FirebaseAuth.instance.currentUser;
              if (user == null) return;
 
              String? postImageUrl;
-             if (imageFile != null) {
-               try {
-                 final fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                 final ref = FirebaseStorage.instance
-                     .ref()
-                     .child('post_images')
-                     .child(fileName);
-                 
-                 await ref.putFile(imageFile);
-                 postImageUrl = await ref.getDownloadURL();
-               } catch (e) {
-                 debugPrint('Resim yükleme hatası: $e');
-               }
+             if (image != null) {
+                final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
+                await ref.putFile(image);
+                postImageUrl = await ref.getDownloadURL();
              }
 
-             final doc = FirebaseFirestore.instance.collection('posts').doc();
-             final now = FieldValue.serverTimestamp();
-             
-             await doc.set({
-               'id': doc.id,
-               'authorId': user.uid,
-               'displayName': user.displayName ?? '',
-               'handle': user.email?.split('@')[0] ?? 'user',
-               'photoURL': user.photoURL ?? '',
-               'text': text.trim(),
-               'movie': movie,
-               if (postImageUrl != null) 'postImage': postImageUrl,
-               'likeCount': 0,
-               'replyCount': 0,
-               'repostCount': 0,
-               'createdAt': now,
-               'updatedAt': now,
-             });
+             await FeedService.instance.createPost(
+               text: text,
+               movie: movie,
+               photoURL: postImageUrl,
+               displayName: user.displayName,
+               handle: user.email?.split('@')[0],
+               
+               // Yeni Alanlar
+               rating: rating,
+               isSpoiler: isSpoiler,
+               tags: tags,
+               reviewTitle: reviewTitle,
+             );
              
              if (context.mounted) {
                Navigator.pop(context); 
-               ScaffoldMessenger.of(context).showSnackBar(
-                 const SnackBar(content: Text('Gönderildi!')),
-               );
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paylaşıldı!')));
              }
           }, 
         ),
@@ -262,18 +235,23 @@ class _MovieActionSheet extends StatelessWidget {
       builder: (ctx) => _InboxPickerSheet(
         movieTitle: title, 
         moviePoster: posterUrl,
-        docId: docId, // <-- BU SATIRI EKLE (Eksikti)
+        docId: docId, 
       ),
     );
   }
 }
 
+// ... (InboxPickerSheet ve _sendMovieMessage kodları aynen kalsın) ...
 class _InboxPickerSheet extends StatelessWidget {
   final String movieTitle;
   final String moviePoster;
-  final String? docId;
+  final String? docId; 
 
-  const _InboxPickerSheet({required this.movieTitle, required this.moviePoster, this.docId,});
+  const _InboxPickerSheet({
+    required this.movieTitle, 
+    required this.moviePoster,
+    this.docId,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -379,12 +357,12 @@ class _InboxPickerSheet extends StatelessWidget {
     if (myUid == null) return;
 
     try {
-      final text = "";
+      final text = "🎬 Film önerisi: $movieTitle";
       
       final movieData = {
         'title': movieTitle,
         'poster': moviePoster,
-        if (docId != null) 'id': docId,
+        if (docId != null) 'id': docId, 
       };
       
       await ChatService.instance.send(

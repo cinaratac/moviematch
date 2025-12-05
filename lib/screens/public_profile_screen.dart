@@ -9,12 +9,39 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:fluttergirdi/services/match_service.dart';
+import 'package:fluttergirdi/screens/post_detail_screen.dart';
 
 // --- YENİ İMPORTLAR ---
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
-import 'package:fluttergirdi/widgets/movie_action_helper.dart'; // Gerekirse
+// Eksik importlar:
+import 'package:fluttergirdi/models/shelf_target.dart'; 
+
+// Aktivite Verisi Modeli (Eksik olan sınıf)
+class _ActivityItemData {
+  final String id; 
+  final String text;
+  final DateTime? createdAt;
+  final String posterUrl; 
+  final String title; 
+  final int likeCount;
+  final int replyCount;
+  final int repostCount;
+  final int? tmdbId; // Poster için gerekli
+
+  const _ActivityItemData({
+    required this.id,
+    required this.text,
+    required this.createdAt,
+    this.posterUrl = '',
+    this.title = '',
+    this.likeCount = 0,
+    this.replyCount = 0,
+    this.repostCount = 0,
+    this.tmdbId,
+  });
+}
 
 class PublicProfileScreen extends StatefulWidget {
   final String uid;
@@ -36,7 +63,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
 
-  // Katalog önbelleği (Sadece ilk sekme ve backdrop için)
+  // Katalog önbelleği
   final Map<String, Future<List<Map<String, dynamic>?>>> _catalogFutureCache = {};
 
   int? _extractTmdbId(Map<String, dynamic> m) {
@@ -52,11 +79,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     if (imageUrl.isEmpty) return;
     showDialog(
       context: context,
-      barrierDismissible: true, // Arka plana basınca kapanır
-      barrierColor: Colors.black.withOpacity(0.9), // Koyu arka plan
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.9),
       builder: (ctx) {
         return GestureDetector(
-          onTap: () => Navigator.pop(ctx), // Herhangi bir yere basınca kapat
+          onTap: () => Navigator.pop(ctx),
           child: InteractiveViewer(
             child: Center(
               child: Image.network(
@@ -394,7 +421,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3, // 3 SEKME
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: Colors.transparent,
@@ -449,13 +476,16 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                             children: [
                               Row(
                                 children: [
-                                  GestureDetector( // GÜNCELLEME: Tıklayınca Büyüme
+                                  GestureDetector(
                                     onTap: () => _showEnlargedImage(photoURL),
                                     child: CircleAvatar(
                                       radius: 36,
                                       backgroundImage: photoURL.isNotEmpty ? NetworkImage(photoURL) : null,
                                       child: photoURL.isEmpty
-                                          ? Text(displayName.isNotEmpty ? displayName[0].toUpperCase() : '?', style: const TextStyle(fontSize: 24))
+                                          ? Text(
+                                              displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                                              style: const TextStyle(fontSize: 24),
+                                            )
                                           : null,
                                     ),
                                   ),
@@ -495,7 +525,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               if (lb.isNotEmpty)
                                 Padding(padding: const EdgeInsets.only(bottom: 10.0), child: Text('Letterboxd: @$lb', style: Theme.of(context).textTheme.bodyMedium)),
                               
-                              // BUTONLAR
                               Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 12.0),
                                 child: Row(
@@ -550,7 +579,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                 tabs: const [
                                   Tab(text: 'Filmler'),
                                   Tab(text: 'Aktiviteler'),
-                                  Tab(text: 'Listeler'), // 3. Sekme
+                                  Tab(text: 'Listeler'),
                                 ],
                               ),
                               const SizedBox(height: 8),
@@ -586,11 +615,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               },
               body: TabBarView(
                 children: [
-                  // 1. Sekme: Filmler (Doğrudan oluşturulur çünkü ilk sekme)
                   _buildProfileTabBody(data),
-                  // 2. Sekme: Aktiviteler (Lazy Loading)
-                  _PublicActivitiesTab(uid: widget.uid),
-                  // 3. Sekme: Listeler (Lazy Loading)
+                  _ActivitiesTab(uid: widget.uid),
                   _PublicListsTab(uid: widget.uid),
                 ],
               ),
@@ -634,39 +660,70 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 }
 
-// --- YENİ: Lazy Loading Aktiviteler Sekmesi ---
-class _PublicActivitiesTab extends StatefulWidget {
+// --- 2. SEKME: AKTİVİTELER (LAZY LOADING) ---
+class _ActivitiesTab extends StatefulWidget {
   final String uid;
-  const _PublicActivitiesTab({required this.uid});
+  const _ActivitiesTab({required this.uid});
 
   @override
-  State<_PublicActivitiesTab> createState() => _PublicActivitiesTabState();
+  State<_ActivitiesTab> createState() => _ActivitiesTabState();
 }
 
-class _PublicActivitiesTabState extends State<_PublicActivitiesTab> with AutomaticKeepAliveClientMixin {
-  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>>? _futureActivities;
-
+class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveClientMixin {
+  bool _loadingActivities = false;
+  List<_ActivityItemData> _activities = [];
+  
   @override
   bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _futureActivities = _fetchActivities();
+    _loadActivities();
   }
 
-  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _fetchActivities() async {
-    final fs = FirebaseFirestore.instance;
-    final base = fs.collection('posts').where('authorId', isEqualTo: widget.uid);
+  Future<void> _loadActivities() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    if (mounted) setState(() => _loadingActivities = true);
+    final db = FirebaseFirestore.instance;
+    final List<_ActivityItemData> items = [];
     try {
-      final qs = await base.orderBy('createdAt', descending: true).limit(50).get(const GetOptions(source: Source.server));
-      return qs.docs;
-    } catch (_) {
-      final qs = await base.limit(50).get();
-      return qs.docs;
+      final q = db.collection('posts').where('authorId', isEqualTo: widget.uid).orderBy('createdAt', descending: true).limit(30);
+      final qs = await q.get();
+      for (final d in qs.docs) {
+        final m = d.data();
+        final ts = m['createdAt'];
+        final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
+        final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
+        
+        // TMDB ID çekiliyor (Poster için kritik)
+        final tmdbId = (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
+
+        items.add(_ActivityItemData(
+          id: d.id,
+          text: (m['text'] ?? '').toString(),
+          createdAt: ts is Timestamp ? ts.toDate() : null,
+          posterUrl: poster,
+          title: title,
+          likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+          replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+          repostCount: ((m['repostCount'] ?? 0) as num).toInt(),
+          tmdbId: (tmdbId is int) ? tmdbId : null,
+        ));
+      }
+    } catch (_) {}
+    
+    items.sort((a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(a.createdAt?.millisecondsSinceEpoch ?? 0));
+
+    if (mounted) {
+      setState(() {
+        _activities = items;
+        _loadingActivities = false;
+      });
     }
   }
-
+  
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
@@ -678,51 +735,109 @@ class _PublicActivitiesTabState extends State<_PublicActivitiesTab> with Automat
   Widget build(BuildContext context) {
     super.build(context);
     return RefreshIndicator(
-      onRefresh: () async {
-        setState(() { _futureActivities = _fetchActivities(); });
-      },
+      onRefresh: _loadActivities,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)]),
-          const SizedBox(height: 8),
-          FutureBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-            future: _futureActivities,
-            builder: (context, asnap) {
-              if (asnap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-              if (asnap.hasError) return const Text('Yüklenemedi.');
-              final docs = asnap.data ?? const [];
-              if (docs.isEmpty) return const Text('Henüz aktivite yok.');
-              return ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: docs.length,
-                padding: EdgeInsets.zero,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (_, i) {
-                  final m = docs[i].data();
-                  final dt = (m['createdAt'] as Timestamp?)?.toDate();
-                  return _ActivityItem(
-                    displayName: (m['displayName'] ?? '') as String,
-                    text: (m['text'] ?? '') as String,
-                    timeLabel: dt == null ? '' : _timeAgo(dt),
-                    likeCount: (m['likeCount'] ?? 0) as int,
-                    replyCount: (m['replyCount'] ?? 0) as int,
-                    repostCount: (m['repostCount'] ?? 0) as int,
-                    posterUrl: (m['moviePoster'] ?? m['moviePosterUrl'] ?? '') as String,
-                    movieTitle: (m['movieTitle'] ?? '') as String,
-                  );
-                },
-              );
-            },
-          ),
+          const SizedBox(height: 10),
+          if (_loadingActivities)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
+          else if (_activities.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
+          else
+            ListView.separated(
+              itemCount: _activities.length,
+              physics: const NeverScrollableScrollPhysics(),
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
+              itemBuilder: (context, i) {
+                final a = _activities[i];
+                final when = a.createdAt;
+                String timeLabel = '';
+                if (when != null) {
+                  timeLabel = _timeAgo(when);
+                }
+                return _ActivityWidget(item: a, timeLabel: timeLabel);
+              },
+            ),
         ],
       ),
     );
   }
 }
 
-// --- YENİ: Lazy Loading Listeler Sekmesi ---
+class _ActivityWidget extends StatelessWidget {
+  final _ActivityItemData item;
+  final String timeLabel;
+  const _ActivityWidget({required this.item, required this.timeLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PostDetailScreen(postId: item.id),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color.fromARGB(3, 255, 255, 255), width: 1)),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if ((item.posterUrl).isNotEmpty || item.tmdbId != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: PosterImage(
+                  posterUrl: item.posterUrl, 
+                  title: item.title,
+                  tmdbId: item.tmdbId,
+                  width: 44, 
+                  height: 66, 
+                  fit: BoxFit.cover
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 4, overflow: TextOverflow.ellipsis)),
+                  if (item.title.isNotEmpty && item.posterUrl.isEmpty && item.tmdbId == null)
+                    Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [const Icon(Icons.local_movies, size: 16), const SizedBox(width: 6), Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall))])),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6.0),
+                    child: Row(children: [
+                      const Icon(Icons.favorite_border, size: 16), const SizedBox(width: 4), Text('${item.likeCount}'), 
+                      const SizedBox(width: 12), 
+                      const Icon(Icons.mode_comment_outlined, size: 16), const SizedBox(width: 4), Text('${item.replyCount}'), 
+                      const SizedBox(width: 12), 
+                      const Icon(Icons.repeat, size: 16),
+                      const Spacer(),
+                      if (timeLabel.isNotEmpty) Text('Paylaştı  $timeLabel', style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                    ]),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- 3. SEKME: LAZY LOADING LISTS TAB ---
 class _PublicListsTab extends StatefulWidget {
   final String uid;
   const _PublicListsTab({required this.uid});
@@ -746,7 +861,7 @@ class _PublicListsTabState extends State<_PublicListsTab> with AutomaticKeepAliv
       child: StreamBuilder<List<CustomList>>(
         stream: CustomListService.instance.getUserLists(widget.uid),
         builder: (context, snapshot) {
-           if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+           if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
            final lists = snapshot.data ?? [];
            
            // Sadece herkese açık listeler
@@ -820,7 +935,7 @@ class _CustomListCard extends StatelessWidget {
   }
 }
 
-// --- YARDIMCI WIDGETLAR (Refactored) ---
+// --- YARDIMCI WIDGETLAR ---
 
 class _StatContainer extends StatelessWidget {
   final IconData icon;
@@ -927,62 +1042,6 @@ class _WatchlistSection extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _ActivityItem extends StatelessWidget {
-  final String displayName;
-  final String text;
-  final String timeLabel;
-  final int likeCount;
-  final int replyCount;
-  final int repostCount;
-  final String posterUrl; 
-  final String movieTitle;
-
-  const _ActivityItem({
-    required this.displayName, required this.text, required this.timeLabel, required this.likeCount, required this.replyCount, required this.repostCount, required this.posterUrl, required this.movieTitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final hasPoster = posterUrl.isNotEmpty;
-
-    return Container(
-      decoration: BoxDecoration(color: cs.surface.withOpacity(0.25), borderRadius: BorderRadius.circular(12), border: Border.all(color: cs.outlineVariant, width: 0.6)),
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (hasPoster) ...[
-            ClipRRect(borderRadius: BorderRadius.circular(8), child: PosterImage(posterUrl: posterUrl, title: movieTitle, width: 56, height: 84, fit: BoxFit.cover)),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(displayName.isNotEmpty ? displayName : 'Kullanıcı', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                if (text.isNotEmpty) Text(text, style: theme.textTheme.bodyMedium),
-                if (movieTitle.isNotEmpty && !hasPoster)
-                  Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [const Icon(Icons.local_movies, size: 16), const SizedBox(width: 6), Expanded(child: Text(movieTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall))])),
-                const SizedBox(height: 10),
-                Row(children: [
-                  Icon(Icons.favorite_border, size: 14, color: cs.onSurfaceVariant), const SizedBox(width: 6), Text('$likeCount', style: theme.textTheme.bodySmall),
-                  const SizedBox(width: 16),
-                  Icon(Icons.mode_comment_outlined, size: 14, color: cs.onSurfaceVariant), const SizedBox(width: 6), Text('$replyCount', style: theme.textTheme.bodySmall),
-                  const Spacer(),
-                  if (timeLabel.isNotEmpty) Text('Paylaştı  $timeLabel', style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
-                ]),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

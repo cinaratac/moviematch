@@ -9,8 +9,17 @@ import '../services/text_filter_service.dart';
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
   final Map<String, String>? initialMovie;
-  // onSend fonksiyonunun imzasını değiştiriyoruz: Artık File? image de alacak
-  final Future<void> Function(String text, Map<String, String>? movie, File? image) onSend;
+  
+  // DÜZELTME: isSpoiler parametresi 'required' yapıldı
+  final Future<void> Function({
+    required String text, 
+    Map<String, String>? movie, 
+    File? image,
+    double? rating,
+    required bool isSpoiler, // <-- BURASI DÜZELTİLDİ
+    List<String>? tags,
+    String? reviewTitle,
+  }) onSend;
 
   const ComposePostPage({
     super.key,
@@ -25,26 +34,33 @@ class ComposePostPage extends StatefulWidget {
 
 class _ComposePostPageState extends State<ComposePostPage> {
   final TextEditingController _controller = TextEditingController();
+  final TextEditingController _titleCtrl = TextEditingController();
+  final TextEditingController _tagsCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  final ImagePicker _picker = ImagePicker(); // Picker tanımla
+  final ImagePicker _picker = ImagePicker(); 
   
   Map<String, String>? _selectedMovie;
-  File? _selectedImage; // Seçilen resmi tutacak değişken
+  File? _selectedImage;
+  
+  // İnceleme Modu Değişkenleri
+  double _rating = 0.0;
+  bool _isSpoiler = false;
+  bool _showReviewOptions = false; // Film seçilince otomatik açılır
 
   @override
   void initState() {
     super.initState();
     if (widget.initialMovie != null) {
       _selectedMovie = widget.initialMovie;
+      _showReviewOptions = true;
     }
   }
   
-  // Resim seçme fonksiyonu
   Future<void> _pickImage() async {
     try {
       final XFile? picked = await _picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 1080, // Aşırı büyük olmaması için
+        maxWidth: 1080, 
         imageQuality: 85,
       );
       if (picked != null) {
@@ -60,15 +76,13 @@ class _ComposePostPageState extends State<ComposePostPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _titleCtrl.dispose();
+    _tagsCtrl.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  // ... _pickMovie fonksiyonu aynen kalsın ...
   Future<void> _pickMovie() async {
-     // (Mevcut kodunuzdaki _pickMovie içeriği buraya gelecek)
-     // ...
-     // Kısaca: Profildeki filmleri listeleme mantığınız aynı kalsın.
       final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
       isScrollControlled: true,
@@ -141,6 +155,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
     if (result != null && mounted) {
       setState(() {
         _selectedMovie = result;
+        _showReviewOptions = true; 
       });
     }
   }
@@ -151,13 +166,12 @@ class _ComposePostPageState extends State<ComposePostPage> {
     final cs = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Yeni Gönderi')),
+      appBar: AppBar(title: const Text('Yeni Gönderi / İnceleme')),
       body: ValueListenableBuilder<TextEditingValue>(
         valueListenable: _controller,
         builder: (context, value, _) {
           final text = value.text;
           final remaining = widget.maxChars - text.characters.length;
-          // Resim varsa da gönderilebilir olsun
           final hasContent = text.trim().isNotEmpty || _selectedImage != null || _selectedMovie != null;
 
           return ListView(
@@ -168,7 +182,6 @@ class _ComposePostPageState extends State<ComposePostPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Profil fotosu
                     CircleAvatar(
                       radius: 20,
                       backgroundImage: FirebaseAuth.instance.currentUser?.photoURL != null
@@ -183,18 +196,31 @@ class _ComposePostPageState extends State<ComposePostPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (_selectedMovie != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8.0),
+                              child: TextField(
+                                controller: _titleCtrl,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                decoration: const InputDecoration(
+                                  hintText: 'İnceleme Başlığı (İsteğe bağlı)',
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                ),
+                              ),
+                            ),
+
                           TextField(
                             controller: _controller,
                             focusNode: _focusNode,
                             maxLines: null,
-                            minLines: 1,
+                            minLines: 3,
                             decoration: const InputDecoration(
-                              hintText: 'Neler oluyor?',
+                              hintText: 'Düşüncelerini yaz...',
                               border: InputBorder.none,
                             ),
                           ),
                           
-                          // --- 1. RESİM ÖNİZLEME ALANI ---
                           if (_selectedImage != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12.0),
@@ -205,7 +231,6 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                     child: Image.file(
                                       _selectedImage!,
                                       width: double.infinity,
-                                      // Resmin çok uzamaması için maks yükseklik
                                       height: 300, 
                                       fit: BoxFit.cover,
                                     ),
@@ -217,10 +242,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                       onTap: () => setState(() => _selectedImage = null),
                                       child: Container(
                                         padding: const EdgeInsets.all(4),
-                                        decoration: const BoxDecoration(
-                                          color: Colors.black54,
-                                          shape: BoxShape.circle,
-                                        ),
+                                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
                                         child: const Icon(Icons.close, color: Colors.white, size: 20),
                                       ),
                                     ),
@@ -229,7 +251,6 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               ),
                             ),
 
-                          // --- 2. FİLM KUTUCUĞU ---
                           if (_selectedMovie != null) ...[
                             Container(
                               decoration: BoxDecoration(
@@ -245,9 +266,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                       child: PosterImage(
                                         posterUrl: _selectedMovie!['poster']!,
                                         title: _selectedMovie!['title'],
-                                        width: 44,
-                                        height: 66,
-                                        fit: BoxFit.cover,
+                                        width: 44, height: 66, fit: BoxFit.cover,
                                       ),
                                     )
                                   else
@@ -262,9 +281,74 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                     ),
                                   ),
                                   IconButton(
-                                    onPressed: () => setState(() => _selectedMovie = null),
+                                    onPressed: () => setState(() {
+                                      _selectedMovie = null;
+                                      _showReviewOptions = false;
+                                      _rating = 0;
+                                    }),
                                     icon: const Icon(Icons.close),
                                     tooltip: 'Kaldır',
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest.withOpacity(0.3),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text("Puan:", style: TextStyle(fontWeight: FontWeight.bold)),
+                                      const SizedBox(width: 8),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: List.generate(5, (index) {
+                                          return GestureDetector(
+                                            onTap: () => setState(() => _rating = index + 1.0),
+                                            child: Icon(
+                                              index < _rating ? Icons.star_rounded : Icons.star_border_rounded,
+                                              color: Colors.amber,
+                                              size: 32,
+                                            ),
+                                          );
+                                        }),
+                                      ),
+                                      if (_rating > 0)
+                                        IconButton(
+                                          onPressed: () => setState(() => _rating = 0), 
+                                          icon: const Icon(Icons.replay, size: 16, color: Colors.grey),
+                                          tooltip: "Puanı sıfırla",
+                                        )
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  
+                                  TextField(
+                                    controller: _tagsCtrl,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Etiketler (Virgülle ayır)',
+                                      hintText: 'Örn: korku, klasik, 90lar',
+                                      isDense: true,
+                                      border: OutlineInputBorder(),
+                                      prefixIcon: Icon(Icons.tag, size: 18),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+
+                                  SwitchListTile(
+                                    title: const Text("Spoiler İçerir", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                    value: _isSpoiler,
+                                    onChanged: (val) => setState(() => _isSpoiler = val),
+                                    activeColor: Colors.redAccent,
+                                    contentPadding: EdgeInsets.zero,
+                                    dense: true,
                                   ),
                                 ],
                               ),
@@ -272,17 +356,14 @@ class _ComposePostPageState extends State<ComposePostPage> {
                             const SizedBox(height: 8),
                           ],
                           
-                          // --- 3. ALT BUTONLAR ---
                           Row(
                             children: [
-                              // Resim Seçme Butonu
                               IconButton(
                                 onPressed: _pickImage,
                                 icon: const Icon(Icons.image_outlined),
                                 tooltip: 'Resim ekle',
                                 color: cs.onSurfaceVariant,
                               ),
-                              // Film Seçme Butonu
                               IconButton(
                                 onPressed: _pickMovie,
                                 icon: const Icon(Icons.movie),
@@ -304,19 +385,27 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                 onPressed: !hasContent || remaining < 0
                                     ? null
                                     : () {
-                                          // --- SANSÜR KONTROLÜ BAŞLANGIÇ ---
-                                          if (TextFilterService.hasProfanity(text)) {
+                                          if (TextFilterService.hasProfanity(text) || TextFilterService.hasProfanity(_titleCtrl.text)) {
                                             ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(
-                                                content: Text('Gönderiniz uygunsuz ifadeler içeriyor. Lütfen düzeltin.'),
-                                                backgroundColor: Colors.red,
-                                              ),
+                                              const SnackBar(content: Text('Uygunsuz içerik tespit edildi.'), backgroundColor: Colors.red),
                                             );
-                                            return; // Göndermeyi iptal et
+                                            return;
                                           }
-                                          // --- SANSÜR KONTROLÜ BİTİŞ ---
 
-                                          widget.onSend(text, _selectedMovie, _selectedImage);
+                                          List<String> tagsList = [];
+                                          if (_tagsCtrl.text.isNotEmpty) {
+                                            tagsList = _tagsCtrl.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+                                          }
+
+                                          widget.onSend(
+                                            text: text, 
+                                            movie: _selectedMovie, 
+                                            image: _selectedImage,
+                                            rating: _rating > 0 ? _rating : null,
+                                            isSpoiler: _isSpoiler,
+                                            tags: tagsList,
+                                            reviewTitle: _titleCtrl.text,
+                                          );
                                         },
                                 child: const Text('Gönder'),
                               ),

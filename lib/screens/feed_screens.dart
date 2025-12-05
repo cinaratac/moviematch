@@ -11,7 +11,7 @@ import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
-import 'package:fluttergirdi/widgets/offline_banner.dart';
+import 'package:fluttergirdi/widgets/offline_banner.dart'; // YENİ
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -107,28 +107,8 @@ class _FeedPageState extends State<FeedPage> {
       _lastDoc = null;
     });
 
-    final base = FirebaseFirestore.instance
-        .collection('posts')
-        .orderBy('createdAt', descending: true)
-        .limit(_pageSize);
-
     try {
-      final cacheQs = await base.get(const GetOptions(source: Source.cache));
-      final cacheDocs = cacheQs.docs;
-      if (cacheDocs.isNotEmpty) {
-        await _fetchAuthorsForPosts(cacheDocs);
-        if (!mounted) return;
-        setState(() {
-          _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(cacheDocs);
-          _lastDoc = cacheDocs.isNotEmpty ? cacheDocs.last : null;
-          _hasMore = cacheDocs.length == _pageSize;
-          _initialLoading = false;
-        });
-      }
-    } catch (_) {}
-
-    try {
-      final serverQs = await base.get(const GetOptions(source: Source.server));
+      final serverQs = await FeedService.instance.fetchInitial(limit: _pageSize);
       final serverDocs = serverQs.docs;
       await _fetchAuthorsForPosts(serverDocs);
 
@@ -149,13 +129,7 @@ class _FeedPageState extends State<FeedPage> {
     if (_lastDoc == null) return;
     setState(() => _loadingMore = true);
     try {
-      final q = FirebaseFirestore.instance
-          .collection('posts')
-          .orderBy('createdAt', descending: true)
-          .startAfterDocument(_lastDoc!)
-          .limit(_pageSize);
-      
-      final qs = await q.get(const GetOptions(source: Source.server));
+      final qs = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: _pageSize);
       final docs = qs.docs;
 
       await _fetchAuthorsForPosts(docs);
@@ -166,7 +140,6 @@ class _FeedPageState extends State<FeedPage> {
         _hasMore = docs.length == _pageSize;
       });
     } catch (_) {
-      // Hata durumunda cache veya sessiz geçiş
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -251,7 +224,7 @@ class _FeedPageState extends State<FeedPage> {
         ),
         body: Column(
           children: [
-            const OfflineBanner(),
+            const OfflineBanner(), 
             Expanded(
               child: TabBarView(
                 children: [
@@ -276,21 +249,23 @@ class _FeedPageState extends State<FeedPage> {
                               final d = _posts[postIndex];
                               final m = d.data() ?? {};
                               final authorId = (m['authorId'] ?? '') as String;
-              
+
                               final cachedUser = _authorCache[authorId];
                               final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
                               final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
                               final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
-              
+
                               final createdAt = (m['createdAt'] as Timestamp?);
                               final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
                               final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
                               final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
                               
-                              // --- DÜZELTME: postImage ALINIYOR ---
                               final postImage = (m['postImage'] ?? '') as String;
-                              // ------------------------------------
-              
+                              final double? rating = (m['rating'] as num?)?.toDouble();
+                              final bool isSpoiler = (m['isSpoiler'] == true);
+                              final String? reviewTitle = m['reviewTitle'] as String?;
+                              final List<String> tags = List<String>.from(m['tags'] ?? []);
+
                               final postWidget = PostTile(
                                 postId: d.id,
                                 authorId: authorId,
@@ -300,21 +275,23 @@ class _FeedPageState extends State<FeedPage> {
                                 timeLabel: timeLabel,
                                 movieTitle: movieTitle.isEmpty ? null : movieTitle,
                                 moviePoster: moviePoster.isEmpty ? null : moviePoster,
-                                // --- DÜZELTME: postImage EKLENDİ ---
                                 postImage: postImage.isEmpty ? null : postImage,
-                                // -----------------------------------
                                 text: (m['text'] ?? '') as String,
                                 likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
                                 replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-                                onToggleLike: (pid, like) => FeedService().toggleLike(postId: pid, like: like),
+                                rating: rating,
+                                isSpoiler: isSpoiler,
+                                reviewTitle: reviewTitle,
+                                tags: tags,
+                                onToggleLike: (pid, like) => FeedService.instance.toggleLike(postId: pid, like: like),
                                 onStartChat: (String _) async {},
                                 onFollow: (uid) async {
-                                   await FeedService().followUser(uid);
-                                   await FeedService().notifyFollow(toUid: uid);
+                                   await FeedService.instance.followUser(uid);
+                                   await FeedService.instance.notifyFollow(toUid: uid);
                                 },
-                                onReport: (pid) => FeedService().reportPost(pid),
+                                onReport: (pid) => FeedService.instance.reportPost(pid),
                               );
-              
+
                               if (postIndex == 3) {
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -329,7 +306,7 @@ class _FeedPageState extends State<FeedPage> {
                             },
                           ),
                   ),
-              
+
                   // 2) TAKİP EDİLENLER
                   const _FollowingFeed(),
                 ],
@@ -348,8 +325,8 @@ class _FeedPageState extends State<FeedPage> {
               useSafeArea: true,
               builder: (_) => ComposePostPage(
                 maxChars: 280,
-                // onSend fonksiyonu artık imageFile da alıyor
-                onSend: (text, movie, imageFile) async {
+                // DÜZELTME: required isSpoiler eklendi
+                onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
                   Navigator.pop(context);
                   
                   final user = FirebaseAuth.instance.currentUser;
@@ -358,44 +335,35 @@ class _FeedPageState extends State<FeedPage> {
                   try {
                     String? imageUrl;
 
-                    // 1. Resim varsa yükle
-                    if (imageFile != null) {
+                    if (image != null) {
                       final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
                       final ref = FirebaseStorage.instance
                           .ref()
                           .child('post_images')
                           .child(fileName);
 
-                      await ref.putFile(imageFile);
+                      await ref.putFile(image);
                       imageUrl = await ref.getDownloadURL();
                     }
 
-                    // 2. Firestore'a kaydet
-                    await FirebaseFirestore.instance.collection('posts').add({
-                      'text': text,
-                      'authorId': user.uid,
-                      'displayName': user.displayName,
-                      'handle': user.email?.split('@')[0] ?? 'user',
-                      'photoURL': user.photoURL ?? '',
+                    await FeedService.instance.createPost(
+                      text: text,
+                      movie: movie,
+                      photoURL: imageUrl,
+                      displayName: user.displayName,
+                      handle: user.email?.split('@')[0] ?? 'user',
                       
-                      if (movie != null) ...{
-                        'movieTitle': movie['title'],
-                        'moviePoster': movie['poster'],
-                      },
-
-                      // Resim URL'ini ekle
-                      if (imageUrl != null) 'postImage': imageUrl,
-
-                      'createdAt': FieldValue.serverTimestamp(),
-                      'likeCount': 0,
-                      'replyCount': 0,
-                    });
+                      // Yeni Alanlar
+                      rating: rating,
+                      isSpoiler: isSpoiler,
+                      tags: tags,
+                      reviewTitle: reviewTitle,
+                    );
 
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Gönderildi!')),
                       );
-                      // Listeyi yenile
                       _refresh();
                     }
                   } catch (e) {
@@ -573,9 +541,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
           
-          // --- DÜZELTME: Takip edilenler akışına da postImage eklendi ---
           final postImage = (m['postImage'] ?? '') as String;
-          // -----------------------------------------------------------
 
           return PostTile(
             postId: d.id,
@@ -586,18 +552,17 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             timeLabel: timeLabel,
             movieTitle: movieTitle.isEmpty ? null : movieTitle,
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
-            // Resmi PostTile'a gönderiyoruz
             postImage: postImage.isEmpty ? null : postImage,
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
             replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-            onToggleLike: (pid, like) => FeedService().toggleLike(postId: pid, like: like),
+            onToggleLike: (pid, like) => FeedService.instance.toggleLike(postId: pid, like: like),
             onStartChat: (String _) async {},
             onFollow: (uid) async {
-               await FeedService().followUser(uid);
-               await FeedService().notifyFollow(toUid: uid);
+               await FeedService.instance.followUser(uid);
+               await FeedService.instance.notifyFollow(toUid: uid);
             },
-            onReport: (pid) => FeedService().reportPost(pid),
+            onReport: (pid) => FeedService.instance.reportPost(pid),
           );
         },
       ),
