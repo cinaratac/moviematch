@@ -92,7 +92,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Scaffold( 
       body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: _buildBottomBar(context),
     );
@@ -100,20 +100,17 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _buildBottomBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SafeArea(
-      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: cs.shadow.withValues(alpha: 0.14),
-              blurRadius: 22,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
+    
+    // Dışarıdaki SafeArea ve padding'i kaldırdık, direkt Container döndürüyoruz.
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.6), // Yarı saydam siyah
+        // borderRadius: ... // Kaldırıldı (Köşeler dik olsun)
+        boxShadow: const [], 
+      ),
+      // Butonların iPhone home çubuğunun altında kalmaması için SafeArea'yı İÇERİ aldık
+      child: SafeArea(
+        top: false, // Üstten boşluk bırakma
         child: NavigationBarTheme(
           data: NavigationBarThemeData(
             height: 52,
@@ -125,7 +122,7 @@ class _HomeShellState extends State<HomeShell> {
               final selected = states.contains(WidgetState.selected);
               return IconThemeData(
                 size: 20,
-                color: selected ? cs.primary : cs.onSurfaceVariant,
+                color: selected ? cs.primary : Colors.white70,
               );
             }),
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -133,7 +130,7 @@ class _HomeShellState extends State<HomeShell> {
               return TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: selected ? cs.primary : cs.onSurfaceVariant,
+                color: selected ? cs.primary : Colors.white70,
               );
             }),
           ),

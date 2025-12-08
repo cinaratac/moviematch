@@ -12,7 +12,7 @@ import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
-
+import 'package:fluttergirdi/widgets/custom_drawer.dart';
 // YENİ İMPORTLAR
 import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
@@ -147,66 +147,7 @@ class _FeedPageState extends State<FeedPage> {
       length: 2,
       child: Scaffold(
         // --- YENİ: DRAWER (YAN MENÜ) ---
-        drawer: Drawer(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          child: Column(
-            children: [
-              // HEADER
-              UserAccountsDrawerHeader(
-                decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest),
-                accountName: Text(FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-                accountEmail: Text(FirebaseAuth.instance.currentUser?.email ?? '', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                currentAccountPicture: GestureDetector(
-                  onTap: () {
-                    // Profile git
-                    Navigator.pop(context);
-                    // Feed ekranında zaten profil sekmesi var mı? Ana kabuk (Shell) yapısına bağlı.
-                    // Şimdilik PublicProfile olarak açalım veya sadece görsel olsun.
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: FirebaseAuth.instance.currentUser!.uid)));
-                  },
-                  child: CircleAvatar(
-                    backgroundImage: FirebaseAuth.instance.currentUser?.photoURL != null 
-                        ? NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!) 
-                        : null,
-                    child: FirebaseAuth.instance.currentUser?.photoURL == null 
-                        ? const Icon(Icons.person) 
-                        : null,
-                  ),
-                ),
-              ),
-              
-              // MENU ITEMS
-              ListTile(
-                leading: const Icon(Icons.leaderboard, color: Colors.amber),
-                title: const Text('Liderlik Tablosu'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen()));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.groups, color: Colors.blueAccent),
-                title: const Text('Kulüpler'),
-                onTap: () {
-                  Navigator.pop(context);
-                  // DÜZELTME: Artık ClubsScreen (AppBar'lı) çağırılıyor.
-                  Navigator.push(
-                    context, 
-                    MaterialPageRoute(builder: (_) => const ClubsScreen())
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.military_tech, color: Colors.purpleAccent),
-                title: const Text('Rozet İlerlemesi'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen()));
-                },
-              ),
-            ],
-          ),
-        ),
+        drawer: const CustomDrawer(),
 
         appBar: AppBar(
           backgroundColor: Theme.of(context).colorScheme.surface,

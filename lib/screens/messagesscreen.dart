@@ -7,29 +7,121 @@ import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
 import 'package:fluttergirdi/screens/clubs_tab.dart'; 
 
-class MessagesPage extends StatelessWidget {
+class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
+
+  @override
+  State<MessagesPage> createState() => _MessagesPageState();
+}
+
+class _MessagesPageState extends State<MessagesPage> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchText = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String val) {
+    // Gereksiz yenilemeleri önle (Sadece metin gerçekten değiştiyse güncelle)
+    final clean = val.trim().toLowerCase();
+    if (_searchText != clean) {
+      setState(() {
+        _searchText = clean;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser!.uid;
+    final cs = Theme.of(context).colorScheme;
 
     return DefaultTabController(
       length: 2, 
       child: Scaffold(
         appBar: AppBar(
-          toolbarHeight: 40,
-          title: const Text('Mesajlar'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Sohbetler'),
-              Tab(text: 'Kulüpler'),
-            ],
+          backgroundColor: cs.surface,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          centerTitle: true,
+          toolbarHeight: 65, 
+          titleSpacing: 16, 
+          
+          title: Container(
+            height: 40,
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TabBar(
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerColor: Colors.transparent,
+              indicator: BoxDecoration(
+                color: cs.surface,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+              labelColor: cs.onSurface,
+              unselectedLabelColor: cs.onSurfaceVariant,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
+              tabs: const [
+                Tab(text: 'Sohbetler'),
+                Tab(text: 'Kulüpler'),
+              ],
+            ),
+          ),
+
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(60),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                  textAlignVertical: TextAlignVertical.center,
+                  decoration: InputDecoration(
+                    hintText: 'Sohbetlerde ara...',
+                    hintStyle: TextStyle(color: cs.onSurfaceVariant.withOpacity(0.7), fontSize: 14),
+                    prefixIcon: Icon(Icons.search, size: 20, color: cs.onSurfaceVariant),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                    suffixIcon: _searchController.text.isNotEmpty 
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            _onSearchChanged('');
+                          },
+                        ) 
+                      : null,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
         body: TabBarView(
           children: [
-            _ChatsView(uid: uid),
+            _ChatsView(uid: uid, filterText: _searchText),
             const ClubsTab(),
           ],
         ),
@@ -39,63 +131,144 @@ class MessagesPage extends StatelessWidget {
 }
 
 // --- SOHBETLER SEKMESİ ---
-class _ChatsView extends StatelessWidget {
+class _ChatsView extends StatefulWidget {
   final String uid;
-  const _ChatsView({required this.uid});
+  final String filterText;
+  
+  const _ChatsView({required this.uid, required this.filterText});
+
+  @override
+  State<_ChatsView> createState() => _ChatsViewState();
+}
+
+class _ChatsViewState extends State<_ChatsView> {
+  final Map<String, Map<String, dynamic>> _userCache = {};
+  
+  // DÜZELTME: Stream'i burada saklıyoruz, böylece her harfte yeniden oluşturulmuyor
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _chatsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    // Stream'i sadece BİR KERE oluştur
+    _chatsStream = FirebaseFirestore.instance
+        .collection('chats')
+        .where('participants', arrayContains: widget.uid)
+        .snapshots(includeMetadataChanges: true);
+  }
+
+  Future<void> _fetchMissingUsers(List<String> uids) async {
+    final missing = uids.where((id) => !_userCache.containsKey(id)).toSet().toList();
+    if (missing.isEmpty) return;
+
+    for (var i = 0; i < missing.length; i += 10) {
+      final chunk = missing.sublist(i, i + 10 > missing.length ? missing.length : i + 10);
+      try {
+        final qs = await FirebaseFirestore.instance
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+        
+        for (var doc in qs.docs) {
+          _userCache[doc.id] = doc.data();
+        }
+      } catch (e) {
+        debugPrint('Kullanıcı verisi çekilemedi: $e');
+      }
+    }
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
-    final fs = FirebaseFirestore.instance;
     return Scaffold(
-      floatingActionButton: _TrashFab(currentUid: uid),
+      floatingActionButton: _TrashFab(currentUid: widget.uid),
       body: Column(
         children: [
-          NewMatchHeader(currentUid: uid),
+          if (widget.filterText.isEmpty) 
+            NewMatchHeader(currentUid: widget.uid),
 
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: fs
-                  .collection('chats')
-                  .where('participants', arrayContains: uid)
-                  .snapshots(includeMetadataChanges: true),
+              stream: _chatsStream, // Sabit stream kullanılıyor
               builder: (context, s) {
                 if (s.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 
-                final docs = s.data?.docs.toList() ?? [];
+                var docs = s.data?.docs.toList() ?? [];
                 
-                // --- KRİTİK DÜZELTME BURADA ---
-                // 1. Grup (Kulüp) sohbetlerini listeden çıkar
                 docs.removeWhere((doc) {
                    final data = doc.data();
-                   return data['isGroup'] == true; 
+                   final isGroup = data['isGroup'] == true;
+                   final vis = (data['visibleFor'] as Map?) ?? {};
+                   final isHidden = vis[widget.uid] == false;
+                   return isGroup || isHidden;
                 });
 
-                // 2. Gizli sohbetleri filtrele
-                docs.removeWhere((doc) {
-                    final vis = (doc.data()['visibleFor'] as Map?) ?? {};
-                    return vis[uid] == false;
-                });
-                
-                // 3. Sıralama (En yeniden eskiye)
+                final otherUids = <String>{};
+                for (var doc in docs) {
+                  final parts = List.from(doc.data()['participants'] ?? []);
+                  final other = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                  if (other != null) otherUids.add(other.toString());
+                }
+
+                if (otherUids.isNotEmpty) {
+                  Future.microtask(() => _fetchMissingUsers(otherUids.toList()));
+                }
+
+                if (widget.filterText.isNotEmpty) {
+                  docs = docs.where((doc) {
+                    final data = doc.data();
+                    final parts = List.from(data['participants'] ?? []);
+                    final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                    
+                    if (otherId == null) return false;
+
+                    final cachedUser = _userCache[otherId];
+                    if (cachedUser != null) {
+                      final name = (cachedUser['displayName'] ?? '').toString().toLowerCase();
+                      final username = (cachedUser['username'] ?? '').toString().toLowerCase();
+                      return name.contains(widget.filterText) || username.contains(widget.filterText);
+                    }
+                    
+                    final titles = (data['titles'] as Map?) ?? {};
+                    final savedName = (titles[widget.uid] as String?)?.toLowerCase() ?? '';
+                    return savedName.contains(widget.filterText);
+                  }).toList();
+                }
+
                 docs.sort((a, b) {
                     final tA = (a.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
                     final tB = (b.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
                     return tB.compareTo(tA);
                 });
                 
-                if (docs.isEmpty) return const _EmptyMessagesInteractive();
+                if (docs.isEmpty) {
+                  return widget.filterText.isNotEmpty 
+                    ? Center(child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Text('Eşleşen sohbet bulunamadı.', style: TextStyle(color: Colors.black)),
+                      )) 
+                    : const _EmptyMessagesInteractive();
+                }
 
                 return ListView.separated(
                   itemCount: docs.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
-                  cacheExtent: 1000,
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                   itemBuilder: (context, index) {
+                    final doc = docs[index];
+                    final parts = List.from(doc.data()['participants'] ?? []);
+                    final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                    
+                    final cachedData = (otherId != null) ? _userCache[otherId] : null;
+
                     return ChatListTile(
-                      key: ValueKey(docs[index].id),
-                      chatDoc: docs[index],
-                      currentUid: uid,
+                      key: ValueKey(doc.id),
+                      chatDoc: doc,
+                      currentUid: widget.uid,
+                      cachedUserData: cachedData,
                     );
                   },
                 );
@@ -108,7 +281,7 @@ class _ChatsView extends StatelessWidget {
   }
 }
 
-// --- YARDIMCI SINIFLAR AYNEN KORUNDU ---
+// --- YARDIMCI SINIFLAR ---
 
 class NewMatchHeader extends StatefulWidget {
   final String currentUid;
@@ -270,11 +443,13 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
 class ChatListTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
   final String currentUid;
+  final Map<String, dynamic>? cachedUserData;
 
   const ChatListTile({
     super.key,
     required this.chatDoc,
     required this.currentUid,
+    this.cachedUserData,
   });
 
   @override
@@ -306,6 +481,17 @@ class ChatListTile extends StatelessWidget {
           final username = userData['username'] as String?;
           final name = userData['displayName'] as String?;
           photoUrl = userData['photoURL'] as String?;
+
+          if (username != null && username.isNotEmpty) {
+            displayName = username;
+          } else if (name != null && name.isNotEmpty) {
+            displayName = name;
+          }
+        } 
+        else if (cachedUserData != null) {
+          final username = cachedUserData!['username'] as String?;
+          final name = cachedUserData!['displayName'] as String?;
+          photoUrl = cachedUserData!['photoURL'] as String?;
 
           if (username != null && username.isNotEmpty) {
             displayName = username;

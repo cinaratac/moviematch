@@ -72,27 +72,24 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: Colors.transparent, // Arkaplanı şeffaf yapıyoruz ki kendi şeklimizi verelim
-        insetPadding: const EdgeInsets.all(20), // Ekran kenarlarından boşluk
+        backgroundColor: Colors.transparent, 
+        insetPadding: const EdgeInsets.all(20), 
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 360), // Çok geniş olmasın
+          constraints: const BoxConstraints(maxWidth: 360), 
           decoration: BoxDecoration(
-            // Hafif bir gradyan ile derinlik katalım
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                cs.surfaceContainerHighest, // Üst taraf biraz daha açık
-                cs.surface,                 // Alt taraf koyu
+                cs.surfaceContainerHighest, 
+                cs.surface,                 
               ],
             ),
-            borderRadius: BorderRadius.circular(24), // Daha yuvarlak köşeler
-            // İnce, şık bir kenarlık (border)
+            borderRadius: BorderRadius.circular(24), 
             border: Border.all(
               color: cs.outlineVariant.withOpacity(0.2),
               width: 1,
             ),
-            // Hafif gölge
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.4),
@@ -105,7 +102,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 1. ÜST İKON (Parlayan efektli)
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -124,7 +120,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
               
               const SizedBox(height: 20),
 
-              // 2. BAŞLIK
               Text(
                 'Sistem Nasıl Çalışıyor?',
                 style: theme.textTheme.titleLarge?.copyWith(
@@ -136,7 +131,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
               
               const SizedBox(height: 24),
 
-              // 3. MADDELER (Yardımcı widget ile)
               _buildFancyInfoItem(
                 context,
                 icon: Icons.person_search_rounded,
@@ -153,7 +147,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
 
               const SizedBox(height: 28),
 
-              // 4. KAPAT BUTONU (Tam genişlik)
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -178,7 +171,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     );
   }
 
-  // Maddeleri düzenli göstermek için küçük yardımcı widget
   Widget _buildFancyInfoItem(BuildContext context, {required IconData icon, required String title, required String desc}) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
@@ -233,7 +225,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     });
   }
 
-  // --- Yardımcı String Fonksiyonları (SearchMovie'den alındı) ---
   String _slugify(String s) {
     var t = s.toLowerCase();
     t = t.replaceAll(RegExp(r'[çÇ]'), 'c')
@@ -272,12 +263,10 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     try {
       final db = FirebaseFirestore.instance;
       
-      // 1. Catalog Film kaydı oluştur veya bul
       final tmdbId = rec.tmdbId;
       final title = rec.title;
       final posterUrl = rec.posterUrl;
       
-      // Yıl bilgisini releaseDate'den al
       int yearInt = 0;
       if (rec.releaseDate.length >= 4) {
         yearInt = int.tryParse(rec.releaseDate.substring(0, 4)) ?? 0;
@@ -288,27 +277,17 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
       
       String? primaryKey;
 
-      // TMDB ID ile ara
       final byTmdb = await db.collection('catalog_films')
           .where('tmdbId', isEqualTo: tmdbId).limit(1).get();
 
       if (byTmdb.docs.isNotEmpty) {
-        final foundId = byTmdb.docs.first.id;
-        // Eğer eski tip ID (tmdb:...) ise yeni tipe geçirilebilir ama şimdilik ID'yi kullan
-        primaryKey = foundId;
+        primaryKey = byTmdb.docs.first.id;
       } else {
-        // ID yoksa slug ile dene
         final slugId = 'film:$guessLbSlug';
         final slugDoc = await db.collection('catalog_films').doc(slugId).get();
-        if (slugDoc.exists) {
-          primaryKey = slugId;
-        } else {
-          // O da yoksa primaryKey bu olacak, oluşturacağız.
-          primaryKey = slugId;
-        }
+        primaryKey = slugId; 
       }
 
-      // Catalog film verisini yaz/güncelle
       final docRef = db.collection('catalog_films').doc(primaryKey);
       await docRef.set({
         'title': title.isNotEmpty ? title : 'Başlık yok',
@@ -322,27 +301,25 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 2. Kullanıcı Profiline Ekle
       final String userArrayField = target.userArrayField;
       await db.collection('users').doc(uid).set({
         userArrayField: FieldValue.arrayUnion([primaryKey]),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 3. UserTasteProfiles Güncelle
+      // DÜZELTME: Alan isimleri 'loved' ve 'disliked' olarak güncellendi (UserProfileService ile uyumlu olması için)
       if (target == ShelfTarget.fiveStar) {
         await db.collection('userTasteProfiles').doc(uid).set({
-          'fiveStars': FieldValue.arrayUnion([primaryKey]),
+          'loved': FieldValue.arrayUnion([primaryKey]), // 'fiveStars' -> 'loved'
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       } else if (target == ShelfTarget.disliked) {
         await db.collection('userTasteProfiles').doc(uid).set({
-          'lowRatings': FieldValue.arrayUnion([primaryKey]),
+          'disliked': FieldValue.arrayUnion([primaryKey]), // 'lowRatings' -> 'disliked'
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       }
 
-      // 4. Local Cache Güncelle (Hızlı UI tepkisi için)
       try {
         final Map<String, String> newLocalItem = {
           'title': title,
@@ -374,7 +351,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
             backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );
-        // Listeden çıkarıp bir sonrakine geçelim
         setState(() {
           _recommendations!.removeAt(_currentIndex);
           if (_currentIndex >= _recommendations!.length) {
@@ -437,7 +413,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     );
   }
 
-  // --- Build Metodu (Mevcut tasarımın aynısı, sadece buton fonksiyonları bağlandı) ---
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -447,7 +422,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
   
     if (_loading) {
       return Container(
-        height: 200, // Yüklenirken de daha kısa görünsün
+        height: 200, 
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -456,7 +431,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(16), // Radius biraz küçüldü
+          borderRadius: BorderRadius.circular(16), 
         ),
         child: const Center(child: CircularProgressIndicator()),
       );
@@ -469,14 +444,14 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     final recommendation = _recommendations![_currentIndex];
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), // Dikey margin azaldı
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), 
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [cs.primaryContainer, cs.secondaryContainer],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16), // Radius 20 -> 16
+        borderRadius: BorderRadius.circular(16), 
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
@@ -486,12 +461,11 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min, // İçeriği kadar yer kaplasın
+        mainAxisSize: MainAxisSize.min, 
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // --- Başlık Kısmı (Daha kompakt) ---
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), // Boşluklar sıkılaştırıldı
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), 
             child: Row(
               children: [
                 Icon(Icons.auto_awesome, color: cs.primary, size: 20),
@@ -503,9 +477,8 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                     color: cs.onPrimaryContainer,
                   ),
                 ),
-                const Spacer(), // Sağa yaslamak için boşluk
+                const Spacer(), 
                 
-                // --- YENİ EKLENEN BİLGİ BUTONU ---
                 SizedBox(
                   height: 32,
                   width: 32,
@@ -514,20 +487,18 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                     iconSize: 20,
                     icon: Icon(Icons.info_outline, color: cs.onSurfaceVariant.withOpacity(0.7)),
                     tooltip: 'Bu liste nasıl oluşuyor?',
-                    onPressed: _showInfoDialog, // Fonksiyonu çağırıyoruz
+                    onPressed: _showInfoDialog, 
                   ),
                 ),
               ],
             ),
           ),
 
-          // --- Film İçeriği ---
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Poster (Küçültüldü: 120x180 -> 100x150)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: SizedBox(
@@ -543,7 +514,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                 ),
                 const SizedBox(width: 12),
                 
-                // Bilgiler
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,14 +522,13 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                         recommendation.title,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
-                          fontSize: 16, // Font boyutu sabitlendi
+                          fontSize: 16, 
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 6), // 8 -> 6
+                      const SizedBox(height: 6), 
                       
-                      // Uyum Skoru
                       Row(
                         children: [
                           Icon(Icons.favorite, size: 14, color: Colors.red),
@@ -575,7 +544,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                       ),
                       const SizedBox(height: 4),
                       
-                      // Sebep (Daha küçük kutu)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
@@ -591,7 +559,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                       ),
                       const SizedBox(height: 6),
                       
-                      // IMDB Puanı
                       Row(
                         children: [
                           const Icon(Icons.star, size: 14, color: Colors.amber),
@@ -604,7 +571,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                       ),
                       const SizedBox(height: 4),
                       
-                      // Türler (Daha kompakt wrap)
                       if (recommendation.genres.isNotEmpty)
                         SizedBox(
                           height: 20,
@@ -635,15 +601,13 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
             ),
           ),
 
-          const SizedBox(height: 12), // 16 -> 12
+          const SizedBox(height: 12), 
 
-          // --- Alt Butonlar ---
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), // Alt boşluk 12
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), 
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // Navigasyon (Önceki/Sonraki)
                 Container(
                   height: 36,
                   decoration: BoxDecoration(
@@ -673,7 +637,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                   ),
                 ),
 
-                // Ekle Butonu
                 SizedBox(
                   height: 36,
                   child: FilledButton.icon(
@@ -687,7 +650,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                     style: FilledButton.styleFrom(
                       backgroundColor: cs.primary,
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      visualDensity: VisualDensity.compact, // Sıkılaştırılmış görünüm
+                      visualDensity: VisualDensity.compact, 
                     ),
                   ),
                 ),

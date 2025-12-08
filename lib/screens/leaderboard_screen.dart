@@ -1,26 +1,68 @@
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/models/gamification.dart';
 import 'package:fluttergirdi/services/gamification_service.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil sayfasına gitmek için
+import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
 
 class LeaderboardScreen extends StatelessWidget {
   const LeaderboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return DefaultTabController(
       length: 2, 
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Liderler', style: TextStyle(fontWeight: FontWeight.bold)),
-          centerTitle: true,
+          backgroundColor: cs.surface,
+          surfaceTintColor: Colors.transparent,
           elevation: 0,
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'En Popüler'),
-              Tab(text: 'Film Kurtları'),
-            ],
+          scrolledUnderElevation: 0,
+          centerTitle: true,
+          
+          // 1. BAŞLIK
+          title: const Text(
+            'Liderlik Tablosu', 
+            style: TextStyle(fontWeight: FontWeight.bold)
+          ),
+
+          // 2. BUBBLE TAB (Başlığın Altında)
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(60), // Tab alanı yüksekliği
+            child: Container(
+              height: 45, // İçteki barın yüksekliği
+              // Yanlardan boşluk (16), alttan boşluk (12)
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 12), 
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.5), // Gri zemin
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TabBar(
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                // Kayan Beyaz Baloncuk
+                indicator: BoxDecoration(
+                  color: cs.surface, 
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                labelColor: cs.onSurface,
+                unselectedLabelColor: cs.onSurfaceVariant,
+                labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                tabs: const [
+                  Tab(text: 'En Popüler'),
+                  Tab(text: 'Film Kurtları'),
+                ],
+              ),
+            ),
           ),
         ),
         body: TabBarView(
@@ -64,7 +106,7 @@ class _LeaderboardList extends StatelessWidget {
               children: [
                 Icon(Icons.emoji_events_outlined, size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 16),
-                const Text("Henüz veri yok veya yüklenemedi.", style: TextStyle(color: Colors.grey)),
+                const Text("Henüz veri yok.", style: TextStyle(color: Colors.grey)),
               ],
             ),
           );
@@ -76,28 +118,52 @@ class _LeaderboardList extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final user = users[index];
-            // İlk 3 kişiye özel renkler
-            final isTop3 = index < 3;
-            Color rankColor;
-            if (index == 0) rankColor = const Color(0xFFFFD700); // Altın
-            else if (index == 1) rankColor = const Color(0xFFC0C0C0); // Gümüş
-            else if (index == 2) rankColor = const Color(0xFFCD7F32); // Bronz
-            else rankColor = Theme.of(context).colorScheme.surfaceContainerHighest;
+            
+            // Renk ve Taç Ayarları
+            Color? bgColor;
+            Color? borderColor;
+            Color rankBadgeColor;
+            bool showCrown = false;
+
+            if (index == 0) {
+              // 1. Sıra (Altın)
+              bgColor = const Color(0xFFFFD700).withOpacity(0.15); 
+              borderColor = const Color(0xFFFFD700);
+              rankBadgeColor = const Color(0xFFFFD700);
+              showCrown = true;
+            } else if (index == 1) {
+              // 2. Sıra (Gümüş)
+              bgColor = const Color(0xFFC0C0C0).withOpacity(0.15);
+              borderColor = const Color(0xFFC0C0C0);
+              rankBadgeColor = const Color(0xFFC0C0C0);
+            } else if (index == 2) {
+              // 3. Sıra (Bronz)
+              bgColor = const Color(0xFFCD7F32).withOpacity(0.15);
+              borderColor = const Color(0xFFCD7F32);
+              rankBadgeColor = const Color(0xFFCD7F32);
+            } else {
+              // Diğerleri
+              bgColor = Theme.of(context).colorScheme.surfaceContainerLow;
+              borderColor = Colors.transparent;
+              rankBadgeColor = Theme.of(context).colorScheme.surfaceContainerHighest;
+            }
 
             return GestureDetector(
               onTap: () {
-                // Profile git
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: user.uid)),
                 );
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  color: bgColor,
                   borderRadius: BorderRadius.circular(16),
-                  border: isTop3 ? Border.all(color: rankColor.withOpacity(0.6), width: 1.5) : null,
+                  border: Border.all(
+                    color: borderColor ?? Colors.transparent, 
+                    width: index < 3 ? 1.5 : 0 
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -106,29 +172,50 @@ class _LeaderboardList extends StatelessWidget {
                       width: 32, height: 32,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: isTop3 ? rankColor : Colors.transparent,
+                        color: rankBadgeColor,
                         shape: BoxShape.circle,
                       ),
                       child: Text(
                         '#${user.rank}',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: isTop3 ? Colors.black : Theme.of(context).colorScheme.onSurface,
+                          color: index < 3 ? Colors.black : Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     
-                    // Profil Resmi
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: Colors.grey.shade800,
-                      backgroundImage: (user.photoURL != null && user.photoURL!.isNotEmpty)
-                          ? NetworkImage(user.photoURL!)
-                          : null,
-                      child: (user.photoURL == null || user.photoURL!.isEmpty)
-                          ? const Icon(Icons.person, size: 20)
-                          : null,
+                    // Profil Resmi + Taç (Varsa)
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        CircleAvatar(
+                          radius: 24,
+                          backgroundColor: Colors.grey.shade800,
+                          backgroundImage: (user.photoURL != null && user.photoURL!.isNotEmpty)
+                              ? NetworkImage(user.photoURL!)
+                              : null,
+                          child: (user.photoURL == null || user.photoURL!.isEmpty)
+                              ? const Icon(Icons.person, size: 24)
+                              : null,
+                        ),
+                        if (showCrown)
+                          Positioned(
+                            top: -12,
+                            right: -6,
+                            child: Transform.rotate(
+                              angle: 0.2,
+                              child: const Icon(
+                                Icons.workspace_premium, 
+                                color: Color(0xFFFFD700),
+                                size: 28,
+                                shadows: [
+                                  Shadow(color: Colors.black26, blurRadius: 2, offset: Offset(0, 1))
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(width: 12),
                     

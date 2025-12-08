@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart'; // debugPrint için
 import '../secrets.dart';
 import 'dart:math';
 
@@ -62,6 +63,7 @@ class UserTasteProfile {
   final List<String> favoriteDirectors;
   final List<String> favoriteActors;
   final List<int> lovedMovieTmdbIds;
+  final List<String> lovedMovieTitles; // ID yoksa isimle aramak için
   final List<int> dislikedMovieTmdbIds;
   final int? age;
 
@@ -70,18 +72,10 @@ class UserTasteProfile {
     this.favoriteDirectors = const [],
     this.favoriteActors = const [],
     this.lovedMovieTmdbIds = const [],
+    this.lovedMovieTitles = const [],
     this.dislikedMovieTmdbIds = const [],
     this.age,
   });
-
-  factory UserTasteProfile.fromFirestore(Map<String, dynamic> data) {
-    return UserTasteProfile(
-      favoriteGenres: List<String>.from(data['favGenres'] ?? []),
-      favoriteDirectors: List<String>.from(data['favDirectors'] ?? []),
-      favoriteActors: List<String>.from(data['favActors'] ?? []),
-      age: data['age'] as int?,
-    );
-  }
 }
 
 class RecommendationEngine {
@@ -96,37 +90,55 @@ class RecommendationEngine {
   List<MovieRecommendation>? _memoryCache;
   DateTime? _lastFetchTime;
 
-  /// Ana öneri motoru - Kullanıcı için öneriler üretir
-  Future<List<MovieRecommendation>> generateRecommendations(String uid) async {
-    // 1. Kullanıcı profilini çek
-    if (_memoryCache != null && _memoryCache!.isNotEmpty && _lastFetchTime != null) {
+  /// ÖNERİLERİ KAYDETTİĞİMİZ YENİ GÜVENLİ YOL
+  /// users -> {uid} -> recommendations -> feed
+  DocumentReference _getRecRef(String uid) {
+    return _db.collection('users').doc(uid).collection('recommendations').doc('feed');
+  }
+
+  Future<List<MovieRecommendation>> generateRecommendations(String uid, {bool forceRefresh = false}) async {
+    // 1. RAM Cache Kontrolü
+    if (!forceRefresh && _memoryCache != null && _memoryCache!.isNotEmpty && _lastFetchTime != null) {
       if (DateTime.now().difference(_lastFetchTime!) < _cacheDuration) {
         return _memoryCache!;
       }
     }
+
     final Set<int> ignoreIds = {};
+    
+    // 2. Firebase Cache Kontrolü (YENİ ADRES)
     try {
-      // Sadece kullanıcının en son kaydedilen öneri dökümanını çekiyoruz
-      final lastRecDoc = await _db.collection('userRecommendations').doc(uid).get();
-      
-      if (lastRecDoc.exists) {
-        final data = lastRecDoc.data();
-        // 'recommendations' listesindeki filmleri al
-        final recs = data?['recommendations'] as List?;
+      final docRef = _getRecRef(uid);
+      final snapshot = await docRef.get();
+
+      if (!forceRefresh && snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final cachedAt = (data['cachedAt'] as Timestamp?)?.toDate();
+        
+        if (cachedAt != null && DateTime.now().difference(cachedAt) < _cacheDuration) {
+           final recsData = data['recommendations'] as List?;
+           if (recsData != null && recsData.isNotEmpty) {
+             final list = recsData.map((e) => MovieRecommendation.fromMap(e)).toList();
+             _memoryCache = list;
+             _lastFetchTime = cachedAt;
+             return list;
+           }
+        }
+        // Veri eskiyse ID'leri al (tekrar önermemek için)
+        final recs = data['recommendations'] as List?;
         if (recs != null) {
-          for (var r in recs) {
-            // Sadece geçen sefer önerilenleri engelle
-            ignoreIds.add(r['tmdbId']); 
-          }
+          for (var r in recs) ignoreIds.add(r['tmdbId']);
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("Cache okuma hatası: $e");
+    }
+
+    // 3. Profil Analizi
     final profile = await _fetchUserProfile(uid);
-    
-    // Geçici ham liste
     final rawRecommendations = <MovieRecommendation>[];
 
-    // 2. Paralel olarak farklı kaynaklardan öneriler topla
+    // 4. API İstekleri (Hataları Yutmadan)
     await Future.wait([
       _getGenreBasedRecommendations(profile, rawRecommendations),
       _getDirectorBasedRecommendations(profile, rawRecommendations),
@@ -134,17 +146,12 @@ class RecommendationEngine {
       _getSimilarMovieRecommendations(profile, rawRecommendations),
     ]);
 
-    // 3. Tekilleştirme ve Puan Birleştirme
+    // 5. Birleştirme & Puanlama
     final uniqueMap = <int, MovieRecommendation>{};
-
     for (final rec in rawRecommendations) {
       if (uniqueMap.containsKey(rec.tmdbId)) {
         final existing = uniqueMap[rec.tmdbId]!;
-        // Eğer zaten listede varsa:
-        // 1. Puanını artır
         existing.matchScore = (existing.matchScore + 10).clamp(0.0, 100.0);
-        
-        // 2. Sebebi güncelle
         if (!existing.matchReason.contains(rec.matchReason)) {
            if (existing.matchReason.length < 50) {
              existing.matchReason = '${existing.matchReason}, ${rec.matchReason.split(':').last}';
@@ -155,336 +162,239 @@ class RecommendationEngine {
       }
     }
 
+    // 6. YEDEK PLAN: Liste boşsa Trendleri Çek
+    if (uniqueMap.length < 10) {
+      final trending = <MovieRecommendation>[];
+      await _getTrendingRecommendations(trending);
+      for (final tr in trending) {
+        if (!uniqueMap.containsKey(tr.tmdbId) && !ignoreIds.contains(tr.tmdbId)) {
+           uniqueMap[tr.tmdbId] = tr;
+        }
+      }
+    }
+
     var mergedList = uniqueMap.values.toList();
-
-    // 4. Zaten bilinen filmleri filtrele
     final filtered = _filterKnownMovies(mergedList, profile, ignoreIds: ignoreIds);
-
-    // 5. Skorlarına göre sırala ve en iyi 30'u al
     filtered.sort((a, b) => b.matchScore.compareTo(a.matchScore));
     final top30 = filtered.take(30).toList();
 
-    // 6. Firestore'a kaydet (cache)
+    // 7. Firebase'e Yazma (YENİ ADRES)
     if (top30.isNotEmpty) {
-      await _saveRecommendationsToCache(uid, top30);
-      _memoryCache = top30;
-      _lastFetchTime = DateTime.now();
+      try {
+        await _getRecRef(uid).set({
+          'recommendations': top30.map((r) => r.toMap()).toList(),
+          'cachedAt': FieldValue.serverTimestamp(),
+          'count': top30.length,
+        });
+        _memoryCache = top30;
+        _lastFetchTime = DateTime.now();
+      } catch (e) {
+        debugPrint("Yazma hatası: $e");
+      }
     }
 
     return top30;
   }
+
+  // --- Yardımcı Fonksiyonlar ---
 
   void clearMemoryCache() {
     _memoryCache = null;
     _lastFetchTime = null;
   }
 
-  /// Cache'den önerileri getir (DÜZELTİLEN FONKSİYON)
   Future<List<MovieRecommendation>?> getCachedRecommendations(String uid) async {
-    if (_memoryCache != null && _memoryCache!.isNotEmpty) {
-       return _memoryCache;
-    }
+    if (_memoryCache != null && _memoryCache!.isNotEmpty) return _memoryCache;
     try {
-      final doc = await _db.collection('userRecommendations').doc(uid).get();
-      if (!doc.exists) return null;
+      final snapshot = await _getRecRef(uid).get();
+      if (!snapshot.exists) return null;
 
-      final data = doc.data()!;
+      final data = snapshot.data() as Map<String, dynamic>;
       final cachedAt = (data['cachedAt'] as Timestamp?)?.toDate();
       
-      if (cachedAt != null && DateTime.now().difference(cachedAt) > _cacheDuration) {
-        return null;
-      }
+      if (cachedAt != null && DateTime.now().difference(cachedAt) > _cacheDuration) return null;
 
       final recommendationsData = data['recommendations'] as List?;
       if (recommendationsData == null) return null;
 
-      final list = recommendationsData
-          .map((e) => MovieRecommendation.fromMap(e as Map<String, dynamic>))
-          .toList();
-      
-      // --- EKLENEN KISIM: Profil verisine göre filtreleme ---
-      // Cache'ten gelse bile, kullanıcı bu sürede izlemiş olabilir diye tekrar filtreliyoruz
-      final profile = await _fetchUserProfile(uid);
-      final filteredList = _filterKnownMovies(list, profile); 
-      // -----------------------------------------------------
-
-      _memoryCache = filteredList;
+      final list = recommendationsData.map((e) => MovieRecommendation.fromMap(e)).toList();
+      _memoryCache = list;
       _lastFetchTime = cachedAt ?? DateTime.now();
-      return filteredList;
+      return list;
     } catch (e) {
-      return null; // <-- BU SATIR EKSİKTİ, EKLENDİ
+      return null;
     }
   }
 
   Future<UserTasteProfile> _fetchUserProfile(String uid) async {
-    final userDoc = await _db.collection('users').doc(uid).get();
-    if (!userDoc.exists) return UserTasteProfile();
+    try {
+      final userDoc = await _db.collection('users').doc(uid).get();
+      if (!userDoc.exists) return UserTasteProfile();
 
-    final data = userDoc.data()!;
-    final lovedIds = await _fetchTmdbIdsFromKeys(List<String>.from(data['fiveStarKeys'] ?? []));
-    final dislikedIds = await _fetchTmdbIdsFromKeys(List<String>.from(data['dislikedKeys'] ?? []));
-    
-    return UserTasteProfile(
-      favoriteGenres: List<String>.from(data['favGenres'] ?? []),
-      favoriteDirectors: List<String>.from(data['favDirectors'] ?? []),
-      favoriteActors: List<String>.from(data['favActors'] ?? []),
-      lovedMovieTmdbIds: lovedIds,
-      dislikedMovieTmdbIds: dislikedIds,
-      age: data['age'] as int?,
-    );
-  }
+      final data = userDoc.data()!;
+      final keys = <String>{...List<String>.from(data['fiveStarKeys'] ?? []), ...List<String>.from(data['favoritesKeys'] ?? [])};
+      
+      final resolvedIds = <int>[];
+      final resolvedTitles = <String>[];
 
-  Future<List<int>> _fetchTmdbIdsFromKeys(List<String> keys) async {
-    if (keys.isEmpty) return [];
-    final ids = <int>[];
-    for (var i = 0; i < keys.length; i += 10) {
-      final chunk = keys.sublist(i, i + 10 > keys.length ? keys.length : i + 10);
-      try {
-        final qs = await _db.collection('catalog_films').where(FieldPath.documentId, whereIn: chunk).get();
-        for (final doc in qs.docs) {
-          final tmdbId = doc.data()['tmdbId'];
-          if (tmdbId is int && tmdbId > 0) ids.add(tmdbId);
+      if (keys.isNotEmpty) {
+        final keyList = keys.toList();
+        for (var i = 0; i < keyList.length; i += 10) {
+          final chunk = keyList.sublist(i, i + 10 > keyList.length ? keyList.length : i + 10);
+          final qs = await _db.collection('catalog_films').where(FieldPath.documentId, whereIn: chunk).get();
+          for (final doc in qs.docs) {
+            final d = doc.data();
+            final tmdbId = d['tmdbId'];
+            if (tmdbId is int && tmdbId > 0) {
+              resolvedIds.add(tmdbId);
+            } else {
+              final title = d['title'] as String?;
+              if (title != null && title.isNotEmpty) resolvedTitles.add(title);
+            }
+          }
         }
-      } catch (_) {}
+      }
+
+      return UserTasteProfile(
+        favoriteGenres: List<String>.from(data['favGenres'] ?? []),
+        favoriteDirectors: List<String>.from(data['favDirectors'] ?? []),
+        favoriteActors: List<String>.from(data['favActors'] ?? []),
+        lovedMovieTmdbIds: resolvedIds,
+        lovedMovieTitles: resolvedTitles,
+        age: data['age'] as int?,
+      );
+    } catch (e) {
+      return UserTasteProfile();
     }
-    return ids;
   }
 
-  // Paralel istekler için güncellenmiş yardımcı fonksiyonlar
-  Future<void> _getGenreBasedRecommendations(
-    UserTasteProfile profile,
-    List<MovieRecommendation> recommendations,
-  ) async {
+  // --- API Fetcher Helper ---
+  
+  Map<String, String> get _headers => {
+    'Authorization': 'Bearer $_tmdbBearer',
+    'Accept': 'application/json',
+  };
+
+  Future<void> _fetchAndAddRecommendations(String path, List<MovieRecommendation> list, String reason) async {
+    try {
+      final uri = Uri.https('api.themoviedb.org', path, {'language': 'tr-TR', 'page': '1'});
+      final resp = await http.get(uri, headers: _headers);
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body);
+        final results = data['results'] as List;
+        for (final movie in results.take(5)) {
+          final vote = (movie['vote_average'] ?? 0.0).toDouble();
+          final score = 50.0 + (vote * 4.5);
+          list.add(_createRecommendation(
+            movie,
+            matchScore: score.clamp(0.0, 92.0),
+            matchReason: reason,
+          ));
+        }
+      }
+    } catch (e) {
+      debugPrint("API Error: $e");
+    }
+  }
+
+  // --- Kaynak Fonksiyonları ---
+
+  Future<void> _getGenreBasedRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
     if (profile.favoriteGenres.isEmpty) return;
     final genreMap = await _getGenreIdMap();
-    
-    // Future.wait ile paralel çalıştır
-    await Future.wait(profile.favoriteGenres.take(5).map((genreName) async {
-      final genreId = genreMap[genreName.toLowerCase()];
-      if (genreId == null) return;
-
-      try {
-        final randomPage = Random().nextInt(3) + 1;
-        final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
-          'with_genres': genreId.toString(),
-          'sort_by': 'vote_average.desc',
-          'vote_count.gte': '300',
-          'language': 'tr-TR',
-          'page': randomPage.toString(),
-        });
-
-        final resp = await http.get(uri, headers: {
-          'Authorization': 'Bearer $_tmdbBearer',
-          'Accept': 'application/json',
-        });
-
-        if (resp.statusCode == 200) {
-          final data = json.decode(resp.body);
-          final results = data['results'] as List;
-
-          for (final movie in results.take(10)) {
-            final vote = (movie['vote_average'] ?? 0.0).toDouble();
-            final score = 50.0 + (vote * 5.0);
-
-            recommendations.add(_createRecommendation(
-              movie,
-              matchScore: score.clamp(0.0, 95.0),
-              matchReason: 'Favori türün: $genreName',
-            ));
+    for (var g in profile.favoriteGenres.take(3)) {
+      final id = genreMap[g.toLowerCase().trim()];
+      if (id != null) {
+        try {
+          final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
+            'with_genres': id.toString(), 'sort_by': 'popularity.desc', 'language': 'tr-TR'
+          });
+          final resp = await http.get(uri, headers: _headers);
+          if(resp.statusCode==200) {
+             final res = json.decode(resp.body)['results'] as List;
+             for(var m in res.take(5)) {
+               final vote = (m['vote_average'] ?? 0.0).toDouble();
+               recommendations.add(_createRecommendation(m, matchScore: (50.0 + (vote * 5.0)).clamp(0.0, 95.0), matchReason: 'Tür: $g'));
+             }
           }
-        }
-      } catch (_) {}
-    }));
+        } catch(_){}
+      }
+    }
   }
 
-  Future<void> _getDirectorBasedRecommendations(
-    UserTasteProfile profile,
-    List<MovieRecommendation> recommendations,
-  ) async {
-    if (profile.favoriteDirectors.isEmpty) return;
-
-    // Paralel çalıştır
-    await Future.wait(profile.favoriteDirectors.take(5).map((directorName) async {
-      try {
-        final searchUri = Uri.https('api.themoviedb.org', '/3/search/person', {
-          'query': directorName,
-          'language': 'tr-TR',
-        });
-
-        final searchResp = await http.get(searchUri, headers: {
-          'Authorization': 'Bearer $_tmdbBearer',
-          'Accept': 'application/json',
-        });
-
-        if (searchResp.statusCode != 200) return;
-
-        final searchData = json.decode(searchResp.body);
-        final results = searchData['results'] as List;
-        
-        if (results.isEmpty) return;
-        
-        var person = results.first;
-        if (results.length > 1) {
-           final directorPerson = results.firstWhere(
-             (p) => (p['known_for_department'] == 'Directing'), 
-             orElse: () => results.first
-           );
-           person = directorPerson;
-        }
-        
-        final directorId = person['id'];
-
-        final moviesUri = Uri.https(
-          'api.themoviedb.org',
-          '/3/person/$directorId/movie_credits',
-          {'language': 'tr-TR'},
-        );
-
-        final moviesResp = await http.get(moviesUri, headers: {
-          'Authorization': 'Bearer $_tmdbBearer',
-          'Accept': 'application/json',
-        });
-
-        if (moviesResp.statusCode == 200) {
-          final moviesData = json.decode(moviesResp.body);
-          final crew = moviesData['crew'] as List;
-          final directed = crew.where((c) => c['job'] == 'Director').toList();
-          
-          directed.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
-
-          for (final movie in directed.take(5)) {
-             final vote = (movie['vote_average'] ?? 0.0).toDouble();
-             final score = 60.0 + (vote * 4.0); 
-
-            recommendations.add(_createRecommendation(
-              movie,
-              matchScore: score.clamp(0.0, 98.0),
-              matchReason: 'Favori yönetmen: $directorName',
-            ));
-          }
-        }
-      } catch (_) {}
-    }));
+  Future<void> _getDirectorBasedRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
+    for (var name in profile.favoriteDirectors.take(2)) {
+      await _fetchPersonCredits(name, 'Directing', recommendations, 'Yönetmen');
+    }
   }
 
-  Future<void> _getActorBasedRecommendations(
-    UserTasteProfile profile,
-    List<MovieRecommendation> recommendations,
-  ) async {
-    if (profile.favoriteActors.isEmpty) return;
-
-    // Paralel çalıştır
-    await Future.wait(profile.favoriteActors.take(3).map((actorName) async {
-      try {
-        final searchUri = Uri.https('api.themoviedb.org', '/3/search/person', {
-          'query': actorName,
-          'language': 'tr-TR',
-        });
-
-        final searchResp = await http.get(searchUri, headers: {
-          'Authorization': 'Bearer $_tmdbBearer',
-          'Accept': 'application/json',
-        });
-
-        if (searchResp.statusCode != 200) return;
-        final searchData = json.decode(searchResp.body);
-        final results = searchData['results'] as List;
-        if (results.isEmpty) return;
-
-        var person = results.first;
-         if (results.length > 1) {
-           person = results.firstWhere(
-             (p) => (p['known_for_department'] == 'Acting'), 
-             orElse: () => results.first
-           );
-        }
-        final actorId = person['id'];
-
-        final moviesUri = Uri.https(
-          'api.themoviedb.org',
-          '/3/person/$actorId/movie_credits',
-          {'language': 'tr-TR'},
-        );
-
-        final moviesResp = await http.get(moviesUri, headers: {
-          'Authorization': 'Bearer $_tmdbBearer',
-          'Accept': 'application/json',
-        });
-
-        if (moviesResp.statusCode == 200) {
-          final moviesData = json.decode(moviesResp.body);
-          final cast = moviesData['cast'] as List;
-          
-          cast.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
-
-          for (final movie in cast.take(5)) {
-            final vote = (movie['vote_average'] ?? 0.0).toDouble();
-            final score = 55.0 + (vote * 4.0);
-
-            recommendations.add(_createRecommendation(
-              movie,
-              matchScore: score.clamp(0.0, 90.0),
-              matchReason: 'Favori oyuncun: $actorName',
-            ));
-          }
-        }
-      } catch (_) {}
-    }));
+  Future<void> _getActorBasedRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
+    for (var name in profile.favoriteActors.take(2)) {
+      await _fetchPersonCredits(name, 'Acting', recommendations, 'Oyuncu');
+    }
   }
 
-  Future<void> _getSimilarMovieRecommendations(
-    UserTasteProfile profile,
-    List<MovieRecommendation> recommendations,
-  ) async {
-    if (profile.lovedMovieTmdbIds.isEmpty) return;
-
-    // Paralel çalıştır
-    await Future.wait(profile.lovedMovieTmdbIds.reversed.take(5).map((tmdbId) async {
-      try {
-        final uri = Uri.https(
-          'api.themoviedb.org',
-          '/3/movie/$tmdbId/recommendations',
-          {'language': 'tr-TR', 'page': '1'},
-        );
-
-        final resp = await http.get(uri, headers: {
-          'Authorization': 'Bearer $_tmdbBearer',
-          'Accept': 'application/json',
-        });
-
-        if (resp.statusCode == 200) {
-          final data = json.decode(resp.body);
-          final results = data['results'] as List;
-
-          for (final movie in results.take(5)) {
-            final vote = (movie['vote_average'] ?? 0.0).toDouble();
-            final score = 50.0 + (vote * 4.5);
-
-            recommendations.add(_createRecommendation(
-              movie,
-              matchScore: score.clamp(0.0, 92.0),
-              matchReason: 'Zevkine uygun',
-            ));
-          }
+  Future<void> _fetchPersonCredits(String name, String dept, List<MovieRecommendation> list, String roleLabel) async {
+    try {
+      final sUri = Uri.https('api.themoviedb.org', '/3/search/person', {'query': name, 'language': 'tr-TR'});
+      final sResp = await http.get(sUri, headers: _headers);
+      if (sResp.statusCode != 200) return;
+      final sRes = json.decode(sResp.body)['results'] as List;
+      if (sRes.isEmpty) return;
+      final personId = sRes.first['id'];
+      final cUri = Uri.https('api.themoviedb.org', '/3/person/$personId/movie_credits', {'language': 'tr-TR'});
+      final cResp = await http.get(cUri, headers: _headers);
+      if (cResp.statusCode == 200) {
+        final cData = json.decode(cResp.body);
+        var credits = (dept == 'Directing' ? cData['crew'] : cData['cast']) as List;
+        if (dept == 'Directing') {
+          credits = credits.where((c) => c['job'] == 'Director').toList();
         }
-      } catch (_) {}
-    }));
+        credits.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
+        for (final movie in credits.take(4)) {
+           final vote = (movie['vote_average'] ?? 0.0).toDouble();
+           list.add(_createRecommendation(
+             movie,
+             matchScore: (55.0 + (vote * 4.0)).clamp(0.0, 90.0),
+             matchReason: '$roleLabel: $name',
+           ));
+        }
+      }
+    } catch (_) {}
   }
 
-  MovieRecommendation _createRecommendation(
-    Map<String, dynamic> movie, {
-    required double matchScore,
-    required String matchReason,
-  }) {
+  Future<void> _getSimilarMovieRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
+    // ID ile
+    for (var id in profile.lovedMovieTmdbIds.take(3)) {
+      await _fetchAndAddRecommendations('/3/movie/$id/recommendations', recommendations, 'Benzer');
+    }
+    // İsim ile (ID Bulup)
+    for (var title in profile.lovedMovieTitles.take(3)) {
+      try {
+        final sUri = Uri.https('api.themoviedb.org', '/3/search/movie', {'query': title, 'language': 'tr-TR'});
+        final sResp = await http.get(sUri, headers: _headers);
+        if (sResp.statusCode == 200) {
+          final res = json.decode(sResp.body)['results'] as List;
+          if (res.isNotEmpty) {
+            final id = res.first['id'];
+            await _fetchAndAddRecommendations('/3/movie/$id/recommendations', recommendations, 'Benzer: $title');
+          }
+        }
+      } catch(_){}
+    }
+  }
+
+  Future<void> _getTrendingRecommendations(List<MovieRecommendation> recommendations) async {
+    await _fetchAndAddRecommendations('/3/trending/movie/week', recommendations, 'Popüler');
+  }
+
+  MovieRecommendation _createRecommendation(Map<String, dynamic> movie, {required double matchScore, required String matchReason}) {
     final posterPath = movie['poster_path'] as String?;
     final genreIds = List<int>.from(movie['genre_ids'] ?? []);
-
     return MovieRecommendation(
       tmdbId: movie['id'] as int,
       title: movie['title'] ?? '',
-      posterUrl: posterPath != null 
-          ? 'https://image.tmdb.org/t/p/w500$posterPath'
-          : '',
+      posterUrl: posterPath != null ? 'https://image.tmdb.org/t/p/w500$posterPath' : '',
       overview: movie['overview'] ?? '',
       voteAverage: (movie['vote_average'] ?? 0.0).toDouble(),
       releaseDate: movie['release_date'] ?? '',
@@ -494,45 +404,30 @@ class RecommendationEngine {
     );
   }
 
-  List<MovieRecommendation> _filterKnownMovies(
-    List<MovieRecommendation> recommendations,
-    UserTasteProfile profile, {
-    Set<int>? ignoreIds,
-  }) {
-    final knownIds = {
-      ...profile.lovedMovieTmdbIds,
-      ...profile.dislikedMovieTmdbIds,
-      ...?ignoreIds, 
-    };
-    return recommendations.where((rec) => !knownIds.contains(rec.tmdbId)).toList();
-  }
-
-  Future<void> _saveRecommendationsToCache(
-    String uid,
-    List<MovieRecommendation> recommendations,
-  ) async {
-    try {
-      await _db.collection('userRecommendations').doc(uid).set({
-        'recommendations': recommendations.map((r) => r.toMap()).toList(),
-        'cachedAt': FieldValue.serverTimestamp(),
-        'count': recommendations.length,
-      });
-    } catch (_) {}
+  List<MovieRecommendation> _filterKnownMovies(List<MovieRecommendation> list, UserTasteProfile profile, {Set<int>? ignoreIds}) {
+    final knownIds = {...profile.lovedMovieTmdbIds, ...?ignoreIds};
+    final knownTitles = profile.lovedMovieTitles.map((t) => t.toLowerCase()).toSet();
+    return list.where((rec) {
+      if (knownIds.contains(rec.tmdbId)) return false;
+      if (knownTitles.contains(rec.title.toLowerCase())) return false;
+      return true;
+    }).toList();
   }
 
   Future<Map<String, int>> _getGenreIdMap() async {
     return {
-      'aksiyon': 28, 'macera': 12, 'animasyon': 16, 'komedi': 35, 'suç': 80,
-      'belgesel': 99, 'drama': 18, 'aile': 10751, 'fantastik': 14, 'tarih': 36,
-      'korku': 27, 'müzik': 10402, 'gizem': 9648, 'romantik': 10749,
-      'bilim kurgu': 878, 'gerilim': 53, 'savaş': 10752, 'western': 37,
+      'aksiyon': 28, 'macera': 12, 'animasyon': 16, 'komedi': 35, 'suç': 80, 
+      'belgesel': 99, 'dram': 18, 'drama': 18, 'aile': 10751, 'fantastik': 14, 
+      'tarih': 36, 'korku': 27, 'müzik': 10402, 'gizem': 9648, 'romantik': 10749,
+      'bilimkurgu': 878, 'bilim kurgu': 878, 'gerilim': 53, 'savaş': 10752, 
+      'western': 37, 'klasikler': 18
     };
   }
 
   String _genreIdToName(int id) {
     final map = {
       28: 'Aksiyon', 12: 'Macera', 16: 'Animasyon', 35: 'Komedi', 80: 'Suç',
-      99: 'Belgesel', 18: 'Drama', 10751: 'Aile', 14: 'Fantastik', 36: 'Tarih',
+      99: 'Belgesel', 18: 'Dram', 10751: 'Aile', 14: 'Fantastik', 36: 'Tarih',
       27: 'Korku', 10402: 'Müzik', 9648: 'Gizem', 10749: 'Romantik',
       878: 'Bilim Kurgu', 53: 'Gerilim', 10752: 'Savaş', 37: 'Western',
     };

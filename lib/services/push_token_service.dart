@@ -8,54 +8,69 @@ class PushTokenService {
   PushTokenService._();
   static final PushTokenService I = PushTokenService._();
 
-  Stream<String?>? _tokenStream;
+  // DÜZELTME: 'String?' yerine 'String' yaptık. Token refresh stream'i null dönmez.
+  Stream<String>? _tokenStream;
+  bool _isInitializing = false; 
 
   Future<void> start() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    // Eğer zaten işlem yapılıyorsa tekrar başlatma
+    if (_isInitializing) return;
+    _isInitializing = true;
 
-    // Request permission (iOS + Android13+)
-    await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-      announcement: false,
-      carPlay: false,
-      criticalAlert: false,
-      provisional: false,
-    );
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
 
-    // Initial token save
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token != null) {
-      await _saveToken(user.uid, token);
+      // Request permission (iOS + Android13+)
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        announcement: false,
+        carPlay: false,
+        criticalAlert: false,
+        provisional: false,
+      );
+
+      // Initial token save
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await _saveToken(user.uid, token);
+      }
+
+      // Listen for token refresh
+      if (_tokenStream == null) {
+        _tokenStream = FirebaseMessaging.instance.onTokenRefresh;
+        _tokenStream!.listen((t) async {
+          final u = FirebaseAuth.instance.currentUser;
+          // t artık String olduğu için hata vermez
+          if (u != null) await _saveToken(u.uid, t);
+        });
+      }
+    } catch (e) {
+      // Hata olsa bile devam et
+      print("PushTokenService hatası: $e");
+    } finally {
+      _isInitializing = false; // Kilidi aç
     }
-
-    // Listen for token refresh
-    _tokenStream ??= FirebaseMessaging.instance.onTokenRefresh;
-    _tokenStream!.listen((t) async {
-      if (t == null) return;
-      final u = FirebaseAuth.instance.currentUser;
-      if (u == null) return;
-      await _saveToken(u.uid, t);
-    });
   }
 
   Future<void> stop() async {
     // No-op: we keep historical tokens for multi-device support.
-    // Optionally, you could delete the token doc on sign-out.
   }
 
   Future<void> _saveToken(String uid, String token) async {
-    final ref = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('fcmTokens')
-        .doc(token);
-    await ref.set({
-      'token': token,
-      'platform': Platform.operatingSystem,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    try {
+      final ref = FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('fcmTokens')
+          .doc(token);
+      await ref.set({
+        'token': token,
+        'platform': Platform.operatingSystem,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
   }
 }

@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:fluttergirdi/screens/settings_page.dart';
 import 'dart:math' as math;
 import 'package:fluttergirdi/services/match_service.dart'
     as global_match;
 import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
-import 'package:fluttergirdi/screens/likes_page.dart';
-import 'package:fluttergirdi/screens/passes_page.dart';
+import 'package:fluttergirdi/screens/likes_page.dart'; // Geri açıldı
+import 'package:fluttergirdi/screens/passes_page.dart'; // Geri açıldı
 import 'package:swipe_cards/swipe_cards.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
-import 'package:fluttergirdi/widgets/match_card.dart'; // MatchCard ve FilmItem buradan geliyor
+import 'package:fluttergirdi/widgets/match_card.dart'; 
 
 // Simple in-memory cache to persist match list within app session
 class _MatchListSessionCache {
@@ -139,55 +138,101 @@ class _MatchListScreenState extends State<MatchListScreen> {
   @override
   Widget build(BuildContext context) {
     final me = FirebaseAuth.instance.currentUser;
+    final cs = Theme.of(context).colorScheme;
+
     if (me == null) {
       return const Scaffold(
           body: Center(child: Text('Oturum açmanız gerekiyor')));
     }
 
     return DefaultTabController(
-      initialIndex: 1,
+      initialIndex: 1, // Eşleşmeler sekmesi varsayılan
       length: 3,
       child: PageStorage(
         bucket: _bucket,
         child: Scaffold(
-          backgroundColor: Theme.of(context).colorScheme.surface,
+          backgroundColor: cs.surface,
           appBar: AppBar(
-            title: const Text('Matchs',
-                style: TextStyle(fontWeight: FontWeight.bold)),
+            backgroundColor: cs.surface,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
             centerTitle: true,
-            bottom: const TabBar(
-              tabs: [
-                Tab(text: 'Geçilenler'),
-                Tab(text: 'Eşleşmeler'),
-                Tab(text: 'Beğenilenler'),
+            toolbarHeight: 65,
+            titleSpacing: 16, 
+            
+            // --- GÜNCELLENEN APPBAR TITLE ---
+            title: Row(
+              children: [
+                // SOL TARA: BUBBLE TAB (Genişletilmiş)
+                Expanded(
+                  child: Container(
+                    height: 42,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: TabBar(
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      dividerColor: Colors.transparent,
+                      // Kayan Beyaz Baloncuk
+                      indicator: BoxDecoration(
+                        color: cs.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      labelColor: cs.onSurface,
+                      unselectedLabelColor: cs.onSurfaceVariant,
+                      labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                      overlayColor: WidgetStateProperty.all(Colors.transparent),
+                      tabs: const [
+                        Tab(text: 'Geçilenler'),
+                        Tab(text: 'Eşleşmeler'),
+                        Tab(text: 'Beğenilenler'),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(width: 8), // Tab ile Kalp arasındaki boşluk
+
+                // SAĞ TARA: KALP İKONU KUTUSU (Tab ile aynı yükseklik)
+               // SAĞ TARA: KALP İKONU KUTUSU
+                Container(
+                  height: 42,
+                  width: 42,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(12), // Karemsi yapı (12 radius)
+                  ),
+                  // Döndürme (Transform) kaldırıldı, düz duruyor
+                  child: _LikesIndicatorHeart(onPressed: _openIncomingLikes),
+                ),
               ],
             ),
-            actions: [
-              _LikesIndicatorHeart(onPressed: _openIncomingLikes),
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SettingsPage()),
-                  );
-                },
-              ),
-            ],
           ),
           body: Stack(
             children: [
               TabBarView(
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  const PassesListBody(),
+                  const PassesListBody(), // DÜZELDİ: Geçilenler listesi geri geldi
                   
+                  // --- ORTA SEKME (KARTLAR) ---
                   _loading
                       ? const Center(child: CircularProgressIndicator())
                       : (_swipeItems.isEmpty || _finished
                           ? const _NoMatchesCharacter()
                           : Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                              // Kartları maksimum genişletmek için padding'i sıfırladık
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                               child: SwipeCards(
                                 matchEngine: _matchEngine,
                                 itemBuilder: (context, index) {
@@ -221,7 +266,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
                               ),
                             )),
 
-                  const LikesListBody(),
+                  const LikesListBody(), // DÜZELDİ: Beğenilenler listesi geri geldi
                 ],
               ),
 
@@ -555,7 +600,6 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
         final d = doc.data();
         final t = (d['title'] ?? d['name'] ?? '').toString();
         final p = (d['posterUrl'] ?? d['poster'] ?? d['poster_path'] ?? '').toString();
-        // DÜZELTME: FilmItem'a ID parametresi eklendi
         items.add(FilmItem(id: doc.id, title: t.isNotEmpty ? t : 'İsimsiz', posterUrl: p));
       }
     }
@@ -685,8 +729,6 @@ class _IncomingLikeTile extends StatelessWidget {
   }
 }
 
-// --- Empty State & Indicator ---
-
 class _NoMatchesCharacter extends StatelessWidget {
   const _NoMatchesCharacter();
   @override
@@ -720,24 +762,28 @@ class _LikesIndicatorHeart extends StatelessWidget {
         return Stack(
           alignment: Alignment.center,
           children: [
+            // Arkaplanı üstteki Container sağladığı için burada sildik.
             IconButton(
               onPressed: onPressed,
+              iconSize: 26, // Kutuya uygun boyut
+              padding: EdgeInsets.zero,
               icon: Icon(
                 hasUnread ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: hasUnread ? Colors.red : null,
+                color: hasUnread ? Colors.red : null, // Okunmamışsa kırmızı, değilse tema rengi
               ),
             ),
+            // Kırmızı Bildirim Noktası
             if (hasUnread)
               Positioned(
-                right: 8,
-                top: 8,
+                right: 10,
+                top: 10,
                 child: Container(
-                  width: 10,
-                  height: 10,
+                  width: 8,
+                  height: 8,
                   decoration: BoxDecoration(
                     color: Colors.red,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 1.5),
                   ),
                 ),
               )

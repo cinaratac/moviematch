@@ -27,13 +27,13 @@ class AppBadge {
     required this.threshold,
   });
 
-  // Rozet Tanımları
+  // Rozet Tanımları (METİNLER DÜZELTİLDİ)
   static const List<AppBadge> allBadges = [
     AppBadge(
       id: 'film_buff_1',
       type: BadgeType.filmBuff,
       name: 'Film Kurdu',
-      description: '100 film kaydettin!',
+      description: '100 film kaydedin.',
       icon: Icons.movie_filter_rounded,
       color: Colors.blueAccent,
       threshold: 100,
@@ -42,7 +42,7 @@ class AppBadge {
       id: 'critic_1',
       type: BadgeType.critic,
       name: 'Eleştirmen',
-      description: '10 detaylı inceleme yazdın.',
+      description: '10 detaylı inceleme yazın.',
       icon: Icons.rate_review_rounded,
       color: Colors.purpleAccent,
       threshold: 10,
@@ -51,7 +51,7 @@ class AppBadge {
       id: 'archivist_1',
       type: BadgeType.archivist,
       name: 'Arşivci',
-      description: '5 tematik liste oluşturdun.',
+      description: '5 tematik liste oluşturun.',
       icon: Icons.folder_special_rounded,
       color: Colors.amber,
       threshold: 5,
@@ -60,7 +60,7 @@ class AppBadge {
       id: 'social_1',
       type: BadgeType.socialite,
       name: 'Popüler',
-      description: '50 takipçiye ulaştın.',
+      description: '50 takipçiye ulaşın.',
       icon: Icons.groups_rounded,
       color: Colors.pinkAccent,
       threshold: 50,
@@ -72,7 +72,7 @@ class LeaderboardUser {
   final String uid;
   final String displayName;
   final String? photoURL;
-  final int score; // Sıralama kriterine göre puan (örn: izlenen film sayısı)
+  final int score; 
   final int rank;
 
   LeaderboardUser({
