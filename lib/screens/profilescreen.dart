@@ -759,7 +759,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // --- 1. SEKME: FİLMLER ---
-  Widget _buildProfileContentAfterHeader() {
+   Widget _buildProfileContentAfterHeader() {
     return RefreshIndicator(
       onRefresh: () async {
         await _refreshFavorites();
@@ -804,6 +804,9 @@ class _ProfilePageState extends State<ProfilePage> {
           Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Watchlist', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
           const SizedBox(height: 8),
           _watchlistSectionFromKeys(List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(), maxItems: 30),
+
+          // Added: 50 birim boşluk profilin en altına
+          const SizedBox(height: 52),
         ],
       ),
     );

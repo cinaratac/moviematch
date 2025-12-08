@@ -335,7 +335,7 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       barrierDismissible: true,
       builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('MovieMatch'),
+        title: const Text('CineMatch'),
         content: const Column(
           children: [
             SizedBox(height: 10),
@@ -353,7 +353,7 @@ class _SettingsPageState extends State<SettingsPage> {
               // Flutter'ın yerleşik lisans sayfasını aç
               showLicensePage(
                 context: context,
-                applicationName: 'MovieMatch',
+                applicationName: 'CineMatch',
                 applicationVersion: '1.0.0',
                 applicationLegalese: '© 2024 Kozmosoft',
                 applicationIcon: const Icon(Icons.movie_filter_rounded, size: 48),

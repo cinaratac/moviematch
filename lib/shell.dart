@@ -100,6 +100,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold( 
+      extendBody: true,
       body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: _buildBottomBar(context),
     );
@@ -110,7 +111,7 @@ class _HomeShellState extends State<HomeShell> {
     
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6), 
+        color: Colors.black.withOpacity(0.6), // Saydamlık için opacity ayarı
         boxShadow: const [], 
       ),
       child: SafeArea(
@@ -118,8 +119,8 @@ class _HomeShellState extends State<HomeShell> {
         child: NavigationBarTheme(
           data: NavigationBarThemeData(
             height: 52,
-            backgroundColor: Colors.transparent,
-            indicatorColor: cs.primary.withValues(alpha: 0.14),
+            backgroundColor: Colors.transparent, // Arka planı saydam yap
+            indicatorColor: cs.primary.withOpacity(0.14),
             indicatorShape: const StadiumBorder(),
             labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
             iconTheme: WidgetStateProperty.resolveWith((states) {
@@ -142,7 +143,6 @@ class _HomeShellState extends State<HomeShell> {
             selectedIndex: _index,
             onDestinationSelected: (i) {
               setState(() => _index = i);
-              // Manuel tıklamada servisi de güncelle ki senkron kalsın
               TabService.instance.changeTab(i); 
             },
             destinations: [

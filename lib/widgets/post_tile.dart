@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:fluttergirdi/services/text_filter_service.dart';
 import 'package:fluttergirdi/widgets/comments_sheet.dart';
 import '../widgets/poster_image.dart';
 import '../screens/public_profile_screen.dart';
@@ -38,6 +37,9 @@ class PostTile extends StatefulWidget {
   final Function(String userId) onStartChat;
   final Function(String userId) onFollow;
   final Function(String postId) onReport;
+  
+  // EKLENDİ: Silme işlemi tamamlanınca çalışacak fonksiyon
+  final VoidCallback? onDelete;
 
   const PostTile({
     super.key,
@@ -55,7 +57,6 @@ class PostTile extends StatefulWidget {
     required this.replyCount,
     this.movieTmdbId,
     
-    // Yeni alanları constructor'a ekledik
     this.rating,
     this.isSpoiler = false,
     this.tags = const [],
@@ -65,6 +66,7 @@ class PostTile extends StatefulWidget {
     required this.onStartChat,
     required this.onFollow,
     required this.onReport,
+    this.onDelete, // Constructor'a eklendi
   });
 
   @override
@@ -77,7 +79,6 @@ class _PostTileState extends State<PostTile> {
   int _currentLikeCount = 0;
   final String _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  // Spoiler kontrolü için state
   bool _revealSpoiler = false;
 
   @override
@@ -144,18 +145,11 @@ class _PostTileState extends State<PostTile> {
   }
 
   void _showCommentsSheet() {
-    // Yorumlar sayfasını açmak için (önceki kodlarda tanımladığın CommentsSheet import edilmiş olmalı)
-    // Buraya CommentsSheet kodunu eklemediysen, o dosyayı import etmen gerekir.
-    // Eğer ayrı dosyadaysa: import '../widgets/comments_sheet.dart';
-    // Şimdilik placeholder fonksiyonu çağıralım veya importunu ekleyelim.
-    // Bu örnekte yorum kodu PostTile içinde değil, dışarıdan çağrılıyor gibi varsaydım 
-    // ama önceki adımda CommentsSheet'i import etmiştik.
-    // Eğer hata alırsan import '../widgets/comments_sheet.dart'; ekle.
      showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => CommentsSheet( // <-- CommentsSheet widget'ını çağırmalısın
+      builder: (context) => CommentsSheet(
         postId: widget.postId,
         postAuthorId: widget.authorId,
       ),
@@ -259,6 +253,10 @@ class _PostTileState extends State<PostTile> {
                     if (confirm == true) {
                       try {
                         await FirebaseFirestore.instance.collection('posts').doc(widget.postId).delete();
+                        // GÜNCELLENDİ: Silme başarılı olunca callback'i çağırıyoruz.
+                        if (widget.onDelete != null) {
+                          widget.onDelete!();
+                        }
                       } catch (e) {
                         debugPrint('Silme hatası: $e');
                       }
@@ -272,7 +270,6 @@ class _PostTileState extends State<PostTile> {
     );
   }
 
-  // --- YENİ: Yıldızları Oluşturan Widget ---
   Widget _buildRatingStars(double rating) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -367,7 +364,7 @@ class _PostTileState extends State<PostTile> {
             ),
           ),
 
-          // --- YENİ: İNCELEME BAŞLIĞI VE PUAN ---
+          // İNCELEME BAŞLIĞI VE PUAN
           if (widget.reviewTitle != null || widget.rating != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -387,7 +384,7 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-          // 2. GÖRSEL ALAN (Resim varsa)
+          // 2. GÖRSEL ALAN
           if (widget.postImage != null && widget.postImage!.isNotEmpty)
             GestureDetector(
               onTap: _navigateToDetail, 
@@ -417,11 +414,10 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-          // 3. TEXT CONTENT (SPOILER KONTROLLÜ)
+          // 3. TEXT CONTENT
           if (widget.text.isNotEmpty)
             GestureDetector(
               onTap: () {
-                // Eğer spoiler ise ve kapalıysa aç
                 if (widget.isSpoiler && !_revealSpoiler) {
                   setState(() => _revealSpoiler = true);
                 } else {
@@ -431,7 +427,6 @@ class _PostTileState extends State<PostTile> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: widget.isSpoiler && !_revealSpoiler
-                    // SPOILER GİZLİ GÖRÜNÜMÜ
                     ? Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
@@ -453,7 +448,6 @@ class _PostTileState extends State<PostTile> {
                           ],
                         ),
                       )
-                    // NORMAL METİN GÖRÜNÜMÜ
                     : Text(
                         widget.text,
                         style: theme.textTheme.bodyMedium?.copyWith(height: 1.4, fontSize: 15),
@@ -461,13 +455,10 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-           // 4. MOVIE CARD (Film Kartı)
-            // 4. MOVIE CARD (Film Kartı)
+           // 4. MOVIE CARD
           if (widget.movieTitle != null && widget.moviePoster != null)
             GestureDetector(
               onTap: () {
-                // SADECE tmdbId varsa Film Detaya git.
-                // else bloğunu sildik, böylece ID yoksa Post Detaya gitmeyecek.
                 if (widget.movieTmdbId != null) {
                   Navigator.push(
                     context,
@@ -479,9 +470,6 @@ class _PostTileState extends State<PostTile> {
                       ),
                     ),
                   );
-                } else {
-                  // İsteğe bağlı: ID yoksa konsola yazdırabilirsin veya boş bırakabilirsin.
-                  debugPrint("Bu filmin TMDB ID'si bulunamadı, tıklama işlemi yapılmadı.");
                 }
               },
               child: Padding(
@@ -550,7 +538,7 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-            // --- YENİ: ETİKETLER (Tags) ---
+            // ETİKETLER
             if (widget.tags.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -600,7 +588,7 @@ class _PostTileState extends State<PostTile> {
                         ? widget.text 
                         : (widget.movieTitle ?? 'Bir gönderi');
                     final String shareText = 
-                        '${widget.displayName} (@${widget.handle.replaceAll('@', '')}) MovieMatch\'te paylaştı:\n\n'
+                        '${widget.displayName} (@${widget.handle.replaceAll('@', '')}) CineMatch\'te paylaştı:\n\n'
                         '$content\n\n'
                         '${widget.movieTitle != null ? "🎬 İzliyor: ${widget.movieTitle}\n" : ""}'
                         'Uygulamada aç: $appLink';
@@ -645,4 +633,3 @@ class _ActionButton extends StatelessWidget {
     );
   }
 }
-

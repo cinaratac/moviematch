@@ -141,6 +141,20 @@ class _FeedPageState extends State<FeedPage> {
     return '${years}y';
   }
 
+  int? _parseTmdbId(Map<String, dynamic> m) {
+    dynamic rawId;
+    if (m['movie'] is Map) {
+      final movieMap = m['movie'] as Map;
+      rawId = movieMap['tmdbId'] ?? movieMap['id'];
+    }
+    rawId ??= m['tmdbId'];
+
+    if (rawId is int) return rawId;
+    if (rawId is String) return int.tryParse(rawId);
+    if (rawId is double) return rawId.toInt();
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -167,7 +181,7 @@ class _FeedPageState extends State<FeedPage> {
                 },
                 borderRadius: BorderRadius.circular(24),
                 child: Container(
-                  height: 40, // Arama kutusunu da hafif küçülttüm (44 -> 40)
+                  height: 40,
                   decoration: BoxDecoration(
                     color: cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(24),
@@ -187,18 +201,16 @@ class _FeedPageState extends State<FeedPage> {
           ),
           
           actions: const [
-            // AYARLAR BUTONU KALDIRILDI
             NotificationsButton(),
-            SizedBox(width: 8), // Sağdan biraz boşluk
+            SizedBox(width: 8),
           ],
           
-          // --- KÜÇÜLTÜLMÜŞ BUBBLE TAB BAR ---
           bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(50), // Yükseklik azaltıldı (60 -> 50)
+            preferredSize: const Size.fromHeight(50),
             child: Container(
-              height: 36, // Bar yüksekliği küçüldü (48 -> 36)
+              height: 36,
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              padding: const EdgeInsets.all(3), // Padding azaltıldı
+              padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerHighest.withOpacity(0.5),
                 borderRadius: BorderRadius.circular(20),
@@ -213,7 +225,7 @@ class _FeedPageState extends State<FeedPage> {
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05), // Gölge hafifletildi
+                      color: Colors.black.withOpacity(0.05),
                       blurRadius: 2,
                       offset: const Offset(0, 1),
                     ),
@@ -224,10 +236,10 @@ class _FeedPageState extends State<FeedPage> {
                 unselectedLabelColor: cs.onSurfaceVariant,
                 labelStyle: const TextStyle(
                   fontWeight: FontWeight.w700, 
-                  fontSize: 13, // Yazı boyutu küçüldü (14 -> 13)
+                  fontSize: 13,
                   letterSpacing: -0.2
                 ),
-                labelPadding: EdgeInsets.zero, // Yazı boşluğu sıfırlandı
+                labelPadding: EdgeInsets.zero,
                 overlayColor: WidgetStateProperty.all(Colors.transparent),
                 
                 tabs: const [
@@ -276,19 +288,9 @@ class _FeedPageState extends State<FeedPage> {
                               final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
                               final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
                               final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
-                              int? movieTmdbId;
-try {
-  final rawId = m['movie']?['tmdbId'] ?? m['tmdbId'];
-  if (rawId is int) {
-    movieTmdbId = rawId;
-  } else if (rawId is String) {
-    movieTmdbId = int.tryParse(rawId);
-  } else if (rawId is double) {
-    movieTmdbId = rawId.toInt();
-  }
-} catch (e) {
-  debugPrint('ID parse hatası: $e');
-}
+                              
+                              int? movieTmdbId = _parseTmdbId(m);
+
                               final postImage = (m['postImage'] ?? '') as String;
 
                               final double? rating = (m['rating'] as num?)?.toDouble();
@@ -297,6 +299,8 @@ try {
                               final List<String> tags = List<String>.from(m['tags'] ?? []);
 
                               final postWidget = PostTile(
+                                // PERFORMANS İÇİN ÖNEMLİ: Key eklendi!
+                                key: ValueKey(d.id), 
                                 postId: d.id,
                                 authorId: authorId,
                                 displayName: displayName, 
@@ -321,6 +325,13 @@ try {
                                    await FeedService.instance.notifyFollow(toUid: uid);
                                 },
                                 onReport: (pid) => FeedService.instance.reportPost(pid),
+                                onDelete: () {
+                                  if (mounted) {
+                                    setState(() {
+                                      _posts.removeWhere((element) => element.id == d.id);
+                                    });
+                                  }
+                                },
                               );
 
                               if (postIndex == 3) {
@@ -346,51 +357,55 @@ try {
           ],
         ),
         
-        floatingActionButton: FloatingActionButton(
-          heroTag: 'feed_compose_fab',
-          onPressed: () {
-            showModalBottomSheet(
-              context: context,
-              isScrollControlled: true,
-              useSafeArea: true,
-              builder: (_) => ComposePostPage(
-                maxChars: 280,
-                onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
-                  Navigator.pop(context);
-                  final user = FirebaseAuth.instance.currentUser;
-                  if (user == null) return;
-                  try {
-                    String? imageUrl;
-                    if (image != null) {
-                      final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                      final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
-                      await ref.putFile(image);
-                      imageUrl = await ref.getDownloadURL();
+        // BUTON YUKARI TAŞINDI
+        floatingActionButton: Padding(
+          padding: const EdgeInsets.only(bottom: 70.0), // Biraz daha yukarı alındı (50->70)
+          child: FloatingActionButton(
+            heroTag: 'feed_compose_fab',
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                builder: (_) => ComposePostPage(
+                  maxChars: 280,
+                  onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
+                    Navigator.pop(context);
+                    final user = FirebaseAuth.instance.currentUser;
+                    if (user == null) return;
+                    try {
+                      String? imageUrl;
+                      if (image != null) {
+                        final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                        final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
+                        await ref.putFile(image);
+                        imageUrl = await ref.getDownloadURL();
+                      }
+                      await FeedService.instance.createPost(
+                        text: text,
+                        movie: movie,
+                        photoURL: imageUrl,
+                        displayName: user.displayName,
+                        handle: user.email?.split('@')[0] ?? 'user',
+                        rating: rating,
+                        isSpoiler: isSpoiler,
+                        tags: tags,
+                        reviewTitle: reviewTitle,
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gönderildi!')));
+                        _refresh();
+                      }
+                    } catch (e) {
+                      debugPrint('Post gönderme hatası: $e');
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hata oluştu.')));
                     }
-                    await FeedService.instance.createPost(
-                      text: text,
-                      movie: movie,
-                      photoURL: imageUrl,
-                      displayName: user.displayName,
-                      handle: user.email?.split('@')[0] ?? 'user',
-                      rating: rating,
-                      isSpoiler: isSpoiler,
-                      tags: tags,
-                      reviewTitle: reviewTitle,
-                    );
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gönderildi!')));
-                      _refresh();
-                    }
-                  } catch (e) {
-                    debugPrint('Post gönderme hatası: $e');
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hata oluştu.')));
-                  }
-                },
-              ),
-            );
-          },
-          child: const Icon(Icons.edit_note_rounded),
+                  },
+                ),
+              );
+            },
+            child: const Icon(Icons.edit_note_rounded),
+          ),
         ),
       ),
     );
@@ -492,6 +507,20 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
     }
   }
 
+  int? _parseTmdbId(Map<String, dynamic> m) {
+    dynamic rawId;
+    if (m['movie'] is Map) {
+      final movieMap = m['movie'] as Map;
+      rawId = movieMap['tmdbId'] ?? movieMap['id'];
+    }
+    rawId ??= m['tmdbId'];
+
+    if (rawId is int) return rawId;
+    if (rawId is String) return int.tryParse(rawId);
+    if (rawId is double) return rawId.toInt();
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -539,19 +568,8 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
           
-         int? movieTmdbId;
-try {
-  final rawId = m['movie']?['tmdbId'] ?? m['tmdbId'];
-  if (rawId is int) {
-    movieTmdbId = rawId;
-  } else if (rawId is String) {
-    movieTmdbId = int.tryParse(rawId);
-  } else if (rawId is double) {
-    movieTmdbId = rawId.toInt();
-  }
-} catch (e) {
-  debugPrint('ID parse hatası: $e');
-}
+          int? movieTmdbId = _parseTmdbId(m);
+
           final postImage = (m['postImage'] ?? '') as String;
           
           final double? rating = (m['rating'] as num?)?.toDouble();
@@ -560,6 +578,8 @@ try {
           final List<String> tags = List<String>.from(m['tags'] ?? []);
 
           return PostTile(
+            // PERFORMANS İÇİN ÖNEMLİ: Key eklendi!
+            key: ValueKey(d.id),
             postId: d.id,
             authorId: authorId,
             displayName: displayName,
@@ -584,6 +604,13 @@ try {
                await FeedService.instance.notifyFollow(toUid: uid);
             },
             onReport: (pid) => FeedService.instance.reportPost(pid),
+            onDelete: () {
+              if (mounted) {
+                setState(() {
+                  _items.removeWhere((element) => element.id == d.id);
+                });
+              }
+            },
           );
         },
       ),

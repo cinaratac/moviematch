@@ -164,7 +164,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
                           icon: CupertinoIcons.share_solid,
                           title: 'Davet Et',
                           color: Colors.green,
-                          onTap: () => Share.share('MovieMatch ile film zevkini keşfet! https://moviematch.app'),
+                          onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
                         ),
                         _buildIOSMenuItem(
                           context,
