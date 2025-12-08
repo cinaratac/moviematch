@@ -39,7 +39,7 @@ class MovieRecommendation {
     'genres': genres,
     'matchScore': matchScore,
     'matchReason': matchReason,
-    'recommendedAt': FieldValue.serverTimestamp(),
+    'recommendedAt': Timestamp.now(),
   };
 
   factory MovieRecommendation.fromMap(Map<String, dynamic> map) {

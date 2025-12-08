@@ -11,6 +11,7 @@ import '../services/chat_service.dart';
 import '../services/follow_system_service.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
 class PostTile extends StatefulWidget {
   final String postId;
@@ -25,6 +26,7 @@ class PostTile extends StatefulWidget {
   final String text;
   final int likeCount;
   final int replyCount;
+  final int? movieTmdbId;
 
   // --- YENİ ALANLAR ---
   final double? rating;
@@ -51,6 +53,7 @@ class PostTile extends StatefulWidget {
     required this.text,
     required this.likeCount,
     required this.replyCount,
+    this.movieTmdbId,
     
     // Yeni alanları constructor'a ekledik
     this.rating,
@@ -459,9 +462,28 @@ class _PostTileState extends State<PostTile> {
             ),
 
            // 4. MOVIE CARD (Film Kartı)
-            if (widget.movieTitle != null && widget.moviePoster != null)
+            // 4. MOVIE CARD (Film Kartı)
+          if (widget.movieTitle != null && widget.moviePoster != null)
             GestureDetector(
-              onTap: _navigateToDetail,
+              onTap: () {
+                // SADECE tmdbId varsa Film Detaya git.
+                // else bloğunu sildik, böylece ID yoksa Post Detaya gitmeyecek.
+                if (widget.movieTmdbId != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MovieDetailScreen(
+                        tmdbId: widget.movieTmdbId!,
+                        title: widget.movieTitle,
+                        posterUrl: widget.moviePoster,
+                      ),
+                    ),
+                  );
+                } else {
+                  // İsteğe bağlı: ID yoksa konsola yazdırabilirsin veya boş bırakabilirsin.
+                  debugPrint("Bu filmin TMDB ID'si bulunamadı, tıklama işlemi yapılmadı.");
+                }
+              },
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: Container(
@@ -499,20 +521,29 @@ class _PostTileState extends State<PostTile> {
                               ),
                               child: Text(
                                 'İZLİYOR',
-                                style: theme.textTheme.labelSmall?.copyWith(color: cs.primary, fontWeight: FontWeight.bold, fontSize: 10),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                    color: cs.primary, 
+                                    fontWeight: FontWeight.bold, 
+                                    fontSize: 10
+                                ),
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               widget.movieTitle!,
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold
+                              ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
                       ),
-                      const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.chevron_right, color: Colors.grey)),
+                      const Padding(
+                        padding: EdgeInsets.only(right: 16), 
+                        child: Icon(Icons.chevron_right, color: Colors.grey)
+                      ),
                     ],
                   ),
                 ),

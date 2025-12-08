@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:ui' as ui;
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:fluttergirdi/secrets.dart'; // Secrets sınıfını import ettik
 
 class MovieDetailScreen extends StatefulWidget {
   final int tmdbId;
@@ -22,10 +22,6 @@ class MovieDetailScreen extends StatefulWidget {
 }
 
 class _MovieDetailScreenState extends State<MovieDetailScreen> {
-  // BURAYA KENDİ TMDB API ANAHTARINI GİR
-  static const String _apiKey = 'YOUR_TMDB_API_KEY'; 
-  static const String _baseUrl = 'https://api.themoviedb.org/3';
-
   Map<String, dynamic>? _movieData;
   List<dynamic> _cast = [];
   List<dynamic> _crew = [];
@@ -40,27 +36,35 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
   Future<void> _fetchDetails() async {
     try {
-      // Film Detayları ve Kredi Bilgileri (Oyuncular/Yönetmen)
-      final url = Uri.parse('$_baseUrl/movie/${widget.tmdbId}?api_key=$_apiKey&language=tr-TR&append_to_response=credits,release_dates');
-      final response = await http.get(url);
+      // Secrets.tmdbHeaders kullanılarak yetkilendirme yapılıyor
+      final url = Uri.parse('https://api.themoviedb.org/3/movie/${widget.tmdbId}?language=tr-TR&append_to_response=credits,release_dates');
+      
+      final response = await http.get(
+        url,
+        headers: Secrets.tmdbHeaders, // Token buradan geliyor
+      );
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          _movieData = data;
-          _cast = data['credits']['cast'] ?? [];
-          _crew = data['credits']['crew'] ?? [];
-          _loading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _movieData = data;
+            _cast = data['credits']['cast'] ?? [];
+            _crew = data['credits']['crew'] ?? [];
+            _loading = false;
+          });
+        }
       } else {
-        throw Exception('API Hatası');
+        throw Exception('API Hatası: ${response.statusCode}');
       }
     } catch (e) {
       debugPrint('Film detayı çekilemedi: $e');
-      setState(() {
-        _loading = false;
-        _hasError = true;
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _hasError = true;
+        });
+      }
     }
   }
 
@@ -103,7 +107,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
         leading: IconButton(
           icon: Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
+            decoration: const BoxDecoration(color: Colors.black26, shape: BoxShape.circle),
             child: const Icon(Icons.arrow_back, color: Colors.white),
           ),
           onPressed: () => Navigator.pop(context),
@@ -217,27 +221,27 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   Text("Oyuncular", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                   const SizedBox(height: 12),
                   SizedBox(
-                    height: 110,
+                    height: 130, // Yüksekliği biraz artırdık ki isimler sığsın
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: _cast.length > 10 ? 10 : _cast.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 16),
                       itemBuilder: (context, index) {
                         final actor = _cast[index];
-                        final photo = actor['profile_path'];
+                        final photoPath = actor['profile_path'];
                         return Column(
                           children: [
                             CircleAvatar(
-                              radius: 30,
+                              radius: 35, // Avatarı biraz büyüttük
                               backgroundColor: Colors.grey.shade800,
-                              backgroundImage: photo != null 
-                                ? NetworkImage('https://image.tmdb.org/t/p/w200$photo') 
+                              backgroundImage: photoPath != null 
+                                ? NetworkImage('https://image.tmdb.org/t/p/w200$photoPath') 
                                 : null,
-                              child: photo == null ? const Icon(Icons.person) : null,
+                              child: photoPath == null ? const Icon(Icons.person) : null,
                             ),
                             const SizedBox(height: 8),
                             SizedBox(
-                              width: 70,
+                              width: 80,
                               child: Text(
                                 actor['name'],
                                 maxLines: 2,

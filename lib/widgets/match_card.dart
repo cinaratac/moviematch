@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/services/match_service.dart' as global_match;
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
@@ -7,12 +8,18 @@ import 'dart:math' as math;
 
 /// Film verisi taşıyıcı sınıf
 class FilmItem {
-  final String id; // ID eklendi (Karşılaştırma için)
+  final String id;
   final String title;
   final String posterUrl;
-  const FilmItem({required this.id, required this.title, required this.posterUrl});
-}
+  final int? tmdbId; // EKLENDİ
 
+  const FilmItem({
+    required this.id, 
+    required this.title, 
+    required this.posterUrl,
+    this.tmdbId, // EKLENDİ
+  });
+}
 class MatchCard extends StatefulWidget {
   final global_match.MatchResult result;
   final VoidCallback onOpen;
@@ -257,33 +264,44 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                                   return Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          // Eğer ortaksa kırmızı border, değilse şeffaf
-                                          border: isCommon ? Border.all(color: Colors.redAccent, width: 3) : null,
-                                          borderRadius: BorderRadius.circular(10), // Border radius
-                                          boxShadow: isCommon ? [
-                                            BoxShadow(color: Colors.redAccent.withOpacity(0.5), blurRadius: 8, spreadRadius: 1)
-                                          ] : [],
-                                        ),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(8), // İç resim radius (border'dan küçük olmalı)
-                                          child: SizedBox(
-                                            width: 60, 
-                                            height: 90,
-                                            child: PosterImage(
-                                              posterUrl: film.posterUrl,
-                                              title: film.title,
-                                              fit: BoxFit.cover,
+                                      GestureDetector( // GESTURE DETECTOR EKLENDİ
+                                        onTap: () {
+                                          if (film.tmdbId != null) {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => MovieDetailScreen(
+                                                  tmdbId: film.tmdbId!,
+                                                  title: film.title,
+                                                  posterUrl: film.posterUrl,
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            border: isCommon ? Border.all(color: Colors.redAccent, width: 3) : null,
+                                            borderRadius: BorderRadius.circular(10),
+                                            boxShadow: isCommon ? [
+                                              BoxShadow(color: Colors.redAccent.withOpacity(0.5), blurRadius: 8, spreadRadius: 1)
+                                            ] : [],
+                                          ),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(8),
+                                            child: SizedBox(
+                                              width: 60, 
+                                              height: 90,
+                                              child: PosterImage(
+                                                posterUrl: film.posterUrl,
+                                                title: film.title,
+                                                fit: BoxFit.cover,
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                      if (isCommon)
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 4),
-                                          
-                                        )
+                                      // ... geri kalan kodlar aynı ...
                                     ],
                                   );
                                 },
@@ -573,14 +591,11 @@ Future<List<FilmItem>> _fetchFilmsByKeys(List<String> keys) async {
   final db = FirebaseFirestore.instance;
   final films = <FilmItem>[];
   
-  // Firestore whereIn limiti 10'dur, chunklara bölüyoruz
   for (var i = 0; i < keys.length; i += 10) {
     final chunk = keys.sublist(i, math.min(i + 10, keys.length));
     try {
-      // 1. Doc ID ile ara
       var qs = await db.collection('catalog_films').where(FieldPath.documentId, whereIn: chunk).get();
       
-      // 2. Bulamazsa 'key' alanı ile ara
       if (qs.docs.isEmpty) {
         qs = await db.collection('catalog_films').where('key', whereIn: chunk).get();
       }
@@ -589,9 +604,15 @@ Future<List<FilmItem>> _fetchFilmsByKeys(List<String> keys) async {
         final data = d.data();
         final p = (data['posterUrl'] ?? data['poster'] ?? '').toString();
         final t = (data['title'] ?? data['name'] ?? '').toString();
-        // ID'yi doküman ID'si olarak alıyoruz (ortak kontrolü için)
+        final tmdbId = data['tmdbId'] as int?; // EKLENDİ
+
         if (t.isNotEmpty) {
-          films.add(FilmItem(id: d.id, title: t, posterUrl: p));
+          films.add(FilmItem(
+            id: d.id, 
+            title: t, 
+            posterUrl: p, 
+            tmdbId: tmdbId // EKLENDİ
+          ));
         }
       }
     } catch (_) {}

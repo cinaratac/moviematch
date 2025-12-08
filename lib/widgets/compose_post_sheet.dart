@@ -1,22 +1,24 @@
-import 'dart:io'; // Dosya işlemleri için
+import 'dart:io'; 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart'; // Resim seçici
+import 'package:image_picker/image_picker.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; 
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import '../services/text_filter_service.dart';
+import 'dart:math' as math; 
 
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
-  final Map<String, String>? initialMovie;
+  // DİKKAT: Map<String, String> yerine Map<String, dynamic> yapıldı
+  final Map<String, dynamic>? initialMovie;
   
-  // DÜZELTME: isSpoiler parametresi 'required' yapıldı
   final Future<void> Function({
     required String text, 
-    Map<String, String>? movie, 
+    Map<String, dynamic>? movie, // DİKKAT: dynamic yapıldı
     File? image,
     double? rating,
-    required bool isSpoiler, // <-- BURASI DÜZELTİLDİ
+    required bool isSpoiler,
     List<String>? tags,
     String? reviewTitle,
   }) onSend;
@@ -39,13 +41,13 @@ class _ComposePostPageState extends State<ComposePostPage> {
   final FocusNode _focusNode = FocusNode();
   final ImagePicker _picker = ImagePicker(); 
   
-  Map<String, String>? _selectedMovie;
+  // DİKKAT: String yerine dynamic
+  Map<String, dynamic>? _selectedMovie;
   File? _selectedImage;
   
-  // İnceleme Modu Değişkenleri
   double _rating = 0.0;
   bool _isSpoiler = false;
-  bool _showReviewOptions = false; // Film seçilince otomatik açılır
+  bool _showReviewOptions = false; 
 
   @override
   void initState() {
@@ -82,72 +84,143 @@ class _ComposePostPageState extends State<ComposePostPage> {
     super.dispose();
   }
 
+  // --- GÜNCELLENMİŞ VERİ ÇEKME FONKSİYONU ---
+  // DİKKAT: Dönüş tipi Map<String, dynamic> oldu
+  Future<List<Map<String, dynamic>>> _fetchUserMovies() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return [];
+
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (!userDoc.exists) return [];
+      
+      final data = userDoc.data()!;
+      final Set<String> allKeys = {};
+
+      void addKeys(String field) {
+        if (data[field] is List) {
+          allKeys.addAll(List<String>.from(data[field]));
+        }
+      }
+
+      addKeys('fiveStarKeys');
+      addKeys('favoritesKeys');
+      addKeys('watchlistKeys');
+      addKeys('dislikedKeys');
+
+      if (allKeys.isEmpty) return [];
+
+      final List<Map<String, dynamic>> movies = [];
+      final List<String> keysList = allKeys.toList();
+
+      for (var i = 0; i < keysList.length; i += 10) {
+        final chunk = keysList.sublist(i, math.min(i + 10, keysList.length));
+        
+        var qs = await FirebaseFirestore.instance
+            .collection('catalog_films')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+
+        if (qs.docs.isEmpty) {
+           qs = await FirebaseFirestore.instance
+            .collection('catalog_films')
+            .where('key', whereIn: chunk)
+            .get();
+        }
+
+        for (var doc in qs.docs) {
+          final fd = doc.data();
+          final title = (fd['title'] ?? '').toString();
+          
+          // DİKKAT: ID parse işlemi burada yapılıyor
+          int? tmdbId;
+          if (fd['tmdbId'] is int) {
+            tmdbId = fd['tmdbId'];
+          } else if (fd['tmdbId'] is String) {
+            tmdbId = int.tryParse(fd['tmdbId']);
+          } else if (fd['id'] is int) {
+            tmdbId = fd['id'];
+          }
+
+          if (title.isNotEmpty) {
+            movies.add({
+              'title': title,
+              'poster': (fd['posterUrl'] ?? fd['poster'] ?? '').toString(),
+              'tmdbId': tmdbId, // Artık int (veya null) gönderiyoruz
+            });
+          }
+        }
+      }
+      
+      movies.sort((a, b) => (a['title'] ?? '').compareTo(b['title'] ?? ''));
+      return movies;
+
+    } catch (e) {
+      debugPrint("Film listesi çekme hatası: $e");
+      return [];
+    }
+  }
+
   Future<void> _pickMovie() async {
-      final result = await showModalBottomSheet<Map<String, String>>(
+    // DİKKAT: Tür dynamic oldu
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (ctx) {
-        final merged = <Map<String, String>>[
-          ...UserShelfCache.fiveStar,
-          ...UserShelfCache.favorites,
-          ...UserShelfCache.watchlist,
-          ...UserShelfCache.disliked,
-        ];
-        
-        final seen = <String>{};
-        final items = <Map<String, String>>[];
-        for (final m in merged) {
-          final t = (m['title'] ?? '').trim();
-          if (t.isEmpty) continue;
-          final key = t.toLowerCase();
-          if (seen.add(key)) {
-            items.add({
-              'title': t,
-              'poster': (m['poster'] ?? '').toString(),
-            });
-          }
-        }
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: _fetchUserMovies(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.5,
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            }
 
-        return SizedBox(
-          height: MediaQuery.of(ctx).size.height * 0.8,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('Filmlerim', style: Theme.of(ctx).textTheme.titleLarge),
+            final items = snapshot.data ?? [];
+            
+            return SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.8,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text('Filmlerim', style: Theme.of(ctx).textTheme.titleLarge),
+                  ),
+                  const Divider(),
+                  Expanded(
+                    child: items.isEmpty
+                        ? const Center(child: Text('Listen boş veya yüklenemedi.'))
+                        : ListView.separated(
+                            itemCount: items.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (_, i) {
+                              final title = items[i]['title'] ?? '';
+                              final poster = items[i]['poster'] ?? '';
+                              return ListTile(
+                                leading: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: SizedBox(
+                                    width: 40,
+                                    height: 60,
+                                    child: poster.isNotEmpty
+                                        ? PosterImage(posterUrl: poster, title: title)
+                                        : const ColoredBox(color: Colors.black12, child: Icon(Icons.movie)),
+                                  ),
+                                ),
+                                title: Text(title),
+                                onTap: () => Navigator.of(ctx).pop(items[i]),
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ),
-              const Divider(),
-              Expanded(
-                child: items.isEmpty
-                    ? const Center(child: Text('Listen boş. Profilinden senkronize et.'))
-                    : ListView.separated(
-                        itemCount: items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (_, i) {
-                          final title = items[i]['title'] ?? '';
-                          final poster = items[i]['poster'] ?? '';
-                          return ListTile(
-                            leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: SizedBox(
-                                width: 40,
-                                height: 60,
-                                child: poster.isNotEmpty
-                                    ? PosterImage(posterUrl: poster, title: title)
-                                    : const ColoredBox(color: Colors.black12, child: Icon(Icons.movie)),
-                              ),
-                            ),
-                            title: Text(title),
-                            onTap: () => Navigator.of(ctx).pop(items[i]),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -264,7 +337,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
                                       child: PosterImage(
-                                        posterUrl: _selectedMovie!['poster']!,
+                                        posterUrl: _selectedMovie!['poster'],
                                         title: _selectedMovie!['title'],
                                         width: 44, height: 66, fit: BoxFit.cover,
                                       ),

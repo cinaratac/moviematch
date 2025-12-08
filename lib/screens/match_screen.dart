@@ -12,6 +12,7 @@ import 'package:swipe_cards/swipe_cards.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/match_card.dart'; 
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
 // Simple in-memory cache to persist match list within app session
 class _MatchListSessionCache {
@@ -446,11 +447,27 @@ class _MatchScreenState extends State<MatchScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.fiveStars[i];
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: PosterImage(
-                                posterUrl: film.posterUrl, 
-                                title: film.title
+                            return GestureDetector( // EKLENDİ
+                              onTap: () {
+                                if (film.tmdbId != null) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => MovieDetailScreen(
+                                        tmdbId: film.tmdbId!,
+                                        title: film.title,
+                                        posterUrl: film.posterUrl,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: PosterImage(
+                                  posterUrl: film.posterUrl, 
+                                  title: film.title
+                                ),
                               ),
                             );
                           },

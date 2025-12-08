@@ -276,6 +276,19 @@ class _FeedPageState extends State<FeedPage> {
                               final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
                               final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
                               final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
+                              int? movieTmdbId;
+try {
+  final rawId = m['movie']?['tmdbId'] ?? m['tmdbId'];
+  if (rawId is int) {
+    movieTmdbId = rawId;
+  } else if (rawId is String) {
+    movieTmdbId = int.tryParse(rawId);
+  } else if (rawId is double) {
+    movieTmdbId = rawId.toInt();
+  }
+} catch (e) {
+  debugPrint('ID parse hatası: $e');
+}
                               final postImage = (m['postImage'] ?? '') as String;
 
                               final double? rating = (m['rating'] as num?)?.toDouble();
@@ -292,6 +305,7 @@ class _FeedPageState extends State<FeedPage> {
                                 timeLabel: timeLabel,
                                 movieTitle: movieTitle.isEmpty ? null : movieTitle,
                                 moviePoster: moviePoster.isEmpty ? null : moviePoster,
+                                movieTmdbId: movieTmdbId,
                                 postImage: postImage.isEmpty ? null : postImage,
                                 text: (m['text'] ?? '') as String,
                                 likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
@@ -524,6 +538,20 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
+          
+         int? movieTmdbId;
+try {
+  final rawId = m['movie']?['tmdbId'] ?? m['tmdbId'];
+  if (rawId is int) {
+    movieTmdbId = rawId;
+  } else if (rawId is String) {
+    movieTmdbId = int.tryParse(rawId);
+  } else if (rawId is double) {
+    movieTmdbId = rawId.toInt();
+  }
+} catch (e) {
+  debugPrint('ID parse hatası: $e');
+}
           final postImage = (m['postImage'] ?? '') as String;
           
           final double? rating = (m['rating'] as num?)?.toDouble();
@@ -540,6 +568,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             timeLabel: timeLabel,
             movieTitle: movieTitle.isEmpty ? null : movieTitle,
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
+            movieTmdbId: movieTmdbId,
             postImage: postImage.isEmpty ? null : postImage,
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),

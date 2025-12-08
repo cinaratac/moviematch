@@ -5,6 +5,7 @@ import '../services/recommendation_engine.dart';
 import '../widgets/poster_image.dart';
 import '../models/shelf_target.dart';
 import '../screens/profilescreen.dart'; // UserShelfCache için gerekli
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
 // Extension: SearchMoviePage'deki gibi target -> field dönüşümü
 extension ShelfTargetXLocal on ShelfTarget {
@@ -504,11 +505,28 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                   child: SizedBox(
                     width: 100, 
                     height: 150, 
-                    child: PosterImage(
-                      posterUrl: recommendation.posterUrl,
-                      title: recommendation.title,
-                      tmdbId: recommendation.tmdbId,
-                      fit: BoxFit.cover,
+                    // Tıklama özelliği eklendi:
+                    child: GestureDetector( 
+                      onTap: () {
+                         if (recommendation.tmdbId != 0) {
+                           Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => MovieDetailScreen(
+                                tmdbId: recommendation.tmdbId,
+                                title: recommendation.title,
+                                posterUrl: recommendation.posterUrl,
+                              ),
+                            ),
+                          );
+                         }
+                      },
+                      child: PosterImage(
+                        posterUrl: recommendation.posterUrl,
+                        title: recommendation.title,
+                        tmdbId: recommendation.tmdbId,
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                 ),
