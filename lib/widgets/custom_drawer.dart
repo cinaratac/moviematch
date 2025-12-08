@@ -7,11 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
-import 'package:fluttergirdi/screens/clubs_tab.dart';
-
-// --- SERVİS IMPORTU ---
-// (Bu dosyanın projenizde lib/services/announcement_service.dart yolunda olduğunu varsayıyorum)
-import 'package:fluttergirdi/services/announcement_service.dart';
+import 'package:fluttergirdi/screens/clubs_tab.dart'; 
 
 class CustomDrawer extends StatelessWidget {
   const CustomDrawer({super.key});
@@ -25,21 +21,13 @@ class CustomDrawer extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     // --- RENK PALETİ (MAT VE DÜZ) ---
-    // Arkaplan: Tam Siyah veya Tam Beyaz
     final backgroundColor = isDark ? const Color(0xFF121212) : Colors.white;
-    
-    // Yazılar
-    final Color textColor = isDark ? Colors.white : const Color(0xFF1B5E20); // Koyu Yeşil (Light mod)
+    final Color textColor = isDark ? Colors.white : Colors.black87;
     final Color subTextColor = isDark ? Colors.white54 : Colors.grey.shade600;
-    
-    // İkonlar
-    final Color iconColor = isDark ? Colors.white70 : const Color(0xFF2E7D32); 
-    
-    // Çizgiler
+    final Color iconColor = isDark ? Colors.white70 : Colors.black54;
     final Color dividerColor = isDark ? Colors.white12 : Colors.black12;
 
     return Drawer(
-      // Düz zemin rengi
       backgroundColor: backgroundColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.horizontal(right: Radius.circular(0)),
@@ -50,7 +38,7 @@ class CustomDrawer extends StatelessWidget {
             // 1. HEADER
             _buildHeader(uid, textColor, subTextColor, isDark),
 
-            // 2. İNCE ÇİZGİ (Mat)
+            // 2. İNCE ÇİZGİ
             Divider(color: dividerColor, height: 1, thickness: 1),
 
             // 3. MENÜ LİSTESİ
@@ -88,14 +76,13 @@ class CustomDrawer extends StatelessWidget {
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
                   ),
                   
-                  // --- YENİLİKLER (SERVİS ENTEGRASYONU) ---
+                  // --- YENİLİKLER (ENTEGRE EDİLDİ) ---
                   _buildMenuItem(
                     context,
                     icon: Icons.campaign_rounded,
                     title: 'Yenilikler',
                     iconColor: iconColor,
                     textColor: textColor,
-                    // Bildirim sayısı (Mat tasarım)
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
@@ -113,9 +100,8 @@ class CustomDrawer extends StatelessWidget {
                       ),
                     ),
                     onTap: () {
-                      // Burada senin var olan servis dosyanı çağırıyoruz.
-                      // Kullanıcı butona bastığında servis kontrol edip dialogu açacak.
-                      AnnouncementService.instance.checkAndShowAnnouncement(context);
+                      // Dosya içinde tanımladığımız AnnouncementsScreen'e git
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
                     },
                   ),
 
@@ -162,7 +148,6 @@ class CustomDrawer extends StatelessWidget {
                     icon: Icons.logout_rounded,
                     title: 'Çıkış Yap',
                     isDestructive: true, 
-                    // Çıkış butonu rengi (Mat Kırmızı)
                     iconColor: isDark ? const Color(0xFFEF5350) : const Color(0xFFC62828),
                     textColor: isDark ? const Color(0xFFEF5350) : const Color(0xFFC62828),
                     onTap: () async {
@@ -313,6 +298,123 @@ class CustomDrawer extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// --- ENTEGRE EDİLMİŞ DUYURULAR EKRANI ---
+class AnnouncementsScreen extends StatelessWidget {
+  const AnnouncementsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Yenilikler & Duyurular'),
+        centerTitle: true,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+      ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('system').doc('announcement').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.hasData || !snapshot.data!.exists) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.notifications_off_outlined, size: 64, color: Colors.grey.shade400),
+                  const SizedBox(height: 16),
+                  const Text('Henüz bir duyuru yok.', style: TextStyle(color: Colors.grey)),
+                ],
+              ),
+            );
+          }
+
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          // Veri yapısı: "items" listesi veya tekil alanlar
+          final List items = data['items'] ?? [];
+
+          if (items.isEmpty) {
+             // Tekil mesaj varsa onu göster (Fallback)
+             final title = data['title'] as String?;
+             final message = data['message'] as String?;
+             if (title != null && message != null) {
+               items.add({'title': title, 'message': message, 'date': Timestamp.now()});
+             } else {
+               return const Center(child: Text('Henüz bir duyuru yok.'));
+             }
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 16),
+            itemBuilder: (context, index) {
+              final item = items[index] as Map<String, dynamic>;
+              final title = item['title'] ?? 'Duyuru';
+              final message = item['message'] ?? '';
+              final date = (item['date'] as Timestamp?)?.toDate();
+
+              return Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey.shade900 : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
+                  border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).primaryColor.withOpacity(0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.campaign, color: Theme.of(context).primaryColor),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ),
+                        if (date != null)
+                          Text(
+                            "${date.day}.${date.month}.${date.year}",
+                            style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      message,
+                      style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700, height: 1.5),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
