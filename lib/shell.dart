@@ -1,14 +1,15 @@
-import 'dart:async'; // StreamSubscription için gerekli
+import 'dart:async'; 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:app_links/app_links.dart'; // <-- Deep Link paketi
+import 'package:app_links/app_links.dart'; 
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/feed_screens.dart';
 import 'package:fluttergirdi/screens/match_screen.dart';
 import 'package:fluttergirdi/screens/messagesscreen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
-import 'package:fluttergirdi/screens/post_detail_screen.dart'; // <-- Detay sayfası
+import 'package:fluttergirdi/screens/post_detail_screen.dart';
+import 'package:fluttergirdi/services/tab_service.dart'; // EKLENDİ: TabService Importu
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -18,14 +19,25 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int _index = 0;
-  late final AppLinks _appLinks; // <-- Link yakalayıcı
+  int _index = 0; // Sizin değişkeniniz bu
+  late final AppLinks _appLinks; 
   StreamSubscription<Uri>? _linkSubscription;
 
   @override
   void initState() {
     super.initState();
     
+    // --- TAB SERVICE DİNLEYİCİSİ (EKLENDİ) ---
+    // Drawer'dan veya başka yerden sekme değiştirme isteği gelirse burası çalışır
+    TabService.instance.indexNotifier.addListener(() {
+      if (mounted) {
+        final newIndex = TabService.instance.indexNotifier.value;
+        setState(() {
+          _index = newIndex; // DÜZELTME: _selectedIndex yerine _index kullanıldı
+        });
+      }
+    });
+
     // Duyuru kontrolü
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
@@ -38,6 +50,8 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _linkSubscription?.cancel();
+    // TabService dinleyicisini kaldırmaya gerek yok çünkü singleton, 
+    // ama best practice olarak dispose edilebilir. Şimdilik gerek yok.
     super.dispose();
   }
 
@@ -45,7 +59,6 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _initDeepLinks() async {
     _appLinks = AppLinks();
 
-    // 1. Uygulama kapalıyken linke tıklandıysa (Cold Start)
     try {
       final Uri? initialUri = await _appLinks.getInitialLink();
       if (initialUri != null) {
@@ -55,7 +68,6 @@ class _HomeShellState extends State<HomeShell> {
       debugPrint('Link hatası: $e');
     }
 
-    // 2. Uygulama arkaplandayken linke tıklandıysa (Background/Foreground)
     _linkSubscription = _appLinks.uriLinkStream.listen((Uri? uri) {
       if (uri != null) {
         _handleDeepLink(uri);
@@ -63,17 +75,12 @@ class _HomeShellState extends State<HomeShell> {
     });
   }
 
-  // Linki analiz edip sayfayı açan fonksiyon
   void _handleDeepLink(Uri uri) {
-    // Link formatı: cinematch://app/post?id=POST_ID
-    // Veya: https://cinematch.web.app/post?id=POST_ID
     if (uri.path.contains('/post')) {
       final String? postId = uri.queryParameters['id'];
       
       if (postId != null && mounted) {
         debugPrint("Link yakalandı! Post ID: $postId");
-        
-        // İlgili posta git
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => PostDetailScreen(postId: postId),
@@ -101,16 +108,13 @@ class _HomeShellState extends State<HomeShell> {
   Widget _buildBottomBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     
-    // Dışarıdaki SafeArea ve padding'i kaldırdık, direkt Container döndürüyoruz.
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6), // Yarı saydam siyah
-        // borderRadius: ... // Kaldırıldı (Köşeler dik olsun)
+        color: Colors.black.withValues(alpha: 0.6), 
         boxShadow: const [], 
       ),
-      // Butonların iPhone home çubuğunun altında kalmaması için SafeArea'yı İÇERİ aldık
       child: SafeArea(
-        top: false, // Üstten boşluk bırakma
+        top: false, 
         child: NavigationBarTheme(
           data: NavigationBarThemeData(
             height: 52,
@@ -136,7 +140,11 @@ class _HomeShellState extends State<HomeShell> {
           ),
           child: NavigationBar(
             selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
+            onDestinationSelected: (i) {
+              setState(() => _index = i);
+              // Manuel tıklamada servisi de güncelle ki senkron kalsın
+              TabService.instance.changeTab(i); 
+            },
             destinations: [
               const NavigationDestination(
                 icon: Icon(Icons.view_list_outlined),

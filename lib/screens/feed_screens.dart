@@ -17,7 +17,7 @@ import 'package:fluttergirdi/widgets/custom_drawer.dart';
 import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart'; // Profil resmi için
+import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -143,42 +143,42 @@ class _FeedPageState extends State<FeedPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        // --- YENİ: DRAWER (YAN MENÜ) ---
         drawer: const CustomDrawer(),
-
         appBar: AppBar(
-          backgroundColor: Theme.of(context).colorScheme.surface,
+          backgroundColor: cs.surface,
           elevation: 0,
           scrolledUnderElevation: 0,
           toolbarHeight: 60,
+          titleSpacing: 0,
           
-          // --- YENİ: Menü İkonu Solda, Arama Kutusu Sağa Kaydı ---
-          titleSpacing: 0, // Varsayılan boşluğu sıfırla
           title: Align(
             alignment: Alignment.centerLeft,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220), // Genişliği biraz kıstık
+              constraints: const BoxConstraints(maxWidth: 220),
               child: InkWell(
                 onTap: () {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SearchProfilesScreen()));
                 },
                 borderRadius: BorderRadius.circular(24),
                 child: Container(
-                  height: 44,
+                  height: 40, // Arama kutusunu da hafif küçülttüm (44 -> 40)
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color: cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(24),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   alignment: Alignment.centerLeft,
                   child: Row(
                     children: [
-                      Icon(Icons.search, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      Icon(Icons.search, size: 20, color: cs.onSurfaceVariant),
                       const SizedBox(width: 5),
-                      Text('Kullanıcı Ara', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                      Text('Kullanıcı Ara', style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
                     ],
                   ),
                 ),
@@ -186,29 +186,59 @@ class _FeedPageState extends State<FeedPage> {
             ),
           ),
           
-          actions: [
-            const NotificationsButton(),
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
-            ),
+          actions: const [
+            // AYARLAR BUTONU KALDIRILDI
+            NotificationsButton(),
+            SizedBox(width: 8), // Sağdan biraz boşluk
           ],
+          
+          // --- KÜÇÜLTÜLMÜŞ BUBBLE TAB BAR ---
           bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(44),
-            child: Column(
-              children: [
-                TabBar(
-                  isScrollable: false,
-                  labelColor: Theme.of(context).colorScheme.onSurface,
-                  unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                  indicatorColor: Theme.of(context).colorScheme.primary,
-                  tabs: const [Tab(text: 'Popüler'), Tab(text: 'Takip Edilenler')],
+            preferredSize: const Size.fromHeight(50), // Yükseklik azaltıldı (60 -> 50)
+            child: Container(
+              height: 36, // Bar yüksekliği küçüldü (48 -> 36)
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.all(3), // Padding azaltıldı
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: TabBar(
+                isScrollable: false,
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                
+                indicator: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05), // Gölge hafifletildi
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
                 ),
-                const Divider(height: 1),
-              ],
+                
+                labelColor: cs.onSurface,
+                unselectedLabelColor: cs.onSurfaceVariant,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w700, 
+                  fontSize: 13, // Yazı boyutu küçüldü (14 -> 13)
+                  letterSpacing: -0.2
+                ),
+                labelPadding: EdgeInsets.zero, // Yazı boşluğu sıfırlandı
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                
+                tabs: const [
+                  Tab(text: 'Popüler'),
+                  Tab(text: 'Takip Edilenler'),
+                ],
+              ),
             ),
           ),
         ),
+        
         body: Column(
           children: [
             const OfflineBanner(), 
@@ -496,7 +526,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
           final postImage = (m['postImage'] ?? '') as String;
           
-          // YENİ ALANLAR
           final double? rating = (m['rating'] as num?)?.toDouble();
           final bool isSpoiler = (m['isSpoiler'] == true);
           final String? reviewTitle = m['reviewTitle'] as String?;

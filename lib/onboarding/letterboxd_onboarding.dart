@@ -2,7 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/shell.dart';
-import 'package:fluttergirdi/services/user_profile_service.dart';
+
 import 'package:fluttergirdi/services/letterboxd_service.dart'; // Eklendi
 import 'package:fluttergirdi/services/match_service.dart';
 import 'package:flutter/services.dart'; 

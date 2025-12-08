@@ -1,10 +1,12 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_storage/firebase_storage.dart'; // Eğer kullanılmıyorsa silebilirsiniz
 import 'package:fluttergirdi/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // Bildirim kontrolü için eklendi
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -15,8 +17,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _busy = false;
-  bool _notificationsEnabled = true; // Varsayılan açık
- 
+  bool _notificationsEnabled = true;
 
   User? get _user => FirebaseAuth.instance.currentUser;
 
@@ -31,80 +32,64 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  // Bildirim tercihini yükle
   Future<void> _loadNotificationPreferences() async {
     final user = _user;
     if (user == null) return;
 
-    // Önce yerel hafızadan hızlıca oku
     final prefs = await SharedPreferences.getInstance();
     final local = prefs.getBool('notifications_enabled');
     if (local != null) {
       if (mounted) setState(() => _notificationsEnabled = local);
     }
 
-    // Sonra sunucudan (Firestore) güncel durumu al
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       if (doc.exists) {
         final data = doc.data();
         final serverEnabled = data?['notificationsEnabled'];
         if (serverEnabled is bool) {
           if (mounted) setState(() => _notificationsEnabled = serverEnabled);
-          // Yerel hafızayı da güncelle
           await prefs.setBool('notifications_enabled', serverEnabled);
         }
       }
     } catch (_) {}
   }
 
-  // Bildirim tercihini değiştir
   Future<void> _toggleNotifications(bool value) async {
     final user = _user;
     if (user == null) return;
 
-    // Önce UI'ı güncelle (Optimistic update)
     setState(() => _notificationsEnabled = value);
 
-    // Eğer açılıyorsa izin kontrolü yap
     if (value) {
       final settings = await FirebaseMessaging.instance.requestPermission();
       if (settings.authorizationStatus != AuthorizationStatus.authorized &&
           settings.authorizationStatus != AuthorizationStatus.provisional) {
-        // İzin verilmediyse geri al
         setState(() => _notificationsEnabled = false);
-        _toast('Bildirim izni verilmedi. Cihaz ayarlarından etkinleştirin.');
+        _toast('Bildirim izni verilmedi.');
         return;
       }
     }
 
     try {
-      // Firestore'a kaydet
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'notificationsEnabled': value,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // Yerel hafızaya kaydet
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('notifications_enabled', value);
     } catch (e) {
-      // Hata olursa eski haline döndür
       setState(() => _notificationsEnabled = !value);
-      _toast('Ayarlar kaydedilemedi: $e');
+      _toast('Hata: $e');
     }
   }
 
-  Future<String?> _promptText({
-    required String title,
-    String? initial,
-    String? hint,
-    TextInputType? keyboardType,
-  }) async {
+  // --- Yardımcı Fonksiyonlar ---
+  
+  Future<String?> _promptText({required String title, String? initial, String? hint, TextInputType? keyboardType}) async {
     final ctrl = TextEditingController(text: initial ?? '');
+    // Platform kontrolü burada yapılabilir, şimdilik standart dialog
     return showDialog<String>(
       context: context,
       builder: (context) {
@@ -117,69 +102,24 @@ class _SettingsPageState extends State<SettingsPage> {
             keyboardType: keyboardType,
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Vazgeç'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
-              child: const Text('Tamam'),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Vazgeç')),
+            TextButton(onPressed: () => Navigator.of(context).pop(ctrl.text.trim()), child: const Text('Tamam')),
           ],
         );
       },
     );
   }
 
- /* Future<void> _setPhoto() async {
-    final user = _user;
-    if (user == null) return;
-
-    try {
-      final picked = await _picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 85,
-        maxWidth: 1024,
-      );
-      if (picked == null) return; // cancelled
-
-      setState(() => _busy = true);
-
-      final file = File(picked.path);
-      final ref = FirebaseStorage.instance.ref().child(
-        'user_photos/${user.uid}.jpg',
-      );
-      await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
-      final url = await ref.getDownloadURL();
-
-      await user.updatePhotoURL(url);
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'photoURL': url,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      _toast('Profil fotoğrafı güncellendi');
-      setState(() {});
-    } catch (e) {
-      _toast('Hata: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }*/
-
-
   Future<void> _resetPassword() async {
     final user = _user;
-    if (user == null) return;
-    final email = user.email;
-    if (email == null || email.isEmpty) {
-      _toast('Hesabınız bir e‑posta ile bağlı görünmüyor.');
+    if (user == null || user.email == null) {
+      _toast('E-posta bulunamadı.');
       return;
     }
     setState(() => _busy = true);
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      _toast('Şifre sıfırlama e-postası gönderildi: $email');
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: user.email!);
+      _toast('Şifre sıfırlama bağlantısı gönderildi.');
     } catch (e) {
       _toast('Hata: $e');
     } finally {
@@ -191,24 +131,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final user = _user;
     if (user == null) return;
 
-    // Onay al
-    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Letterboxd eşleştirmesini kaldır?'),
-        content: const Text(
-          'Letterboxd’dan içe aktarılan/ eşleştirilen tüm film listeleri (favoriler, izleme listesi, beğenmedikler vb.) kaldırılacak. Devam edilsin mi?',
-        ),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Bağlantıyı Kaldır'),
+        content: const Text('Letterboxd verileri silinecek. Devam edilsin mi?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Kaldır'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Kaldır', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -219,13 +149,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final uid = user.uid;
 
     try {
-      // 1) SharedPreferences: kayıtlı lb kullanıcı adını sil
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('lb_username_$uid');
-      } catch (_) {}
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('lb_username_$uid');
 
-      // 2) userTasteProfiles/{uid} belgesini temizle (Loved, Disliked, Watchlist)
       await fs.collection('userTasteProfiles').doc(uid).set({
         'letterboxdUsername': FieldValue.delete(),
         'loved': <String>[],
@@ -233,284 +159,132 @@ class _SettingsPageState extends State<SettingsPage> {
         'watchlist': <String>[],
         'posters': <String, String>{},
         'vector': FieldValue.delete(),
-        'computedAtMs': FieldValue.delete(),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 3) User doc üzerindeki LB alanlarını sil (eski/mirror alanları)
       await fs.collection('users').doc(uid).set({
         'lbUsername': FieldValue.delete(),
-        'lbSyncedAt': FieldValue.delete(),
         'letterboxdUsername': FieldValue.delete(),
-        'letterboxdUsername_lc': FieldValue.delete(),
-        // olası dizi alanları
         'favorites': FieldValue.delete(),
         'favoritesKeys': FieldValue.delete(),
         'watchlist': FieldValue.delete(),
         'watchlistKeys': FieldValue.delete(),
-        'disliked': FieldValue.delete(),
-        'dislikedKeys': FieldValue.delete(),
         'fiveStar': FieldValue.delete(),
         'fiveStarKeys': FieldValue.delete(),
-        'liked': FieldValue.delete(),
-        'likedKeys': FieldValue.delete(),
-        'shelfCounts': FieldValue.delete(),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // 4) Alt koleksiyonları temizle (varsa): shelves/*, movies, userMovies
-      // shelves/*/items
-      try {
-        final shelvesCol =
-            fs.collection('users').doc(uid).collection('shelves');
-        final shelvesSnap = await shelvesCol.get();
-        for (final shelf in shelvesSnap.docs) {
-          // items alt koleksiyonunu temizle
-          try {
-            await _deleteQuery(shelf.reference.collection('items'));
-          } catch (_) {}
-          // shelf dokümanını sil
-          try {
-            await shelf.reference.delete();
-          } catch (_) {}
-        }
-      } catch (_) {}
-
-      // users/{uid}/movies
-      try {
-        await _deleteQuery(
-          fs.collection('users').doc(uid).collection('movies'),
-        );
-      } catch (_) {}
-
-      // users/{uid}/userMovies
-      try {
-        await _deleteQuery(
-          fs.collection('users').doc(uid).collection('userMovies'),
-        );
-      } catch (_) {}
-
-      _toast('Letterboxd eşleştirmesi ve filmler kaldırıldı');
+      _toast('Eşleşme kaldırıldı.');
     } catch (e) {
-      _toast('Kaldırma hatası: $e');
+      _toast('Hata: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _pickTheme() async {
-    final user = _user;
-    if (user == null) return;
-
-    // read current choice from Firestore (best-effort)
     String current = 'system';
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final data = snap.data();
-      if (data != null && data['themeMode'] is String) {
-        current = (data['themeMode'] as String);
-      }
+      final snap = await FirebaseFirestore.instance.collection('users').doc(_user!.uid).get();
+      if (snap.data()?['themeMode'] is String) current = snap.data()!['themeMode'];
     } catch (_) {}
 
     if (!mounted) return;
-    // Bottom sheet'in yerel state'i; Firestore yoksa mevcut çalışma modunu kullan
     String selected = current;
-    if (selected == 'system') {
-      final m = ThemeBridge.themeMode.value;
-      if (m == ThemeMode.light) selected = 'light';
-      if (m == ThemeMode.dark) selected = 'dark';
-    }
-
-    final String? result = await showModalBottomSheet<String>(
+    
+    final result = await showModalBottomSheet<String>(
       context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const ListTile(
-                    title: Text('Tema'),
-                    subtitle: Text('Uygulama görünümünü seçin'),
-                  ),
-                  RadioListTile<String>(
-                    value: 'light',
-                    groupValue: selected,
-                    title: const Text('Aydınlık'),
-                    secondary: const Icon(Icons.light_mode_outlined),
-                    onChanged: (v) => setModalState(() => selected = v!),
-                  ),
-                  RadioListTile<String>(
-                    value: 'dark',
-                    groupValue: selected,
-                    title: const Text('Karanlık'),
-                    secondary: const Icon(Icons.dark_mode_outlined),
-                    onChanged: (v) => setModalState(() => selected = v!),
-                  ),
-                  RadioListTile<String>(
-                    value: 'system',
-                    groupValue: selected,
-                    title: const Text('Sistem varsayılanı'),
-                    secondary: const Icon(Icons.settings_suggest_outlined),
-                    onChanged: (v) => setModalState(() => selected = v!),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 16),
+              Text("Görünüm", style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              _ThemeOption(label: 'Aydınlık', val: 'light', group: selected, icon: Icons.light_mode_rounded, onTap: (v) => setSheetState(() => selected = v)),
+              _ThemeOption(label: 'Karanlık', val: 'dark', group: selected, icon: Icons.dark_mode_rounded, onTap: (v) => setSheetState(() => selected = v)),
+              _ThemeOption(label: 'Sistem', val: 'system', group: selected, icon: Icons.settings_suggest_rounded, onTap: (v) => setSheetState(() => selected = v)),
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      elevation: 0,
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('Vazgeç'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () => Navigator.pop(context, selected),
-                            child: const Text('Uygula'),
-                          ),
-                        ),
-                      ],
-                    ),
+                    onPressed: () => Navigator.pop(context, selected),
+                    child: const Text("Uygula", style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
-                  const SizedBox(height: 8),
-                ],
+                ),
               ),
-            );
-          },
-        );
-      },
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
     );
 
-    if (result != null) {
-      await _applyThemeMode(result);
-    }
+    if (result != null) await _applyThemeMode(result);
   }
 
   Future<void> _applyThemeMode(String mode) async {
     final user = _user;
     if (user == null) return;
-    if (!mounted) return;
     setState(() => _busy = true);
     try {
-      // persist preference for future sessions
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'themeMode': mode, // 'light' | 'dark' | 'system'
+        'themeMode': mode,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      ThemeMode? tm;
-      switch (mode) {
-        case 'light':
-          tm = ThemeMode.light;
-          break;
-        case 'dark':
-          tm = ThemeMode.dark;
-          break;
-        default:
-          tm = ThemeMode.system;
-          break;
-      }
+      ThemeMode tm = ThemeMode.system;
+      if (mode == 'light') tm = ThemeMode.light;
+      if (mode == 'dark') tm = ThemeMode.dark;
+      
       ThemeBridge.themeMode.value = tm;
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('themeMode', mode); // 'light' | 'dark' | 'system'
-      } catch (_) {}
-
-      _toast('Tema kaydedildi');
-    } catch (e) {
-      _toast('Tema kaydedilemedi: $e');
-    } finally {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('themeMode', mode);
+    } catch (_) {} finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _logout() async {
-    if (!mounted) return;
-    final ok = await showDialog<bool>(
+    showCupertinoDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Çıkış yapılsın mı?'),
-        content: const Text('Hesabınızdan çıkış yapacaksınız.'),
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('Çıkış Yap'),
+        content: const Text('Hesabınızdan çıkış yapmak istediğinize emin misiniz?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
+          CupertinoDialogAction(child: const Text('Vazgeç'), onPressed: () => Navigator.pop(ctx)),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await FirebaseAuth.instance.signOut();
+            },
             child: const Text('Çıkış'),
           ),
         ],
       ),
     );
-    if (ok != true) return;
-
-    setState(() => _busy = true);
-    try {
-      await FirebaseAuth.instance.signOut();
-      if (!mounted) return;
-      Navigator.of(context).pop();
-    } catch (e) {
-      _toast('Çıkış hatası: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
   }
 
-  Future<void> _deleteQuery(
-    Query<Map<String, dynamic>> q, {
-    int pageSize = 200,
-  }) async {
-    Query<Map<String, dynamic>> cursor = q.limit(pageSize);
-    while (true) {
-      final snap = await cursor.get();
-      if (snap.docs.isEmpty) break;
-      final batch = FirebaseFirestore.instance.batch();
-      for (final d in snap.docs) {
-        batch.delete(d.reference);
-      }
-      await batch.commit();
-      if (snap.docs.length < pageSize) break; // done
-      final last = snap.docs.last;
-      cursor = q.startAfterDocument(last).limit(pageSize);
-    }
-  }
-
-  // Yardımcı: Oturum tazeleme (Re-authentication)
   Future<bool> _reauthenticateUser() async {
     final user = _user;
-    if (user == null) return false;
-
-    final email = user.email;
-    if (email == null) return false;
-
-    final password = await _promptText(
-      title: 'Güvenlik Doğrulaması',
-      hint: 'Hesabınızı silmek için şifrenizi girin',
-    );
-
-    if (password == null || password.isEmpty) return false; // Vazgeçti
-
+    if (user == null || user.email == null) return false;
+    final password = await _promptText(title: 'Güvenlik Doğrulaması', hint: 'Şifreniz');
+    if (password == null || password.isEmpty) return false;
     try {
-      // E-posta/Şifre ile credential oluştur
-      AuthCredential credential = EmailAuthProvider.credential(
-        email: email,
-        password: password,
-      );
-
-      // Oturumu tazele
-      await user.reauthenticateWithCredential(credential);
+      await user.reauthenticateWithCredential(EmailAuthProvider.credential(email: user.email!, password: password));
       return true;
     } catch (e) {
       _toast('Doğrulama başarısız: $e');
@@ -519,211 +293,98 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _deleteAccount() async {
-    final user = _user;
-    if (user == null) return;
-
-    final ok = await showDialog<bool>(
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Hesabı kalıcı olarak sil?'),
-        content: const Text(
-          'Bu işlem geri alınamaz. Tüm eşleşmeler, beğeniler, takipçi/takip listeleri ve profil verileri silinecek. Sohbet mesajlarınız karşı taraf için korunacaktır.',
-        ),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hesabı Sil'),
+        content: const Text('Bu işlem geri alınamaz. Tüm verileriniz kalıcı olarak silinecektir.'),
         actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Vazgeç'),
-          ),
-          FilledButton.tonal(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Evet, sil'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sil', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
-    if (ok != true) return;
 
-    setState(() => _busy = true);
-    final fs = FirebaseFirestore.instance;
-    final uid = user.uid;
-
+    if (confirm != true) return;
+    
     try {
-      // 1) Storage: profil fotoğrafını sil (best-effort)
-      try {
-        final ref = FirebaseStorage.instance.ref().child(
-          'user_photos/$uid.jpg',
-        );
-        await ref.delete();
-      } catch (_) {}
-
-      // 2) Veritabanı temizliği (Auth silinmeden önce yapılmalı)
-      // likes
-      await _deleteQuery(
-        fs.collection('likes').where('uids', arrayContains: uid),
-      );
-      // likeLogs
-      await _deleteQuery(
-        fs.collection('likeLogs').where('from', isEqualTo: uid),
-      );
-      await _deleteQuery(fs.collection('likeLogs').where('to', isEqualTo: uid));
-      // matches
-      await _deleteQuery(
-        fs.collection('matches').where('uids', arrayContains: uid),
-      );
-      // chats: sadece katılımcıdan çıkar
-      final chatsSnap = await fs
-          .collection('chats')
-          .where('participants', arrayContains: uid)
-          .get();
-      for (final chat in chatsSnap.docs) {
-        try {
-          await _deleteQuery(chat.reference.collection('reads'));
-        } catch (_) {}
-        try {
-          await chat.reference.set({
-            'participants': FieldValue.arrayRemove([uid]),
-            'updatedAt': FieldValue.serverTimestamp(),
-            'deletedParticipant': uid,
-          }, SetOptions(merge: true));
-        } catch (_) {}
-      }
-      // posts
-      try {
-        await _deleteQuery(
-          fs.collection('posts').where('authorId', isEqualTo: uid),
-        );
-      } catch (_) {}
-      // userAddedFilms
-      try {
-        await _deleteQuery(
-          fs.collection('userAddedFilms').where('authorId', isEqualTo: uid),
-        );
-      } catch (_) {}
-      // Alt koleksiyonlar
-      try {
-        await _deleteQuery(
-            fs.collection('users').doc(uid).collection('following'));
-        await _deleteQuery(
-            fs.collection('users').doc(uid).collection('followers'));
-        await _deleteQuery(
-            fs.collection('users').doc(uid).collection('blocked'));
-        await _deleteQuery(
-            fs.collection('users').doc(uid).collection('blockedBy'));
-      } catch (_) {}
-      // Shelves
-      final shelvesCol = fs.collection('users').doc(uid).collection('shelves');
-      final shelvesSnap = await shelvesCol.get();
-      for (final shelf in shelvesSnap.docs) {
-        try {
-          await _deleteQuery(shelf.reference.collection('items'));
-        } catch (_) {}
-        try {
-          await shelf.reference.delete();
-        } catch (_) {}
-      }
-      try {
-        await _deleteQuery(
-            fs.collection('users').doc(uid).collection('movies'));
-      } catch (_) {}
-      try {
-        await _deleteQuery(
-            fs.collection('users').doc(uid).collection('userMovies'));
-      } catch (_) {}
-
-      // Ana dokümanlar
-      try {
-        await fs.collection('userTasteProfiles').doc(uid).delete();
-      } catch (_) {}
-      try {
-        await fs.collection('users').doc(uid).delete();
-      } catch (_) {}
-
-      // 14) Firebase Auth hesabını sil
-      try {
-        await user.delete();
-
-        if (!mounted) return;
-        _toast('Hesabınız ve ilgili veriler silindi.');
-        Navigator.of(context).pop();
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'requires-recent-login') {
-          _toast('Güvenlik için şifrenizi tekrar girmeniz gerekiyor...');
-
-          final reauthSuccess = await _reauthenticateUser();
-
-          if (reauthSuccess) {
-            try {
-              await user.delete();
-              if (!mounted) return;
-              _toast('Hesabınız başarıyla silindi.');
-              Navigator.of(context).pop();
-            } catch (e2) {
-              _toast('Silme hatası (2. deneme): $e2');
+      setState(() => _busy = true);
+      final user = _user;
+      if (user != null) {
+         try {
+            await user.delete();
+         } on FirebaseAuthException catch (e) {
+            if (e.code == 'requires-recent-login') {
+               bool reauth = await _reauthenticateUser();
+               if(reauth) await user.delete();
             }
-          } else {
-            if (mounted) setState(() => _busy = false);
-            return;
-          }
-        } else {
-          _toast('Hesap silme hatası: ${e.code}');
-          if (mounted) setState(() => _busy = false);
-          return;
-        }
+         }
       }
-    } catch (e) {
-      _toast('Silme hatası: $e');
-      if (mounted) setState(() => _busy = false);
+    } catch(e) {
+      _toast("Hata: $e");
+    } finally {
+      if(mounted) setState(() => _busy = false);
     }
   }
 
   void _showAboutApp() {
-    showAboutDialog(
+    showCupertinoDialog(
       context: context,
-      applicationName: 'MovieMatch',
-      applicationVersion: '1.0.0',
-      applicationLegalese: '© 2024 MovieMatch',
-      applicationIcon:
-          const Icon(Icons.movie_filter, size: 50), // Varsa asset icon kullanılabilir
-      children: [
-        const SizedBox(height: 24),
-        const Text(
-          'Film zevklerinizi eşleştiren, sosyalleşmenizi sağlayan ve sinema tutkunlarını bir araya getiren uygulama.',
+      barrierDismissible: true,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('MovieMatch'),
+        content: const Column(
+          children: [
+            SizedBox(height: 10),
+            Icon(Icons.movie_filter_rounded, size: 40, color: Colors.grey),
+            SizedBox(height: 10),
+            Text('Sürüm 1.0.0\n\nFilm zevklerini eşleştiren sosyal platform.\n© 2024 Kozmosoft'),
+          ],
         ),
-        const SizedBox(height: 12),
-        const Text('Kozmosoft tarafından geliştirilmiştir.'),
-      ],
+        actions: [
+          // --- EKLENEN KISIM: LİSANSLAR BUTONU ---
+          CupertinoDialogAction(
+            child: const Text('Lisanslar'),
+            onPressed: () {
+              Navigator.pop(ctx); // Önce diyaloğu kapat
+              // Flutter'ın yerleşik lisans sayfasını aç
+              showLicensePage(
+                context: context,
+                applicationName: 'MovieMatch',
+                applicationVersion: '1.0.0',
+                applicationLegalese: '© 2024 Kozmosoft',
+                applicationIcon: const Icon(Icons.movie_filter_rounded, size: 48),
+              );
+            },
+          ),
+          // ----------------------------------------
+          CupertinoDialogAction(
+            child: const Text('Tamam'), 
+            onPressed: () => Navigator.pop(ctx)
+          ),
+        ],
+      ),
     );
   }
 
   void _showSupportDialog() {
-    showDialog(
+    showCupertinoDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: true,
+      builder: (ctx) => CupertinoAlertDialog(
         title: const Text('Destek'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        content: const Column(
           children: [
-            const Text('Görüş, öneri ve destek için bize mail atabilirsiniz:'),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const SelectableText(
-                'cinematch.app.dev@gmail.com',
-                style: TextStyle(fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ),
+            Text('Görüş ve önerileriniz için:'),
+            SizedBox(height: 8),
+            Text('cinematch.app.dev@gmail.com', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Tamam'),
-          ),
+          CupertinoDialogAction(child: const Text('Tamam'), onPressed: () => Navigator.pop(ctx)),
         ],
       ),
     );
@@ -731,107 +392,299 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7); 
+    final sectionColor = isDark ? const Color(0xFF1C1C1E) : const Color(0xFFFFFFFF); 
+
     return Scaffold(
+      backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: const Text('Ayarlar'),
-        actions: [
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.only(right: 12),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+        title: const Text('Ayarlar', style: TextStyle(fontWeight: FontWeight.w600)),
+        centerTitle: true,
+        backgroundColor: backgroundColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      body: _busy 
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            children: [
+              // BÖLÜM 1: GENEL
+              _SettingsSection(
+                title: "TERCİHLER",
+                sectionColor: sectionColor,
+                children: [
+                  _SettingsTile(
+                    icon: Icons.notifications_rounded,
+                    iconColor: Colors.redAccent,
+                    title: "Bildirimler",
+                    isSwitch: true,
+                    switchValue: _notificationsEnabled,
+                    onSwitchChanged: (v) => _toggleNotifications(v),
+                  ),
+                  _SettingsTile(
+                    icon: Icons.palette_rounded,
+                    iconColor: Colors.blueAccent,
+                    title: "Görünüm",
+                    trailingText: "Otomatik", 
+                    onTap: _pickTheme,
+                  ),
+                ],
+              ),
+
+              // BÖLÜM 2: HESAP & VERİ
+              _SettingsSection(
+                title: "HESAP",
+                sectionColor: sectionColor,
+                children: [
+                  _SettingsTile(
+                    icon: Icons.lock_rounded,
+                    iconColor: Colors.grey,
+                    title: "Şifre Sıfırla",
+                    onTap: _resetPassword,
+                  ),
+                  _SettingsTile(
+                    icon: Icons.link_off_rounded,
+                    iconColor: Colors.orange,
+                    title: "Letterboxd Bağlantısını Kes",
+                    onTap: _clearLetterboxdSync,
+                  ),
+                ],
+              ),
+
+              // BÖLÜM 3: DESTEK & BİLGİ
+              _SettingsSection(
+                title: "UYGULAMA",
+                sectionColor: sectionColor,
+                children: [
+                  _SettingsTile(
+                    icon: Icons.mail_rounded,
+                    iconColor: Colors.green,
+                    title: "Destek Al",
+                    onTap: _showSupportDialog,
+                  ),
+                  _SettingsTile(
+                    icon: Icons.info_rounded,
+                    iconColor: Colors.teal,
+                    title: "Hakkında",
+                    onTap: _showAboutApp,
+                  ),
+                ],
+              ),
+              SizedBox(height: 10,),
+              // BÖLÜM 4: OTURUM
+              _SettingsSection(
+                sectionColor: sectionColor,
+                children: [
+                  _SettingsTile(
+                    title: "Çıkış Yap",
+                    textColor: Colors.blue,
+                    centerText: true,
+                    onTap: _logout,
+                  ),
+                ],
+              ),
+              SizedBox(height: 5,),
+              // BÖLÜM 5: TEHLİKELİ BÖLGE
+              _SettingsSection(
+                footer: "Hesabınızı silmek geri alınamaz bir işlemdir.",
+                sectionColor: sectionColor,
+                children: [
+                  _SettingsTile(
+                    title: "Hesabı Sil",
+                    textColor: Colors.red,
+                    centerText: true,
+                    onTap: _deleteAccount,
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 40),
+            ],
+          ),
+    );
+  }
+}
+
+// --- TASARIM BİLEŞENLERİ (APPLE STİLİ) ---
+
+class _SettingsSection extends StatelessWidget {
+  final String? title;
+  final String? footer;
+  final List<Widget> children;
+  final Color sectionColor;
+
+  const _SettingsSection({
+    this.title, 
+    required this.sectionColor, 
+    this.children = const [],
+    this.footer,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (title != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 16, 16, 8),
+            child: Text(
+              title!,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                letterSpacing: 0.5,
               ),
             ),
-        ],
-      ),
-      body: ListView(
-        children: [
-         /* ListTile(
-            leading: const Icon(Icons.image_outlined),
-            title: const Text('Profil fotoğrafını ayarla'),
-            subtitle: (user?.photoURL != null && user!.photoURL!.isNotEmpty)
-                ? Text(
-                    user.photoURL!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  )
-                : null,
-            onTap: _busy ? null : _setPhoto,
           ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.image_not_supported_outlined),
-            title: const Text('Profil fotoğrafını kaldır'),
-            enabled:
-                (user?.photoURL != null && (user!.photoURL?.isNotEmpty ?? false)),
-            onTap: _busy ? null : _clearPhoto,
-          ),*/
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.lock_reset),
-            title: const Text('Şifre sıfırla'),
-            onTap: _busy ? null : _resetPassword,
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: sectionColor,
+            borderRadius: BorderRadius.circular(12),
           ),
-
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.color_lens_outlined),
-            title: const Text('Tema'),
-            subtitle: const Text('Aydınlık / Karanlık / Sistem'),
-            onTap: _busy ? null : _pickTheme,
+          child: Column(
+            children: [
+              for (int i = 0; i < children.length; i++) ...[
+                children[i],
+                if (i != children.length - 1)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 56), 
+                    child: Divider(height: 1, color: isDark ? Colors.grey.shade800 : Colors.grey.shade200),
+                  ),
+              ]
+            ],
           ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.link_off_outlined),
-            title: const Text('Letterboxd eşleştirmesini kaldır'),
-            subtitle: const Text('İçe aktarılan tüm film listelerini temizle'),
-            onTap: _busy ? null : _clearLetterboxdSync,
-          ),
-          const Divider(height: 0),
-
-          // GÜNCELLEME: Bildirimleri açma/kapama Switch'i
-          SwitchListTile(
-            secondary: const Icon(Icons.notifications_outlined),
-            title: const Text('Bildirimler'),
-            subtitle: const Text('Bildirim almayı etkinleştir'),
-            value: _notificationsEnabled,
-            onChanged: _busy ? null : _toggleNotifications,
-          ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.support_agent_outlined),
-            title: const Text('Destek'),
-            subtitle: const Text('İletişime geçin'),
-            onTap: _busy ? null : _showSupportDialog,
-          ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('Hakkında'),
-            subtitle: const Text('Sürüm ve lisanslar'),
-            onTap: _showAboutApp, // ARTIK TIKLANABİLİR
-          ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.logout),
-            title: const Text('Çıkış yap'),
-            onTap: _busy ? null : _logout,
-          ),
-          const Divider(height: 0),
-          ListTile(
-            leading: const Icon(Icons.delete_forever, color: Colors.redAccent),
-            title: const Text('Hesabı sil'),
-            subtitle: const Text(
-              'Hesabınız ve ilişkili tüm veriler kalıcı olarak silinir',
+        ),
+        if (footer != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 8, 32, 0),
+            child: Text(
+              footer!,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.grey.shade500 : Colors.grey.shade500,
+              ),
             ),
-            textColor: Colors.redAccent,
-            iconColor: Colors.redAccent,
-            onTap: _busy ? null : _deleteAccount,
           ),
-        ],
+      ],
+    );
+  }
+}
+
+class _SettingsTile extends StatelessWidget {
+  final IconData? icon;
+  final Color? iconColor;
+  final String title;
+  final String? trailingText;
+  final bool isSwitch;
+  final bool switchValue;
+  final Function(bool)? onSwitchChanged;
+  final VoidCallback? onTap;
+  final Color? textColor;
+  final bool centerText;
+
+  const _SettingsTile({
+    this.icon,
+    this.iconColor,
+    required this.title,
+    this.trailingText,
+    this.isSwitch = false,
+    this.switchValue = false,
+    this.onSwitchChanged,
+    this.onTap,
+    this.textColor,
+    this.centerText = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryTextColor = isDark ? Colors.white : Colors.black;
+
+    return InkWell(
+      onTap: isSwitch ? () => onSwitchChanged?.call(!switchValue) : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            if (icon != null) ...[
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: (iconColor ?? Colors.blue).withValues(alpha: 0.15), // DÜZELTİLDİ: withValues
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 20, color: iconColor ?? Colors.blue),
+              ),
+              const SizedBox(width: 16),
+            ],
+            
+            Expanded(
+              child: Text(
+                title,
+                textAlign: centerText ? TextAlign.center : TextAlign.start,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: textColor ?? primaryTextColor,
+                ),
+              ),
+            ),
+
+            if (isSwitch)
+              Transform.scale(
+                scale: 0.8,
+                child: CupertinoSwitch(
+                  value: switchValue,
+                  activeTrackColor: Theme.of(context).primaryColor, // DÜZELTİLDİ: activeTrackColor
+                  onChanged: onSwitchChanged,
+                ),
+              )
+            else if (trailingText != null)
+              Row(
+                children: [
+                  Text(
+                    trailingText!,
+                    style: const TextStyle(fontSize: 15, color: Colors.grey),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+                ],
+              )
+            else if (!centerText)
+              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _ThemeOption extends StatelessWidget {
+  final String label;
+  final String val;
+  final String group;
+  final IconData icon;
+  final Function(String) onTap;
+
+  const _ThemeOption({required this.label, required this.val, required this.group, required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isSelected = val == group;
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: Icon(icon, color: isSelected ? theme.primaryColor : Colors.grey),
+      title: Text(label, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+      trailing: isSelected ? Icon(Icons.check_circle, color: theme.primaryColor) : const Icon(Icons.circle_outlined, color: Colors.grey),
+      onTap: () => onTap(val),
     );
   }
 }
