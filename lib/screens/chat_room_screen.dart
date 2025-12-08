@@ -48,9 +48,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     super.initState();
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     
-    if (!widget.isGroup) {
-      _svc.ensureChat(widget.chatId, myUid, widget.otherUid);
-    }
+   
 
     _latestSub = FirebaseFirestore.instance
         .collection('chats')

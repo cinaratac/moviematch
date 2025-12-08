@@ -2,7 +2,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/search_profiles_screen.dart';
 import 'package:fluttergirdi/services/feed_service.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
@@ -14,10 +13,7 @@ import '../widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:fluttergirdi/widgets/custom_drawer.dart';
 // YENİ İMPORTLAR
-import 'package:fluttergirdi/screens/leaderboard_screen.dart';
-import 'package:fluttergirdi/screens/clubs_tab.dart';
-import 'package:fluttergirdi/screens/badges_progress_screen.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
+ 
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -32,6 +28,8 @@ class _FeedPageState extends State<FeedPage> {
   bool _initialLoading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
+  Set<String> _myLikedPostIds = {};
+  Set<String> _myFollowingUserIds = {};
   
   List<DocumentSnapshot<Map<String, dynamic>>> _posts = [];
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
@@ -96,11 +94,33 @@ class _FeedPageState extends State<FeedPage> {
 
   Future<void> _loadInitial() async {
     _authorCache.clear();
-    setState(() { _initialLoading = true; _hasMore = true; _posts.clear(); _lastDoc = null; });
+    setState(() { 
+      _initialLoading = true; 
+      _hasMore = true; 
+      _posts.clear(); 
+      _lastDoc = null; 
+    });
+
     try {
-      final serverQs = await FeedService.instance.fetchInitial(limit: _pageSize);
+      final me = FirebaseAuth.instance.currentUser?.uid;
+      
+      // Postları ve Kullanıcı etkileşimlerini PARALEL (aynı anda) çekiyoruz:
+      final results = await Future.wait([
+        FeedService.instance.fetchInitial(limit: _pageSize), // Postlar
+        if (me != null) FeedService.instance.fetchUserLikedPostIds(me), // Beğenilerim
+        if (me != null) FeedService.instance.fetchUserFollowingIds(me), // Takiplerim
+      ]);
+
+      final serverQs = results[0] as QuerySnapshot<Map<String, dynamic>>;
+      
+      if (me != null) {
+        _myLikedPostIds = results[1] as Set<String>;
+        _myFollowingUserIds = results[2] as Set<String>;
+      }
+
       final serverDocs = serverQs.docs;
-      await _fetchAuthorsForPosts(serverDocs);
+      await _fetchAuthorsForPosts(serverDocs); // (Bunu sonraki adımda kaldıracağız ama şimdilik kalsın)
+
       if (!mounted) return;
       setState(() {
         _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(serverDocs);
@@ -108,7 +128,10 @@ class _FeedPageState extends State<FeedPage> {
         _hasMore = serverDocs.length == _pageSize;
         _initialLoading = false;
       });
-    } catch (_) { if (mounted) setState(() => _initialLoading = false); }
+    } catch (e) { 
+      debugPrint('Feed Yükleme Hatası: $e');
+      if (mounted) setState(() => _initialLoading = false); 
+    }
   }
 
   Future<void> _loadMore() async {
@@ -299,6 +322,8 @@ class _FeedPageState extends State<FeedPage> {
                               final List<String> tags = List<String>.from(m['tags'] ?? []);
 
                               final postWidget = PostTile(
+                                initialIsLiked: _myLikedPostIds.contains(d.id),
+    initialIsFollowing: _myFollowingUserIds.contains(authorId),
                                 // PERFORMANS İÇİN ÖNEMLİ: Key eklendi!
                                 key: ValueKey(d.id), 
                                 postId: d.id,
@@ -318,11 +343,21 @@ class _FeedPageState extends State<FeedPage> {
                                 isSpoiler: isSpoiler,
                                 reviewTitle: reviewTitle,
                                 tags: tags,
-                                onToggleLike: (pid, like) => FeedService.instance.toggleLike(postId: pid, like: like),
+                                onToggleLike: (pid, like) {
+                                  if (like) {
+                                    _myLikedPostIds.add(pid);
+                                  } else {
+                                    _myLikedPostIds.remove(pid);
+                                  }
+                                  FeedService.instance.toggleLike(postId: pid, like: like);
+                                },
                                 onStartChat: (String _) async {},
-                                onFollow: (uid) async {
-                                   await FeedService.instance.followUser(uid);
-                                   await FeedService.instance.notifyFollow(toUid: uid);
+                                                          onFollow: (uid) async {
+                                  setState(() {
+                                    _myFollowingUserIds.add(uid);
+                                  });
+                                  await FeedService.instance.followUser(uid);
+                                  await FeedService.instance.notifyFollow(toUid: uid);
                                 },
                                 onReport: (pid) => FeedService.instance.reportPost(pid),
                                 onDelete: () {
@@ -430,6 +465,10 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   bool _loading = true;
   List<DocumentSnapshot<Map<String, dynamic>>> _items = [];
   final Map<String, Map<String, String>> _localAuthorCache = {};
+  
+  // Beğeni ve Takip durumlarını tutacak listeler
+  Set<String> _myLikedPostIds = {};
+  Set<String> _myFollowingUserIds = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -476,33 +515,79 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         if(mounted) setState(() { _items = []; _loading = false; });
         return;
       }
-      final followingQs = await FirebaseFirestore.instance.collection('users').doc(me).collection('following').orderBy('createdAt', descending: true).limit(30).get();
+
+      // 1. Etkileşim verilerini (Like/Follow) paralel çek
+      final interactionsFuture = Future.wait([
+        FeedService.instance.fetchUserLikedPostIds(me),
+        FeedService.instance.fetchUserFollowingIds(me),
+      ]);
+
+      // 2. Takip edilen kişilerin listesini çek (Limiti artırdık: 200)
+      // Sıralama önemli değil çünkü hepsini alıp postları tarihe göre biz dizeceğiz.
+      final followingQs = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(me)
+          .collection('following')
+          .limit(200) 
+          .get();
+          
       final uids = followingQs.docs.map((d) => d.id).toList();
 
       if (uids.isEmpty) {
         if(mounted) setState(() { _items = []; _loading = false; });
         return;
       }
-      final List<DocumentSnapshot<Map<String, dynamic>>> acc = [];
-      final processUids = uids.take(15).toList();
 
-      for (var i = 0; i < processUids.length; i += 10) {
-        final chunk = processUids.sublist(i, i + 10 > processUids.length ? processUids.length : i + 10);
-        final qs = await FirebaseFirestore.instance.collection('posts').where('authorId', whereIn: chunk).orderBy('createdAt', descending: true).limit(5).get(const GetOptions(source: Source.server));
-        acc.addAll(qs.docs);
+      // 3. Kullanıcıları 10'arlı gruplara böl ve PARALEL sorgu hazırla
+      // Firestore 'whereIn' limiti 30'dur, güvenli olması için 10 kullanıyoruz.
+      List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
+      
+      for (var i = 0; i < uids.length; i += 10) {
+        final end = (i + 10 < uids.length) ? i + 10 : uids.length;
+        final chunk = uids.sublist(i, end);
+        
+        // Her gruptan en güncel 5 postu iste
+        futures.add(
+          FirebaseFirestore.instance
+            .collection('posts')
+            .where('authorId', whereIn: chunk)
+            .orderBy('createdAt', descending: true)
+            .limit(5)
+            .get() // Source belirtmiyoruz, cache veya server
+        );
       }
-      acc.sort((a, b) {
+
+      // 4. Tüm sorguları aynı anda çalıştır (Hız optimizasyonu)
+      final results = await Future.wait(futures);
+      
+      final List<DocumentSnapshot<Map<String, dynamic>>> allPosts = [];
+      for (var qs in results) {
+        allPosts.addAll(qs.docs);
+      }
+
+      // 5. Gelen tüm postları bellekte tarihe göre (Yeniden Eskiye) sırala
+      allPosts.sort((a, b) {
         final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
         final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
         if (ta == null) return 1; if (tb == null) return -1;
-        return tb.compareTo(ta);
+        return tb.compareTo(ta); // Descending (Yeniden eskiye)
       });
-      await _fetchAuthors(acc);
+
+      // 6. İlk 50 tanesini göster (Performans için sınırla)
+      final finalItems = allPosts.take(50).toList();
+
+      await _fetchAuthors(finalItems);
+
+      // Etkileşim verilerini bekle
+      final interactionResults = await interactionsFuture;
+      _myLikedPostIds = interactionResults[0];
+      _myFollowingUserIds = interactionResults[1];
 
       if (mounted) {
-        setState(() { _items = acc; _loading = false; });
+        setState(() { _items = finalItems; _loading = false; });
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint("Takip akışı hatası: $e");
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -569,7 +654,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
           
           int? movieTmdbId = _parseTmdbId(m);
-
           final postImage = (m['postImage'] ?? '') as String;
           
           final double? rating = (m['rating'] as num?)?.toDouble();
@@ -578,7 +662,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final List<String> tags = List<String>.from(m['tags'] ?? []);
 
           return PostTile(
-            // PERFORMANS İÇİN ÖNEMLİ: Key eklendi!
             key: ValueKey(d.id),
             postId: d.id,
             authorId: authorId,
@@ -597,11 +680,27 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             isSpoiler: isSpoiler,
             reviewTitle: reviewTitle,
             tags: tags,
-            onToggleLike: (pid, like) => FeedService.instance.toggleLike(postId: pid, like: like),
+            
+            // Beğeni ve Takip durumu
+            initialIsLiked: _myLikedPostIds.contains(d.id),
+            initialIsFollowing: _myFollowingUserIds.contains(authorId),
+            
+            onToggleLike: (pid, like) {
+               if (like) {
+                 _myLikedPostIds.add(pid);
+               } else {
+                 _myLikedPostIds.remove(pid);
+               }
+               FeedService.instance.toggleLike(postId: pid, like: like);
+            },
+            
             onStartChat: (String _) async {},
             onFollow: (uid) async {
+               setState(() {
+                 _myFollowingUserIds.add(uid);
+               });
                await FeedService.instance.followUser(uid);
-               await FeedService.instance.notifyFollow(toUid: uid);
+               // Bildirim fonksiyonunu kaldırdık (Cloud Functions hallediyor)
             },
             onReport: (pid) => FeedService.instance.reportPost(pid),
             onDelete: () {

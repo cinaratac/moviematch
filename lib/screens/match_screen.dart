@@ -160,12 +160,10 @@ class _MatchListScreenState extends State<MatchListScreen> {
             scrolledUnderElevation: 0,
             centerTitle: true,
             toolbarHeight: 65,
-            titleSpacing: 16, 
-            
-            // --- GÜNCELLENEN APPBAR TITLE ---
+            titleSpacing: 16,
             title: Row(
               children: [
-                // SOL TARA: BUBBLE TAB (Genişletilmiş)
+                // SOL TARAF: BUBBLE TAB
                 Expanded(
                   child: Container(
                     height: 42,
@@ -177,7 +175,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
                     child: TabBar(
                       indicatorSize: TabBarIndicatorSize.tab,
                       dividerColor: Colors.transparent,
-                      // Kayan Beyaz Baloncuk
                       indicator: BoxDecoration(
                         color: cs.surface,
                         borderRadius: BorderRadius.circular(10),
@@ -202,18 +199,16 @@ class _MatchListScreenState extends State<MatchListScreen> {
                   ),
                 ),
                 
-                const SizedBox(width: 8), // Tab ile Kalp arasındaki boşluk
+                const SizedBox(width: 8),
 
-                // SAĞ TARA: KALP İKONU KUTUSU (Tab ile aynı yükseklik)
-               // SAĞ TARA: KALP İKONU KUTUSU
+                // SAĞ TARAF: KALP İKONU
                 Container(
                   height: 42,
                   width: 42,
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(12), // Karemsi yapı (12 radius)
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  // Döndürme (Transform) kaldırıldı, düz duruyor
                   child: _LikesIndicatorHeart(onPressed: _openIncomingLikes),
                 ),
               ],
@@ -221,55 +216,64 @@ class _MatchListScreenState extends State<MatchListScreen> {
           ),
           body: Stack(
             children: [
-              TabBarView(
-                physics: const NeverScrollableScrollPhysics(),
+              // --- GÜNCELLEME BURADA YAPILDI ---
+              Column(
                 children: [
-                  const PassesListBody(), // DÜZELDİ: Geçilenler listesi geri geldi
-                  
-                  // --- ORTA SEKME (KARTLAR) ---
-                  _loading
-                      ? const Center(child: CircularProgressIndicator())
-                      : (_swipeItems.isEmpty || _finished
-                          ? const _NoMatchesCharacter()
-                          : Padding(
-                              // Kartları maksimum genişletmek için padding'i sıfırladık
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                              child: SwipeCards(
-                                matchEngine: _matchEngine,
-                                itemBuilder: (context, index) {
-                                  final m = _swipeItems[index].content
-                                      as global_match.MatchResult;
-                                  return MatchCard(
-                                    key: ValueKey(m.uid),
-                                    result: m,
-                                    onOpen: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) =>
-                                              MatchScreen(result: m),
-                                        ),
-                                      );
-                                    },
-                                    onLike: () {
-                                      _matchEngine.currentItem?.like();
-                                    },
-                                    onPass: () {
-                                      _matchEngine.currentItem?.nope();
-                                    },
-                                  );
-                                },
-                                onStackFinished: () {
-                                  setState(() => _finished = true);
-                                  _showGuideNotifier.value = true;
-                                },
-                                upSwipeAllowed: false,
-                                fillSpace: true,
-                              ),
-                            )),
-
-                  const LikesListBody(), // DÜZELDİ: Beğenilenler listesi geri geldi
+                  Expanded(
+                    child: TabBarView(
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: [
+                        const PassesListBody(), 
+                        
+                        // --- ORTA SEKME (KARTLAR) ---
+                        _loading
+                            ? const Center(child: CircularProgressIndicator())
+                            : (_swipeItems.isEmpty || _finished
+                                ? const _NoMatchesCharacter()
+                                : Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                                    child: SwipeCards(
+                                      matchEngine: _matchEngine,
+                                      itemBuilder: (context, index) {
+                                        final m = _swipeItems[index].content
+                                            as global_match.MatchResult;
+                                        return MatchCard(
+                                          key: ValueKey(m.uid),
+                                          result: m,
+                                          onOpen: () {
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    MatchScreen(result: m),
+                                              ),
+                                            );
+                                          },
+                                          onLike: () {
+                                            _matchEngine.currentItem?.like();
+                                          },
+                                          onPass: () {
+                                            _matchEngine.currentItem?.nope();
+                                          },
+                                        );
+                                      },
+                                      onStackFinished: () {
+                                        setState(() => _finished = true);
+                                        _showGuideNotifier.value = true;
+                                      },
+                                      upSwipeAllowed: false,
+                                      fillSpace: true,
+                                    ),
+                                  )),
+      
+                        const LikesListBody(), 
+                      ],
+                    ),
+                  ),
+                  // İSTENİLEN BOŞLUK
+                  const SizedBox(height: 56),
                 ],
               ),
+              // ---------------------------------
 
               ValueListenableBuilder<bool>(
                 valueListenable: _showGuideNotifier,

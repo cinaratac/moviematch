@@ -26,6 +26,8 @@ class PostTile extends StatefulWidget {
   final int likeCount;
   final int replyCount;
   final int? movieTmdbId;
+  final bool initialIsLiked;      // isLiked yerine başlangıç durumu
+  final bool initialIsFollowing;
 
   // --- YENİ ALANLAR ---
   final double? rating;
@@ -43,6 +45,8 @@ class PostTile extends StatefulWidget {
 
   const PostTile({
     super.key,
+    required this.initialIsLiked,     // <-- Yeni zorunlu parametre
+    required this.initialIsFollowing,
     this.postImage,
     required this.postId,
     required this.authorId,
@@ -74,45 +78,27 @@ class PostTile extends StatefulWidget {
 }
 
 class _PostTileState extends State<PostTile> {
-  bool _isLiked = false;
-  bool _isFollowing = false;
+  
+  late bool _isLiked;
+  late bool _isFollowing;
   int _currentLikeCount = 0;
+  
+  // EKSİK OLAN SATIR BU (Geri Ekliyoruz):
   final String _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  // Spoiler durumu
   bool _revealSpoiler = false;
 
   @override
   void initState() {
     super.initState();
     _currentLikeCount = widget.likeCount;
-    _checkStatus();
+    // Dışarıdan gelen veriyi alıyoruz
+    _isLiked = widget.initialIsLiked;
+    _isFollowing = widget.initialIsFollowing;
   }
 
-  Future<void> _checkStatus() async {
-    if (_currentUserId.isEmpty) return;
-    
-    FirebaseFirestore.instance
-        .collection('posts')
-        .doc(widget.postId)
-        .collection('likes')
-        .doc(_currentUserId)
-        .get()
-        .then((doc) {
-      if (mounted && doc.exists) setState(() => _isLiked = true);
-    });
-
-    if (widget.authorId != _currentUserId) {
-      FirebaseFirestore.instance
-          .collection('users')
-          .doc(_currentUserId)
-          .collection('following')
-          .doc(widget.authorId)
-          .get()
-          .then((doc) {
-        if (mounted && doc.exists) setState(() => _isFollowing = true);
-      });
-    }
-  }
+  // _checkStatus fonksiyonu ARTIK YOK.
 
   void _handleLike() {
     setState(() {
@@ -158,6 +144,7 @@ class _PostTileState extends State<PostTile> {
 
   Future<void> _startMessage() async {
     try {
+      // BURADA _currentUserId KULLANILIYORDU
       final chatId = await ChatService.instance.getOrCreateChat(_currentUserId, widget.authorId);
       if (mounted) {
         Navigator.push(
@@ -186,6 +173,7 @@ class _PostTileState extends State<PostTile> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // BURADA _currentUserId KULLANILIYORDU
               if (widget.authorId != _currentUserId) ...[
                 ListTile(
                   leading: Icon(
@@ -253,7 +241,6 @@ class _PostTileState extends State<PostTile> {
                     if (confirm == true) {
                       try {
                         await FirebaseFirestore.instance.collection('posts').doc(widget.postId).delete();
-                        // GÜNCELLENDİ: Silme başarılı olunca callback'i çağırıyoruz.
                         if (widget.onDelete != null) {
                           widget.onDelete!();
                         }
@@ -492,6 +479,7 @@ class _PostTileState extends State<PostTile> {
                             posterUrl: widget.moviePoster,
                             title: widget.movieTitle,
                             fit: BoxFit.cover,
+                            cacheWidth: 200,
                           ),
                         ),
                       ),

@@ -443,17 +443,86 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
   }
 }
 
+// lib/screens/messagesscreen.dart dosyasında ChatListTile sınıfını bulun ve değiştirin.
+
 class ChatListTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
   final String currentUid;
-  final Map<String, dynamic>? cachedUserData;
-
+  // cachedUserData parametresi artık kullanılmasa da uyumluluk için tutulabilir.
   const ChatListTile({
     super.key,
     required this.chatDoc,
     required this.currentUid,
-    this.cachedUserData,
+    Map<String, dynamic>? cachedUserData, 
   });
+  
+  // Asıl ListTile'ı oluşturacak yardımcı metod (Verinin kaynağından bağımsız)
+  Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime) {
+    return ListTile(
+        onTap: () {
+            Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => ChatRoomScreen(
+                        chatId: chatDoc.id,
+                        otherUid: otherUid,
+                        otherTitle: displayName,
+                    ),
+                ),
+            );
+            ChatService.instance.markAsRead(chatDoc.id, currentUid);
+        },
+        onLongPress: () => _showHideDialog(context, chatDoc.id),
+        leading: InkWell(
+            onTap: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => PublicProfileScreen(uid: otherUid),
+                    ),
+                );
+            },
+            child: CircleAvatar(
+                backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                    ? NetworkImage(photoUrl)
+                    : null,
+                child: (photoUrl == null || photoUrl.isEmpty)
+                    ? const Icon(Icons.person)
+                    : null,
+            ),
+        ),
+        title: Text(
+            displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Row(
+            children: [
+                Expanded(
+                    child: Text(
+                        lastMsg.isNotEmpty ? lastMsg : 'Fotoğraf / Medya',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: lastMsg.isEmpty ? Colors.grey : null,
+                            fontStyle: lastMsg.isEmpty ? FontStyle.italic : null,
+                        ),
+                    ),
+                ),
+                if (lastMsgTime != null)
+                    Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Text(
+                            _formatTime(lastMsgTime),
+                            style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ),
+            ],
+        ),
+        trailing: _UnreadCountBadge(chatId: chatDoc.id, uid: currentUid),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -469,108 +538,62 @@ class ChatListTile extends StatelessWidget {
 
     final lastMsg = (data['lastMessage'] ?? '').toString();
     final lastMsgTime = (data['lastMessageAt'] as Timestamp?)?.toDate();
+    
     final titles = (data['titles'] as Map?) ?? {};
-    final savedTitle = titles[currentUid] as String?;
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('users').doc(otherUid).snapshots(),
-      builder: (context, userSnap) {
-        
-        String displayName = savedTitle ?? 'Kullanıcı';
-        String? photoUrl;
-
-        if (userSnap.hasData && userSnap.data!.exists) {
-          final userData = userSnap.data!.data()!;
-          final username = userData['username'] as String?;
-          final name = userData['displayName'] as String?;
-          photoUrl = userData['photoURL'] as String?;
-
-          if (username != null && username.isNotEmpty) {
-            displayName = username;
-          } else if (name != null && name.isNotEmpty) {
-            displayName = name;
-          }
-        } 
-        else if (cachedUserData != null) {
-          final username = cachedUserData!['username'] as String?;
-          final name = cachedUserData!['displayName'] as String?;
-          photoUrl = cachedUserData!['photoURL'] as String?;
-
-          if (username != null && username.isNotEmpty) {
-            displayName = username;
-          } else if (name != null && name.isNotEmpty) {
-            displayName = name;
-          }
-        }
-
-        return ListTile(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ChatRoomScreen(
-                  chatId: chatDoc.id,
-                  otherUid: otherUid,
-                  otherTitle: displayName,
-                ),
-              ),
-            );
-            ChatService.instance.markAsRead(chatDoc.id, currentUid);
-          },
-          onLongPress: () => _showHideDialog(context, chatDoc.id),
-          leading: InkWell(
-            onTap: () {
-               Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PublicProfileScreen(uid: otherUid),
-                ),
-              );
-            },
-            child: CircleAvatar(
-              backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
-                  ? NetworkImage(photoUrl)
-                  : null,
-              child: (photoUrl == null || photoUrl.isEmpty)
-                  ? const Icon(Icons.person)
-                  : null,
-            ),
-          ),
-          title: Text(
-            displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          subtitle: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  lastMsg.isNotEmpty ? lastMsg : 'Fotoğraf / Medya',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: lastMsg.isEmpty ? Colors.grey : null,
-                    fontStyle: lastMsg.isEmpty ? FontStyle.italic : null,
-                  ),
-                ),
-              ),
-              if (lastMsgTime != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 8.0),
-                  child: Text(
-                    _formatTime(lastMsgTime),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-            ],
-          ),
-          trailing: _UnreadCountBadge(chatId: chatDoc.id, uid: currentUid),
+    final photos = (data['photos'] as Map?) ?? {};
+    
+    // 1. Denormalize edilmiş veriyi (Benim gördüğüm bilgileri) almayı dene
+    String displayName = (titles[currentUid] as String?) ?? ''; // Benim gördüğüm isim
+    String? photoUrl = (photos[currentUid] as String?); // Benim gördüğüm fotoğraf
+    
+    // 2. Eğer denormalize veri varsa, direkt kullan
+    if (displayName.isNotEmpty || (photoUrl != null && photoUrl.isNotEmpty)) {
+        return _buildTile(
+            context, 
+            otherUid, 
+            displayName.isNotEmpty ? displayName : 'Kullanıcı', // İsim boşsa default
+            photoUrl, 
+            lastMsg, 
+            lastMsgTime
         );
-      },
+    }
+    
+    // 3. Denormalize veri yoksa (Eski Sohbet), FutureBuilder ile bir kerelik çekim yap
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        // Sadece diğer kullanıcının verisini çek (users/{otherUid})
+        future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
+        builder: (context, userSnap) {
+            
+            String fetchedDisplayName = 'Kullanıcı';
+            String? fetchedPhotoUrl;
+            
+            if (userSnap.hasData && userSnap.data!.exists) {
+                final userData = userSnap.data!.data()!;
+                final username = userData['username'] as String?;
+                final name = userData['displayName'] as String?;
+                fetchedPhotoUrl = userData['photoURL'] as String?;
+
+                if (username != null && username.isNotEmpty) {
+                    fetchedDisplayName = username;
+                } else if (name != null && name.isNotEmpty) {
+                    fetchedDisplayName = name;
+                }
+            } else if (userSnap.connectionState == ConnectionState.waiting) {
+                 // Yüklenirken küçük bir gösterge göster
+                 return const Center(child: Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
+            }
+            
+            // Veri çekildikten sonra Tile'ı oluştur.
+            // NOT: Yeni mesaj gönderildiğinde bu veriler sohbet dokümanına kaydedilecektir.
+            return _buildTile(context, otherUid, fetchedDisplayName, fetchedPhotoUrl, lastMsg, lastMsgTime);
+        },
     );
   }
-
+  
+  // _showHideDialog ve _formatTime gibi yardımcı fonksiyonlar ChatListTile sınıfının dışında olmalıdır.
+  // Eğer sınıfın içindelerse, _showHideDialog'ı da _buildTile'a taşımak gerekir.
+  
+  // Bu metodun sınıf içinde değil, dosyanın en altında olması gerekir.
   Future<void> _showHideDialog(BuildContext context, String docId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -591,7 +614,6 @@ class ChatListTile extends StatelessWidget {
     }
   }
 }
-
 class _UnreadCountBadge extends StatelessWidget {
   final String chatId;
   final String uid;

@@ -20,6 +20,7 @@ class FeedService {
     return _fs.collection('posts').doc(postId);
   }
 
+  /// İlk yükleme: Önce sunucuyu dener, hata alırsa (offline) cache'ten getirir.
   Future<QuerySnapshot<Map<String, dynamic>>> fetchInitial({int limit = 20}) async {
     final q = _baseQuery().limit(limit);
     try {
@@ -29,26 +30,62 @@ class FeedService {
     }
   }
 
+  /// Sayfalama: İnternet durumuna göre otomatik karar verir (Server veya Cache).
   Future<QuerySnapshot<Map<String, dynamic>>> fetchMore({
     required DocumentSnapshot<Map<String, dynamic>> lastDoc,
     int limit = 20,
   }) {
     final q = _baseQuery().startAfterDocument(lastDoc).limit(limit);
-    return q.get(const GetOptions(source: Source.server));
+    return q.get(); 
   }
 
-  /// GÜNCELLENDİ: Detaylı inceleme alanları eklendi
+  // --- DÜZELTİLEN FONKSİYON BURASI ---
+ Future<Set<String>> fetchUserLikedPostIds(String userId) async {
+    try {
+      final querySnapshot = await _fs
+          .collectionGroup('likes')
+          .where('by', isEqualTo: userId)
+          .get(const GetOptions(source: Source.serverAndCache));
+
+      final likedIds = <String>{};
+      for (var doc in querySnapshot.docs) {
+        final parent = doc.reference.parent.parent;
+        if (parent != null) {
+          likedIds.add(parent.id);
+        }
+      }
+      return likedIds;
+    } catch (e) {
+      // ÖNEMLİ: Hatayı konsola yazdırıyoruz ki Linki görebilelim.
+      print("LIKE SORGU HATASI: $e");
+      return {};
+    }
+  }
+
+  Future<Set<String>> fetchUserFollowingIds(String userId) async {
+    try {
+      final querySnapshot = await _fs
+          .collection('users')
+          .doc(userId)
+          .collection('following')
+          .get(const GetOptions(source: Source.serverAndCache));
+      
+      return querySnapshot.docs.map((d) => d.id).toSet();
+    } catch (e) {
+      return {};
+    }
+  }
+
   Future<void> createPost({
     required String text,
     Map<String, dynamic>? movie,
     String? handle,
     String? displayName,
     String? photoURL,
-    // Yeni Alanlar
-    double? rating,       // 1.0 - 5.0 arası puan
+    double? rating,       
     bool isSpoiler = false,
-    List<String>? tags,   // ["korku", "klasik"] gibi
-    String? reviewTitle,  // İnceleme başlığı
+    List<String>? tags,   
+    String? reviewTitle,  
   }) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -64,13 +101,11 @@ class FeedService {
       'photoURL': photoURL ?? '',
       'movie': movie,
       'text': text.trim(),
-      // Yeni Veriler
       'rating': rating,
       'isSpoiler': isSpoiler,
       'tags': tags ?? [],
       'reviewTitle': reviewTitle?.trim(),
-      'isReview': rating != null || (reviewTitle != null && reviewTitle.isNotEmpty), // Bu bir inceleme mi?
-      
+      'isReview': rating != null || (reviewTitle != null && reviewTitle.isNotEmpty),
       'likeCount': 0,
       'replyCount': 0,
       'repostCount': 0,
@@ -79,7 +114,6 @@ class FeedService {
     }, SetOptions(merge: false));
   }
 
-  // ... (toggleLike, followUser, reportPost vb. diğer fonksiyonlar aynen kalacak) ...
   Future<void> toggleLike({required String postId, required bool like}) async {
     final user = _auth.currentUser;
     final me = user?.uid;
@@ -90,7 +124,7 @@ class FeedService {
 
     String postAuthorUid = '';
     try {
-      final ps = await postRef.get(const GetOptions(source: Source.server));
+      final ps = await postRef.get();
       postAuthorUid = (ps.data()?['authorId'] ?? '').toString();
       if (postAuthorUid.isEmpty) {
         final pc = await postRef.get(const GetOptions(source: Source.cache));

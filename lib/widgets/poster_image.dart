@@ -3,7 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/services/poster_fallback_service.dart'; 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
-// CacheManager global olarak tanımlı (Doğru)
+// CacheManager global olarak tanımlı
 final customCacheManager = CacheManager(
   Config(
     'moviePosterCache', 
@@ -19,6 +19,8 @@ class PosterImage extends StatefulWidget {
   final double? width;
   final double? height;
   final BoxFit fit;
+  // Optimize için yeni parametre: İstenilen bellek önbellek boyutu
+  final int? cacheWidth;
 
   const PosterImage({
     super.key,
@@ -28,6 +30,7 @@ class PosterImage extends StatefulWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
+    this.cacheWidth, // Yeni parametre
   });
 
   @override
@@ -73,7 +76,6 @@ class _PosterImageState extends State<PosterImage> {
   bool _isEmpty(String? s) => s == null || s.trim().isEmpty;
 
   Future<void> _tryFallback() async {
-    // KORUMA 1: Eğer zaten yükleniyorsa, başlık yoksa veya 2 kereden fazla denendiyse dur.
     if (_isLoadingFallback || _isEmpty(widget.title) || _retryCount >= 2) {
       if (mounted && _retryCount >= 2) setState(() => _failed = true);
       return;
@@ -82,7 +84,7 @@ class _PosterImageState extends State<PosterImage> {
     if (!mounted) return;
     setState(() {
       _isLoadingFallback = true;
-      _retryCount++; // Deneme sayısını artır
+      _retryCount++; 
     });
 
     try {
@@ -93,16 +95,12 @@ class _PosterImageState extends State<PosterImage> {
       );
       
       if (mounted) {
-        // KORUMA 2: Yeni URL geçerli mi ve eskisiyle farklı mı?
         if (newUrl != null && newUrl.isNotEmpty && newUrl != _currentUrl) {
           setState(() {
             _currentUrl = newUrl;
             _failed = false;
-            // Başarılı olursa sayacı sıfırlama, çünkü bu yeni resim de bozuk olabilir.
-            // Sayacı olduğu gibi bırakıyoruz ki sonsuz döngü olmasın.
           });
         } else {
-          // Eğer aynı URL geldiyse veya null ise başarısız say.
           setState(() => _failed = true);
         }
       }
@@ -134,18 +132,25 @@ class _PosterImageState extends State<PosterImage> {
       );
     }
 
+    // OPTİMİZASYON: Bellek boyutunu hesapla
+    // Eğer dışarıdan cacheWidth verilmişse onu kullan.
+    // Verilmemişse ama widget.width belliyse onun 2.5 katını kullan (Retina ekranlar için).
+    // Hiçbiri yoksa varsayılan 200 kullan (Eski 300'den daha güvenli).
+    final int? optimalMemCacheWidth = widget.cacheWidth ?? 
+        (widget.width != null ? (widget.width! * 2.5).toInt() : 200);
+
     return CachedNetworkImage(
       imageUrl: _currentUrl!,
       cacheManager: customCacheManager,
-      // DÜZELTME: maxWidthDiskCache KALDIRILDI.
-      // Bu parametre bazı resimlerde işleme hatası verip infinite loop'a sokuyor olabilir.
-      // Sadece RAM için memCacheWidth tutuyoruz, bu performans için yeterlidir.
-      memCacheWidth: 300, 
+      
+      // ÖNEMLİ: Sadece RAM'deki boyutu kısıtlıyoruz. 
+      // Disktekini orijinal boyutta tutabiliriz, böylece detay sayfasına geçince tekrar indirmeyiz.
+      memCacheWidth: optimalMemCacheWidth,
+      
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
       errorWidget: (context, url, error) {
-        // Döngü koruması: Sadece henüz fallback denenmediyse dene
         if (!_isLoadingFallback && !_failed) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) _tryFallback();
