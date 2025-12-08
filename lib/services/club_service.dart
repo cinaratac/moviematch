@@ -8,6 +8,13 @@ class ClubService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  Stream<QuerySnapshot> getUserClubsStream(String uid) {
+    // Not: Firestore'da 'array-contains' ve 'orderBy' aynı anda kullanıldığında
+    // konsoldan index oluşturmanız gerekebilir. Şimdilik sıralamasız çekiyoruz.
+    return _db.collection('clubs')
+        .where('members', arrayContains: uid)
+        .snapshots();
+  }
   // --- KULÜP OLUŞTURMA ---
   Future<void> createClub({
     required String name,

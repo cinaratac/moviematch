@@ -2,25 +2,58 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --- SAYFA IMPORTLARI ---
 import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
-import 'package:fluttergirdi/screens/clubs_tab.dart'; 
+import 'package:fluttergirdi/screens/clubs_tab.dart';
+import 'package:fluttergirdi/screens/profilescreen.dart'; // Dosya adı doğru
+import 'package:fluttergirdi/theme.dart';
 
-class CustomDrawer extends StatelessWidget {
+class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
+
+  @override
+  State<CustomDrawer> createState() => _CustomDrawerState();
+}
+
+class _CustomDrawerState extends State<CustomDrawer> {
+  String? _lastSeenAnnouncementId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLastSeenId();
+  }
+
+  Future<void> _loadLastSeenId() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _lastSeenAnnouncementId = prefs.getString('last_seen_announcement_id');
+      });
+    }
+  }
+
+  Future<void> _markAnnouncementAsSeen(String currentId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_seen_announcement_id', currentId);
+    if (mounted) {
+      setState(() {
+        _lastSeenAnnouncementId = currentId;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final uid = user?.uid;
-    
-    // Tema Durumu
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // --- RENK PALETİ (MAT VE DÜZ) ---
+
     final backgroundColor = isDark ? const Color(0xFF121212) : Colors.white;
     final Color textColor = isDark ? Colors.white : Colors.black87;
     final Color subTextColor = isDark ? Colors.white54 : Colors.grey.shade600;
@@ -35,13 +68,11 @@ class CustomDrawer extends StatelessWidget {
       child: SafeArea(
         child: Column(
           children: [
-            // 1. HEADER
-            _buildHeader(uid, textColor, subTextColor, isDark),
+            // 1. HEADER (Tıklanabilir yapıldı)
+            _buildHeaderStream(uid, textColor, subTextColor, isDark),
 
-            // 2. İNCE ÇİZGİ
             Divider(color: dividerColor, height: 1, thickness: 1),
 
-            // 3. MENÜ LİSTESİ
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 10),
@@ -52,7 +83,8 @@ class CustomDrawer extends StatelessWidget {
                     title: 'Liderlik Tablosu',
                     iconColor: iconColor,
                     textColor: textColor,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
                   ),
                   _buildMenuItem(
                     context,
@@ -61,10 +93,13 @@ class CustomDrawer extends StatelessWidget {
                     iconColor: iconColor,
                     textColor: textColor,
                     onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(
-                        appBar: AppBar(title: const Text("Kulüpler")),
-                        body: const ClubsTab(),
-                      )));
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => Scaffold(
+                                    appBar: AppBar(title: const Text("Kulüpler")),
+                                    body: const ClubsTab(),
+                                  )));
                     },
                   ),
                   _buildMenuItem(
@@ -73,41 +108,63 @@ class CustomDrawer extends StatelessWidget {
                     title: 'Rozet İlerlemesi',
                     iconColor: iconColor,
                     textColor: textColor,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
                   ),
-                  
-                  // --- YENİLİKLER (ENTEGRE EDİLDİ) ---
-                  _buildMenuItem(
-                    context,
-                    icon: Icons.campaign_rounded,
-                    title: 'Yenilikler',
-                    iconColor: iconColor,
-                    textColor: textColor,
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.red.withOpacity(0.2) : Colors.red.shade50, 
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: isDark ? Colors.redAccent : Colors.red, width: 1)
-                      ),
-                      child: Text(
-                        '1', 
-                        style: TextStyle(
-                          fontSize: 11, 
-                          color: isDark ? Colors.redAccent : Colors.red.shade900, 
-                          fontWeight: FontWeight.bold
-                        )
-                      ),
-                    ),
-                    onTap: () {
-                      // Dosya içinde tanımladığımız AnnouncementsScreen'e git
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
+
+                  // --- YENİLİKLER ---
+                  StreamBuilder<DocumentSnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('system')
+                        .doc('announcement')
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      Widget? trailingWidget;
+                      String? currentId;
+
+                      if (snapshot.hasData && snapshot.data!.exists) {
+                        final data = snapshot.data!.data() as Map<String, dynamic>;
+                        final bool isActive = data['isActive'] ?? false;
+                        currentId = data['id'] ?? 'v0';
+
+                        if (isActive &&
+                            currentId != null &&
+                            currentId != _lastSeenAnnouncementId) {
+                          trailingWidget = Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                            ),
+                          );
+                        }
+                      }
+
+                      return _buildMenuItem(
+                        context,
+                        icon: Icons.campaign_rounded,
+                        title: 'Yenilikler',
+                        iconColor: iconColor,
+                        textColor: textColor,
+                        trailing: trailingWidget,
+                        onTap: () {
+                          if (currentId != null) {
+                            _markAnnouncementAsSeen(currentId);
+                          }
+                          Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const AnnouncementsScreen()));
+                        },
+                      );
                     },
                   ),
 
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Divider(color: dividerColor, height: 1, indent: 16, endIndent: 16),
+                    child: Divider(
+                        color: dividerColor, height: 1, indent: 16, endIndent: 16),
                   ),
 
                   _buildMenuItem(
@@ -116,9 +173,9 @@ class CustomDrawer extends StatelessWidget {
                     title: 'Ayarlar',
                     iconColor: iconColor,
                     textColor: textColor,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
+                    onTap: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => const SettingsPage())),
                   ),
-                  
                   _buildMenuItem(
                     context,
                     icon: Icons.person_add_alt_1_rounded,
@@ -126,7 +183,8 @@ class CustomDrawer extends StatelessWidget {
                     iconColor: iconColor,
                     textColor: textColor,
                     onTap: () {
-                      Share.share('MovieMatch ile film zevkini keşfet! Hemen indir: https://moviematch.app');
+                      Share.share(
+                          'MovieMatch ile film zevkini keşfet! Hemen indir: https://moviematch.app');
                     },
                   ),
                   _buildMenuItem(
@@ -135,9 +193,7 @@ class CustomDrawer extends StatelessWidget {
                     title: 'Tema Ayarları',
                     iconColor: iconColor,
                     textColor: textColor,
-                    onTap: () {
-                      _showThemeSelector(context);
-                    },
+                    onTap: () => _showThemeSelector(context),
                   ),
 
                   const SizedBox(height: 20),
@@ -147,9 +203,11 @@ class CustomDrawer extends StatelessWidget {
                     context,
                     icon: Icons.logout_rounded,
                     title: 'Çıkış Yap',
-                    isDestructive: true, 
-                    iconColor: isDark ? const Color(0xFFEF5350) : const Color(0xFFC62828),
-                    textColor: isDark ? const Color(0xFFEF5350) : const Color(0xFFC62828),
+                    isDestructive: true,
+                    iconColor:
+                        isDark ? const Color(0xFFEF5350) : const Color(0xFFC62828),
+                    textColor:
+                        isDark ? const Color(0xFFEF5350) : const Color(0xFFC62828),
                     onTap: () async {
                       await FirebaseAuth.instance.signOut();
                     },
@@ -163,51 +221,62 @@ class CustomDrawer extends StatelessWidget {
     );
   }
 
-  // --- YARDIMCI WIDGETLAR ---
-
-  Widget _buildHeader(String? uid, Color textColor, Color subTextColor, bool isDark) {
+  // --- HEADER (TIKLANABİLİR YAPILDI & DÜZELTİLDİ) ---
+  Widget _buildHeaderStream(String? uid, Color textColor, Color subTextColor, bool isDark) {
     if (uid == null) return const SizedBox.shrink();
 
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, snapshot) {
         final data = snapshot.data?.data() as Map<String, dynamic>?;
         final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
         final email = FirebaseAuth.instance.currentUser?.email ?? '';
         final photo = data?['photoURL'];
 
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 32,
-                backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
-                backgroundImage: photo != null ? NetworkImage(photo) : null,
-                child: photo == null 
-                  ? Icon(Icons.person, size: 32, color: isDark ? Colors.white70 : Colors.grey.shade600) 
-                  : null,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      email,
-                      style: TextStyle(color: subTextColor, fontSize: 13),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+        return InkWell(
+          onTap: () {
+            // DÜZELTME: ProfileScreen -> ProfilePage
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfilePage()));
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 30),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 32,
+                  backgroundColor:
+                      isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                  backgroundImage: photo != null ? NetworkImage(photo) : null,
+                  child: photo == null
+                      ? Icon(Icons.person,
+                          size: 32,
+                          color: isDark ? Colors.white70 : Colors.grey.shade600)
+                      : null,
                 ),
-              ),
-            ],
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: TextStyle(
+                            color: textColor,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        email,
+                        style: TextStyle(color: subTextColor, fontSize: 13),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -225,11 +294,7 @@ class CustomDrawer extends StatelessWidget {
     bool isDestructive = false,
   }) {
     return ListTile(
-      leading: Icon(
-        icon, 
-        color: iconColor,
-        size: 24,
-      ),
+      leading: Icon(icon, color: iconColor, size: 24),
       title: Text(
         title,
         style: TextStyle(
@@ -249,68 +314,57 @@ class CustomDrawer extends StatelessWidget {
   void _showThemeSelector(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => Container(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Görünüm", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+            const Text("Görünüm",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
             const SizedBox(height: 24),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.grey.shade200, shape: BoxShape.circle),
-                child: const Icon(Icons.dark_mode_rounded, color: Colors.black),
-              ),
-              title: const Text("Karanlık Mod"),
-              onTap: () {
-                Navigator.pop(ctx);
-              },
-            ),
+            _buildThemeOption(ctx, Icons.dark_mode_rounded, "Karanlık Mod", ThemeMode.dark),
             const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.orange.shade100, shape: BoxShape.circle),
-                child: const Icon(Icons.light_mode_rounded, color: Colors.orange),
-              ),
-              title: const Text("Aydınlık Mod"),
-              onTap: () {
-                Navigator.pop(ctx);
-              },
-            ),
+            _buildThemeOption(ctx, Icons.light_mode_rounded, "Aydınlık Mod", ThemeMode.light),
             const SizedBox(height: 12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.blue.shade100, shape: BoxShape.circle),
-                child: const Icon(Icons.settings_system_daydream_rounded, color: Colors.blue),
-              ),
-              title: const Text("Sistem Teması"),
-              onTap: () {
-                Navigator.pop(ctx);
-              },
-            ),
+            _buildThemeOption(ctx, Icons.settings_system_daydream_rounded, "Sistem Teması", ThemeMode.system),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildThemeOption(BuildContext ctx, IconData icon, String text, ThemeMode mode) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: Colors.grey.shade200, shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.black87),
+      ),
+      title: Text(text),
+      onTap: () async {
+        ThemeBridge.themeMode.value = mode;
+        final prefs = await SharedPreferences.getInstance();
+        String modeStr = 'system';
+        if (mode == ThemeMode.light) modeStr = 'light';
+        if (mode == ThemeMode.dark) modeStr = 'dark';
+        await prefs.setString('themeMode', modeStr);
+        
+        if (ctx.mounted) Navigator.pop(ctx);
+      },
+    );
+  }
 }
 
-// --- ENTEGRE EDİLMİŞ DUYURULAR EKRANI ---
 class AnnouncementsScreen extends StatelessWidget {
   const AnnouncementsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Yenilikler & Duyurular'),
@@ -324,32 +378,19 @@ class AnnouncementsScreen extends StatelessWidget {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
           if (!snapshot.hasData || !snapshot.data!.exists) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.notifications_off_outlined, size: 64, color: Colors.grey.shade400),
-                  const SizedBox(height: 16),
-                  const Text('Henüz bir duyuru yok.', style: TextStyle(color: Colors.grey)),
-                ],
-              ),
-            );
+            return _buildEmptyState();
           }
-
           final data = snapshot.data!.data() as Map<String, dynamic>;
-          // Veri yapısı: "items" listesi veya tekil alanlar
           final List items = data['items'] ?? [];
 
           if (items.isEmpty) {
-             // Tekil mesaj varsa onu göster (Fallback)
              final title = data['title'] as String?;
              final message = data['message'] as String?;
              if (title != null && message != null) {
                items.add({'title': title, 'message': message, 'date': Timestamp.now()});
              } else {
-               return const Center(child: Text('Henüz bir duyuru yok.'));
+               return _buildEmptyState();
              }
           }
 
@@ -359,63 +400,58 @@ class AnnouncementsScreen extends StatelessWidget {
             separatorBuilder: (_, __) => const SizedBox(height: 16),
             itemBuilder: (context, index) {
               final item = items[index] as Map<String, dynamic>;
-              final title = item['title'] ?? 'Duyuru';
-              final message = item['message'] ?? '';
-              final date = (item['date'] as Timestamp?)?.toDate();
-
-              return Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.grey.shade900 : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
-                  border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).primaryColor.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.campaign, color: Theme.of(context).primaryColor),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                          ),
-                        ),
-                        if (date != null)
-                          Text(
-                            "${date.day}.${date.month}.${date.year}",
-                            style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      message,
-                      style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700, height: 1.5),
-                    ),
-                  ],
-                ),
-              );
+              return _buildAnnouncementCard(context, item, isDark);
             },
           );
         },
       ),
     );
+  }
+  
+  Widget _buildEmptyState() {
+     return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.notifications_off_outlined, size: 64, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            const Text('Henüz bir duyuru yok.', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+      );
+  }
+
+  Widget _buildAnnouncementCard(BuildContext context, Map<String, dynamic> item, bool isDark) {
+      final title = item['title'] ?? 'Duyuru';
+      final message = item['message'] ?? '';
+      final date = (item['date'] as Timestamp?)?.toDate();
+      
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.grey.shade900 : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+          ],
+          border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.campaign, color: Theme.of(context).primaryColor),
+                const SizedBox(width: 12),
+                Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                if (date != null)
+                  Text("${date.day}.${date.month}.${date.year}", style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(message, style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700, height: 1.5)),
+          ],
+        ),
+      );
   }
 }

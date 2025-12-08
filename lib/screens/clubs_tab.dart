@@ -1,10 +1,10 @@
+import 'dart:async'; // StreamSubscription için gerekli
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/screens/create_club_screen.dart';
 import 'package:fluttergirdi/services/club_service.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'dart:io';
 
 // --- 1. DRAWER'DAN AÇILAN HAVALI EKRAN ---
@@ -20,73 +20,188 @@ class ClubsScreen extends StatelessWidget {
         elevation: 0,
         backgroundColor: Theme.of(context).colorScheme.surface,
       ),
-      body: const ClubsTab(isStandalone: true), // Bağımsız mod
+      body: const ClubsTab(isStandalone: true),
     );
   }
 }
 
-// --- 2. TAB İÇERİĞİ (HEM MESAJLARDA HEM BURADA KULLANILIR) ---
-class ClubsTab extends StatelessWidget {
+// --- 2. TAB İÇERİĞİ ---
+class ClubsTab extends StatefulWidget {
   final bool isStandalone;
   const ClubsTab({super.key, this.isStandalone = false});
 
   @override
-  Widget build(BuildContext context) {
-    // Scaffold yerine doğrudan içerik döndürüyoruz (Parent yönetiyor)
-    return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      body: StreamBuilder<QuerySnapshot>(
-        stream: ClubService.instance.getClubsStream(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final docs = snapshot.data?.docs ?? [];
+  State<ClubsTab> createState() => _ClubsTabState();
+}
 
-          if (docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.groups_3_outlined, size: 80, color: Colors.grey.shade300),
-                  const SizedBox(height: 16),
-                  const Text("Henüz bir kulüp yok.\nİlkini sen kur!", 
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey, fontSize: 16)),
-                ],
-              ),
-            );
-          }
+class _ClubsTabState extends State<ClubsTab> {
+  String _searchQuery = "";
+  final TextEditingController _searchController = TextEditingController();
 
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 16),
-            itemBuilder: (context, index) {
-              final data = docs[index].data() as Map<String, dynamic>;
-              return _ClubCard(data: data);
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'create_club_fab',
-        onPressed: () => _showCreateClubSheet(context),
-        icon: const Icon(Icons.add),
-        label: const Text("Kulüp Kur"),
-      ),
+  // PERFORMANS ÇÖZÜMÜ: Verileri hafızada tutuyoruz
+  List<DocumentSnapshot> _allClubs = []; // Tüm kulüpler burada duracak
+  bool _isLoading = true; // İlk yükleme kontrolü
+  StreamSubscription? _streamSub; // Canlı bağlantı kontrolcüsü
+
+  @override
+  void initState() {
+    super.initState();
+    // Sayfa açıldığında Firebase'i dinlemeye başla
+    // StreamBuilder kullanmadığımız için bu bağlantı arama yaparken ASLA kopmaz/yenilenmez.
+    _streamSub = ClubService.instance.getClubsStream().listen((snapshot) {
+      if (mounted) {
+        setState(() {
+          _allClubs = snapshot.docs;
+          _isLoading = false;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    // Sayfadan çıkınca dinlemeyi durdur
+    _streamSub?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _navigateToCreateClub(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CreateClubScreen()),
     );
   }
 
-  void _showCreateClubSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => const _CreateClubSheet(),
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // --- YEREL FİLTRELEME (FIREBASE'E GİTMEZ) ---
+    // Hafızadaki _allClubs listesini arama metnine göre süzüyoruz.
+    final filteredClubs = _allClubs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      final name = (data['name'] ?? '').toString().toLowerCase();
+      return name.contains(_searchQuery);
+    }).toList();
+
+    return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
+      body: Column(
+        children: [
+          // --- ARAMA ALANI ---
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (val) {
+                final cleanText = val.trim().toLowerCase();
+                // Gereksiz setState'i önle
+                if (_searchQuery != cleanText) {
+                  setState(() {
+                    _searchQuery = cleanText;
+                  });
+                }
+              },
+              decoration: InputDecoration(
+                hintText: 'Kulüp ara...',
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 20),
+                        onPressed: () {
+                          _searchController.clear();
+                          if (_searchQuery.isNotEmpty) {
+                            setState(() {
+                              _searchQuery = "";
+                            });
+                          }
+                        },
+                      )
+                    : null,
+              ),
+            ),
+          ),
+
+          // --- KULÜP OLUŞTUR BUTONU ---
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: FilledButton.icon(
+                onPressed: () => _navigateToCreateClub(context),
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text("Yeni Kulüp Oluştur", style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // --- LİSTE GÖRÜNÜMÜ ---
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Builder(
+                    builder: (context) {
+                      // 1. Hiç veri yoksa (Veritabanı boşsa)
+                      if (_allClubs.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.groups_3_outlined, size: 80, color: Colors.grey.shade300),
+                              const SizedBox(height: 16),
+                              const Text("Henüz bir kulüp yok.\nİlkini sen kur!", 
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.grey, fontSize: 16)),
+                            ],
+                          ),
+                        );
+                      }
+
+                      // 2. Arama sonucu boşsa (Sadece istenen sade mesaj)
+                      if (filteredClubs.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            "Kulüp bulunamadı",
+                            style: TextStyle(color: Colors.grey, fontSize: 16),
+                          ),
+                        );
+                      }
+
+                      // 3. Listeyi Göster
+                      return ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+                        itemCount: filteredClubs.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 16),
+                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                        itemBuilder: (context, index) {
+                          final data = filteredClubs[index].data() as Map<String, dynamic>;
+                          return _ClubCard(data: data);
+                        },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
+
+// --- CARD SINIFI ---
 
 class _ClubCard extends StatelessWidget {
   final Map<String, dynamic> data;
@@ -111,7 +226,7 @@ class _ClubCard extends StatelessWidget {
         color: theme.colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4)),
         ],
       ),
       clipBehavior: Clip.antiAlias,
@@ -123,9 +238,10 @@ class _ClubCard extends StatelessWidget {
               MaterialPageRoute(
                 builder: (_) => ChatRoomScreen(
                   chatId: data['id'],
-                  otherUid: '',
+                  otherUid: '', 
                   isGroup: true,
                   groupName: data['name'],
+                  otherTitle: data['name'],
                 ),
               ),
             );
@@ -156,7 +272,7 @@ class _ClubCard extends StatelessWidget {
                           end: Alignment.bottomRight,
                         ),
                       ),
-                      child: Center(child: Icon(Icons.groups, size: 50, color: theme.colorScheme.onPrimaryContainer.withOpacity(0.5))),
+                      child: Center(child: Icon(Icons.groups, size: 50, color: theme.colorScheme.onPrimaryContainer.withValues(alpha: 0.5))),
                     ),
                   if (isPrivate)
                     Positioned(
@@ -217,7 +333,7 @@ class _ClubCard extends StatelessWidget {
                         onTap: () => _showRequestsDialog(context, data['id'], pending),
                         child: Container(
                           padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.orange.withOpacity(0.3))),
+                          decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.orange.withValues(alpha: 0.3))),
                           child: Row(children: [const Icon(Icons.info_outline, size: 16, color: Colors.orange), const SizedBox(width: 8), Text("${pending.length} onay bekleyen üye", style: const TextStyle(color: Colors.deepOrange, fontWeight: FontWeight.bold))]),
                         ),
                       ),
@@ -296,83 +412,5 @@ class _AvatarPile extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-// ... (_CreateClubSheet aynı kalabilir, sadece yukarıya ekledik)
-class _CreateClubSheet extends StatefulWidget {
-  const _CreateClubSheet();
-  @override
-  State<_CreateClubSheet> createState() => _CreateClubSheetState();
-}
-
-class _CreateClubSheetState extends State<_CreateClubSheet> {
-  final _nameCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  bool _isPrivate = false;
-  bool _isLoading = false;
-  File? _imageFile;
-  final ImagePicker _picker = ImagePicker();
-
-  Future<void> _pickImage() async {
-    final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) setState(() => _imageFile = File(picked.path));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Yeni Kulüp', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 20),
-              GestureDetector(
-                onTap: _pickImage,
-                child: Container(
-                  height: 100, width: 100,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(12),
-                    image: _imageFile != null ? DecorationImage(image: FileImage(_imageFile!), fit: BoxFit.cover) : null,
-                  ),
-                  child: _imageFile == null ? const Icon(Icons.add_a_photo, size: 30, color: Colors.grey) : null,
-                ),
-              ),
-              const SizedBox(height: 20),
-              TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Kulüp İsmi', border: OutlineInputBorder())),
-              const SizedBox(height: 12),
-              TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Açıklama', border: OutlineInputBorder()), maxLines: 2),
-              SwitchListTile(title: const Text('Gizli Kulüp'), value: _isPrivate, onChanged: (v) => setState(() => _isPrivate = v)),
-              const SizedBox(height: 20),
-              SizedBox(width: double.infinity, child: FilledButton(onPressed: _isLoading ? null : _create, child: _isLoading ? const CircularProgressIndicator() : const Text('Oluştur'))),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _create() async {
-    if (_nameCtrl.text.isEmpty) return;
-    setState(() => _isLoading = true);
-    try {
-      String? url;
-      if (_imageFile != null) {
-        final ref = FirebaseStorage.instance.ref().child('club_images/${DateTime.now().millisecondsSinceEpoch}.jpg');
-        await ref.putFile(_imageFile!);
-        url = await ref.getDownloadURL();
-      }
-      await ClubService.instance.createClub(name: _nameCtrl.text.trim(), description: _descCtrl.text.trim(), isPrivate: _isPrivate, imageUrl: url);
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      debugPrint(e.toString());
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
 }

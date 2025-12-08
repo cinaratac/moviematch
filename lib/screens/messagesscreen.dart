@@ -6,6 +6,9 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
 import 'package:fluttergirdi/screens/clubs_tab.dart'; 
+import 'package:fluttergirdi/services/club_service.dart';
+import 'package:fluttergirdi/widgets/club_card.dart';
+import 'package:fluttergirdi/screens/create_club_screen.dart'; // Boş durumdaki buton için
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -78,7 +81,7 @@ class _MessagesPageState extends State<MessagesPage> {
               overlayColor: WidgetStateProperty.all(Colors.transparent),
               tabs: const [
                 Tab(text: 'Sohbetler'),
-                Tab(text: 'Kulüpler'),
+                Tab(text: 'Kulüplerim'),
               ],
             ),
           ),
@@ -122,7 +125,7 @@ class _MessagesPageState extends State<MessagesPage> {
         body: TabBarView(
           children: [
             _ChatsView(uid: uid, filterText: _searchText),
-            const ClubsTab(),
+             const JoinedClubsList(),
           ],
         ),
       ),
@@ -1207,4 +1210,57 @@ class _HiddenChatItem {
     required this.lastMessage,
     required this.lastAt,
   });
+}
+// --- KATILINAN KULÜPLER LİSTESİ WIDGET'I ---
+class JoinedClubsList extends StatelessWidget {
+  const JoinedClubsList({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot>(
+      // Servisteki 'getUserClubsStream' metodunu kullanıyoruz
+      stream: ClubService.instance.getUserClubsStream(uid),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          // Hiç kulüp yoksa
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.diversity_3_outlined, size: 64, color: Colors.grey.withOpacity(0.3)),
+                const SizedBox(height: 16),
+                const Text("Henüz bir kulübe üye değilsin.", style: TextStyle(color: Colors.grey)),
+                const SizedBox(height: 24),
+                FilledButton.tonal(
+                  onPressed: () {
+                    // Kulüp oluşturma veya keşfetme sayfasına yönlendir
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateClubScreen()));
+                  },
+                  child: const Text("Yeni Bir Kulüp Kur"),
+                )
+              ],
+            ),
+          );
+        }
+
+        final docs = snapshot.data!.docs;
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            // isJoinedView: true yaptık, böylece kart üzerinde 'GİRİŞ YAP' butonu çıkar
+            return ClubCard(doc: docs[index], isJoinedView: true);
+          },
+        );
+      },
+    );
+  }
 }
