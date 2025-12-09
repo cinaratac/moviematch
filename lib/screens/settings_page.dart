@@ -217,7 +217,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     style: ElevatedButton.styleFrom(
                       elevation: 0,
                       backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Colors.black,
+                      // DEĞİŞİKLİK: Metin rengini contrastı garanti eden onPrimary olarak ayarlıyoruz.
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary, 
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () => Navigator.pop(context, selected),

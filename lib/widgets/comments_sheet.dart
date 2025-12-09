@@ -209,7 +209,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
           // --- INPUT ALANI ---
           Container(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 8 + bottomInset), 
+            // DÜZELTME 1: bottomInset padding'i kaldırıldı, sadece sabit 8 birim kaldı.
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), 
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
               border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
@@ -270,6 +271,8 @@ class _CommentsSheetState extends State<CommentsSheet> {
               ],
             ),
           ),
+          // DÜZELTME 2: bottomInset (sistem çubuğu boşluğu) ayrı bir SizedBox olarak eklendi.
+          SizedBox(height: bottomInset), 
         ],
       ),
     );
