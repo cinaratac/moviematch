@@ -5,7 +5,7 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart'
     show PublicProfileScreen;
 import 'package:fluttergirdi/widgets/poster_image.dart';
 
-// --- Data Models ---
+// --- Data Models (Poster Fallback için Geri Getirildi) ---
 
 class _PosterData {
   final String posterUrl;
@@ -22,6 +22,7 @@ class _CardData {
   final List<String> directors;
   final List<String> actors;
   
+  // String listesi yerine zengin veri modeli kullanıyoruz
   final List<_PosterData> fivePosters;
   final List<_PosterData> favPosters;
   final List<_PosterData> watchPosters;
@@ -29,8 +30,6 @@ class _CardData {
   final int? commonFiveCount;
   final int? commonFavCount;
   final int? commonWatchCount;
-  
-  final bool isDeleted; // EKLENDİ: Silinme durumu kontrolü
 
   _CardData({
     this.title,
@@ -45,7 +44,6 @@ class _CardData {
     this.commonFiveCount,
     this.commonFavCount,
     this.commonWatchCount,
-    this.isDeleted = false, // Varsayılan false
   });
 }
 
@@ -184,11 +182,12 @@ class _LikesListBodyState extends State<LikesListBody>
           future: _myTasteFuture,
           builder: (context, tasteSnap) {
             if (tasteSnap.connectionState == ConnectionState.waiting || !tasteSnap.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
+      return const Center(child: CircularProgressIndicator());
+    }
             final myTaste = tasteSnap.data ?? const <String, dynamic>{};
             return ListView.separated(
               key: const PageStorageKey('likes_list'),
+              // SCROLL FIX: cacheExtent yerine KeepAlive kullanıyoruz.
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               itemCount: items.length,
               separatorBuilder: (ctx, index) => const SizedBox(height: 16),
@@ -202,6 +201,7 @@ class _LikesListBodyState extends State<LikesListBody>
                 final when = whenTs?.toDate().toLocal();
                 if (otherUid == null) return const SizedBox.shrink();
                 
+                // POSTER FIX + SCROLL FIX: Hem veri çekimi doğru hem de stateful widget.
                 return _LikesDetailCard(
                   otherUid: otherUid,
                   when: when,
@@ -241,7 +241,7 @@ class _LikesListBodyState extends State<LikesListBody>
   bool get wantKeepAlive => true;
 }
 
-// --- STATEFUL WIDGET ---
+// --- SCROLL FIX İÇİN STATEFUL WIDGET ---
 
 class _LikesDetailCard extends StatefulWidget {
   final String otherUid;
@@ -262,11 +262,11 @@ class _LikesDetailCardState extends State<_LikesDetailCard>
     with AutomaticKeepAliveClientMixin {
   
   @override
-  bool get wantKeepAlive => true;
+  bool get wantKeepAlive => true; // Scroll sırasında widget'ı canlı tutar.
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
+    super.build(context); // KeepAlive için gerekli
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
@@ -275,11 +275,6 @@ class _LikesDetailCardState extends State<_LikesDetailCard>
       builder: (context, snap) {
         final isLoading = snap.connectionState == ConnectionState.waiting;
         final cd = snap.data;
-        
-        // HATA DÜZELTMESİ: Silinmiş kullanıcıyı gizle
-        if (!isLoading && (cd == null || cd.isDeleted)) {
-          return const SizedBox.shrink();
-        }
         
         return Container(
           decoration: BoxDecoration(
@@ -427,7 +422,7 @@ class _LikesDetailCardState extends State<_LikesDetailCard>
           const SizedBox(height: 16),
         ],
 
-        // --- POSTER STRIP ---
+        // --- POSTER STRIP (POSTER FIX UYGULANDI) ---
         if (cd.fivePosters.isNotEmpty || cd.favPosters.isNotEmpty) ...[
           _SectionHeader(
               title: cd.fivePosters.isNotEmpty
@@ -503,6 +498,7 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
+// POSTER FIX: List<_PosterData> kabul ediyor ve PosterImage'a detay gönderiyor.
 class _PosterStrip extends StatelessWidget {
   final List<_PosterData> data;
   const _PosterStrip({required this.data});
@@ -523,8 +519,8 @@ class _PosterStrip extends StatelessWidget {
               aspectRatio: 2 / 3,
               child: PosterImage(
                 posterUrl: item.posterUrl, 
-                title: item.title,      
-                tmdbId: item.tmdbId,    
+                title: item.title,      // Title gönderiyoruz
+                tmdbId: item.tmdbId,    // ID gönderiyoruz
                 fit: BoxFit.cover
               ),
             ),
@@ -605,7 +601,7 @@ class _SkeletonBox extends StatelessWidget {
   }
 }
 
-// --- DATA LOGIC ---
+// --- DATA LOGIC (POSTER FIX ve NULL SAFETY) ---
 
 Future<_CardData> _loadCardData(
   String otherUid,
@@ -613,24 +609,13 @@ Future<_CardData> _loadCardData(
 ) async {
   final fs = FirebaseFirestore.instance;
 
-  // HATA DÜZELTMESİ: Önce kullanıcının varlığını kontrol et
-  // Eğer kullanıcı yoksa 'isDeleted: true' döndür.
-  try {
-    final userDoc = await fs.collection('users').doc(otherUid).get();
-    if (!userDoc.exists) {
-      return _CardData(isDeleted: true);
-    }
-  } catch (_) {
-    // Hata durumunda da silinmiş gibi davranabilir veya retry yapabiliriz.
-    // Şimdilik silinmiş kabul ediyoruz.
-    return _CardData(isDeleted: true);
-  }
-
   List<String> ls(dynamic x) {
     if (x is List) return x.map((e) => e.toString()).toList();
     return const <String>[];
   }
   
+
+
   List<String> extractIds(dynamic v) {
     final out = <String>[];
     if (v is List) {
@@ -653,11 +638,13 @@ Future<_CardData> _loadCardData(
     return const <String>[];
   }
   
+
   List<String> inter(List<String> a, List<String> b) {
     final bs = b.toSet();
     return a.where(bs.contains).toList();
   }
   
+  // POSTER FETCH: Hem Null-Safe, hem de Detaylı (Fallback destekli)
   Future<List<_PosterData>> fetchPosters(List<String> ids) async {
     if (ids.isEmpty) return [];
     final postersData = <_PosterData>[];
@@ -672,7 +659,9 @@ Future<_CardData> _loadCardData(
       }
       
       for (final d in qs.docs) {
+         // NULL SAFETY
          final data = d.data() as Map<String, dynamic>?;
+         
          final p = (data?['poster'] ?? data?['posterUrl'] ?? '').toString();
          final title = (data?['title'] ?? data?['titleTr'] ?? data?['originalTitle'] ?? '') as String?;
          final tmdbId = data?['tmdbId'] as int?;
@@ -696,8 +685,8 @@ Future<_CardData> _loadCardData(
   final hisDirectors = ls(his['directors'] ?? his['favoriteDirectors']);
   final hisActors = ls(his['actors'] ?? his['favoriteActors']);
 
-  final myFiveIds = pickIds(my, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
-  final hisFiveIds = pickIds(his, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
+final myFiveIds = pickIds(my, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
+final hisFiveIds = pickIds(his, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
   final myFavIds = pickIds(my, ['favIds', 'favoriteFilmIds', 'favorites']);
   final hisFavIds = pickIds(his, ['favIds', 'favoriteFilmIds', 'favorites']);
   final myWatchIds = pickIds(my, ['watchIds', 'watchlist']);
@@ -707,6 +696,7 @@ Future<_CardData> _loadCardData(
   final commonFavIds = inter(myFavIds, hisFavIds);
   final commonWatchIds = inter(myWatchIds, hisWatchIds);
   
+  // Zengin poster verilerini çekiyoruz
   List<_PosterData> fivePosters = [];
   List<_PosterData> favPosters = [];
   List<_PosterData> watchPosters = [];
@@ -719,8 +709,6 @@ Future<_CardData> _loadCardData(
   String? photoURL;
   int? age;
   try {
-    // Burada tekrar users koleksiyonuna gitmeye gerek yok, yukarıda kontrol ettik.
-    // Ancak veriyi almak için tekrar okuyoruz (cache'ten gelir muhtemelen).
     final userDoc = await fs.collection('users').doc(otherUid).get();
     final u = userDoc.data();
     if (u != null) {

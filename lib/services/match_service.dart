@@ -151,12 +151,8 @@ class MatchService {
     // 3. PUANLAMA ALGORİTMASI (Daha Cömert Versiyon)
     
     // Yardımcı: Doygunluk Fonksiyonu
-    // count: Ortak sayı
-    // weight: Bu kategorinin maksimum puanı
-    // k (saturation): Kaç tane ortak olunca puanın yarısını alsın? (Düşük k = Hızlı Puan)
     double calcPart(int count, double weight, double k) {
       if (count <= 0) return 0.0;
-      // Formül: weight * (count / (count + k))
       return weight * (count / (count + k));
     }
 
@@ -205,14 +201,14 @@ class MatchService {
       commonGenres: commonG,
       commonDirectors: commonDir,
       commonActors: commonAct,
-      displayName: theirData['displayName'] as String?,
-      letterboxdUsername: theirData['letterboxdUsername'] as String?,
-      photoURL: theirData['photoURL'] as String?,
+      displayName: (theirData['displayName'] ?? '').toString(),
+      letterboxdUsername: (theirData['letterboxdUsername'] ?? '').toString(),
+      photoURL: (theirData['photoURL'] ?? '').toString(),
     );
   }
 
   /* ---------------------------------------------------------------------- */
-  /* 1) EŞLEŞME LİSTESİ HESAPLA (findMatches)                               */
+  /* 1) EŞLEŞME LİSTESİ HESAPLA (findMatches) - DÜZELTİLMİŞ                 */
   /* ---------------------------------------------------------------------- */
   Future<List<MatchResult>> findMatches(String myUid, {int candidateLimit = 100}) async {
     // 1. Cache Kontrolü
@@ -240,34 +236,62 @@ class MatchService {
         final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
         final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
         final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
+        // Beğendiklerim, Geçtiklerim veya Eşleştiklerim karşıma tekrar çıkmasın
         if (myLiked || myPass || (myLiked && otherLiked)) {
           hiddenUids.add(meIsA ? b : a);
         }
       }
     } catch (_) {}
 
-    // 4. Adayları Getir
-    final allCandidates = await _users.limit(candidateLimit).get();
     final List<MatchResult> out = [];
+    DocumentSnapshot? lastDoc;
+    bool keepFetching = true;
+    int fetchCycles = 0;
+    const int maxCycles = 15; // Sonsuz döngü koruması: En fazla 15 kere 50'lik paket çeksin
 
-    // 5. Her aday için _computeMatch çağır
-    for (final d in allCandidates.docs) {
-      final uid = d.id;
-      if (hiddenUids.contains(uid)) continue;
+    // 4. Adayları Getir (DÜZELTME: Sayfalama ile döngü)
+    // Yeterli aday bulana kadar veya DB bitene kadar çekmeye devam et
+    while (keepFetching && out.length < candidateLimit && fetchCycles < maxCycles) {
+      fetchCycles++;
 
-      final result = _computeMatch(myUid, uid, myData, d.data());
-      if (result != null) {
-        out.add(result);
+      // Document ID'ye göre sıralı çekiyoruz ki sayfalama yapabilelim
+      Query query = _users.orderBy(FieldPath.documentId).limit(50);
+      
+      if (lastDoc != null) {
+        query = query.startAfterDocument(lastDoc);
+      }
+
+      final snapshot = await query.get();
+
+      if (snapshot.docs.isEmpty) {
+        keepFetching = false;
+        break;
+      }
+
+      lastDoc = snapshot.docs.last;
+
+      for (final d in snapshot.docs) {
+        final uid = d.id;
+        
+        // Zaten etkileşime geçilmişse atla
+        if (hiddenUids.contains(uid)) continue;
+
+        // Hesapla
+        final result = _computeMatch(myUid, uid, myData, d.data() as Map<String, dynamic>);
+        if (result != null) {
+          out.add(result);
+        }
       }
     }
 
-    // 6. Sırala
+    // 5. Sırala
     out.sort((a, b) {
       final s = b.score.compareTo(a.score);
       if (s != 0) return s;
       return b.commonFiveCount.compareTo(a.commonFiveCount);
     });
 
+    // Cache'i güncelle
     _findCache[myUid] = _FindCache(out, DateTime.now());
     return out;
   }

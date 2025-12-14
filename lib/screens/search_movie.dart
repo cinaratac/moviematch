@@ -29,7 +29,7 @@ Future<List<dynamic>> _tmdbSearchMovies(String query) async {
   final uri = Uri.https('api.themoviedb.org', '/3/search/movie', {
     'query': q,
     'include_adult': 'false',
-    'language': 'tr-TR', // Türkçe sonuçlar için
+    'language': 'tr-TR', 
     'page': '1',
   });
   final resp = await http.get(uri, headers: {'Authorization': 'Bearer $bearer', 'Accept': 'application/json'});
@@ -39,8 +39,8 @@ Future<List<dynamic>> _tmdbSearchMovies(String query) async {
 }
 
 class SearchMoviePage extends StatefulWidget {
-  final ShelfTarget? target; // Artık opsiyonel (Özel liste için null gelebilir)
-  final bool isSelectionMode; // Seçim modu mu?
+  final ShelfTarget? target; 
+  final bool isSelectionMode; 
 
   const SearchMoviePage({
     super.key, 
@@ -85,6 +85,25 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
     }
   }
 
+  // Geliştirilmiş Slugify (Türkçe karakterleri ve sembolleri düzgün temizler)
+  String _slugify(String s) {
+    var slug = s.toLowerCase();
+    // Türkçe karakterleri latinize et (daha iyi eşleşme için)
+    slug = slug
+      .replaceAll('ı', 'i')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ü', 'u')
+      .replaceAll('ş', 's')
+      .replaceAll('ö', 'o')
+      .replaceAll('ç', 'c');
+    
+    // Alfanümerik olmayan her şeyi tire yap
+    slug = slug.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
+    // Baştaki ve sondaki tireleri sil
+    slug = slug.replaceAll(RegExp(r'^-+|-+$'), '');
+    return slug;
+  }
+
   void _showMovieDetails(dynamic movie) {
     final theme = Theme.of(context);
     final posterPath = movie['poster_path'];
@@ -92,6 +111,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
         ? 'https://image.tmdb.org/t/p/w500$posterPath'
         : '';
     final String title = (movie['title'] ?? 'Başlık yok').toString();
+    final String originalTitle = (movie['original_title'] ?? '').toString(); 
     final String release = (movie['release_date'] ?? '').toString();
     final String year = release.length >= 4 ? release.substring(0, 4) : '';
     final String overview = (movie['overview'] ?? '').toString();
@@ -132,6 +152,11 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                             child: Text(year, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold)),
                           ),
                         ],
+                        // Bilgi amaçlı orijinal başlığı göster
+                         Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text('Orijinal: $originalTitle', style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+                        ),
                       ],
                     ),
                   ),
@@ -150,7 +175,6 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                   label: Text(widget.isSelectionMode ? 'Bu Filmi Seç' : 'Listeye Ekle', style: const TextStyle(fontWeight: FontWeight.bold)),
                   style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   onPressed: () async {
-                    // --- SEÇİM MODU (ÖZEL LİSTE İÇİN) ---
                     if (widget.isSelectionMode) {
                       final selectedMovie = {
                         'id': movie['id'],
@@ -158,12 +182,11 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                         'poster': posterUrl,
                         'releaseDate': release,
                       };
-                      Navigator.of(context).pop(); // BottomSheet kapat
-                      Navigator.of(context).pop(selectedMovie); // Sayfayı kapat ve veriyi dön
+                      Navigator.of(context).pop(); 
+                      Navigator.of(context).pop(selectedMovie);
                       return;
                     }
 
-                    // --- MEVCUT RAF EKLEME MANTIĞI ---
                     try {
                       final uid = FirebaseAuth.instance.currentUser?.uid;
                       if (uid == null) { if (mounted) Navigator.of(context).pop(); return; }
@@ -171,34 +194,37 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                       final int tmdbId = (movie['id'] as num).toInt();
                       final int yearInt = int.tryParse(year) ?? 0;
                       
-                      // (Mevcut Firestore kayıt kodları aynen kalıyor...)
-                      // ... Kodu kısaltmak için burayı özet geçiyorum, önceki mantık aynen çalışır ...
-                      
-                      // Helper functions
-                      String _slugify(String s) { return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '-'); } // Basitleştirilmiş
-                      String _normTitle(String s) { return s.toLowerCase().trim(); }
-
-                      final String titleLc = _normTitle(title);
-                      final String guessLbSlug = _slugify(title);
                       final db = FirebaseFirestore.instance;
+
+                      // --- KESİN ÇÖZÜM: TÜRKÇE KAYITLARI BOŞVER ---
+                      // Var olan "Örümcek Adam" kaydını ARAMIYORUZ.
+                      // Doğrudan "Original Title" üzerinden ID üretiyoruz.
+                      // Böylece Letterboxd ile %100 uyumlu oluyor.
                       
-                      // 1. Catalog Film Kaydı
-                      String? primaryKey;
-                      final byTmdb = await db.collection('catalog_films').where('tmdbId', isEqualTo: tmdbId).limit(1).get();
-                      if (byTmdb.docs.isNotEmpty) {
-                        primaryKey = byTmdb.docs.first.id;
-                      } else {
-                        primaryKey = 'film:$guessLbSlug';
-                      }
+                      final sourceForSlug = originalTitle.isNotEmpty ? originalTitle : title;
+                      final String guessLbSlug = _slugify(sourceForSlug);
                       
+                      // ID'yi zorla İngilizce slug'a sabitliyoruz
+                      final String primaryKey = 'film:$guessLbSlug';
+                      
+                      print('--- FORCING ENGLISH/ORIGINAL ID ---');
+                      print('Original: $sourceForSlug');
+                      print('Generated ID: $primaryKey');
+
+                      // Dokümanı oluştur veya güncelle (Türkçe başlığı da içine kaydediyoruz ama ID İngilizce)
                       await db.collection('catalog_films').doc(primaryKey).set({
-                        'title': title, 'posterUrl': posterUrl, 'tmdbId': tmdbId, 'year': yearInt,
-                        'titleLc': titleLc, 'lbSlugGuess': guessLbSlug,
-                        'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']),
-                        'source': 'tmdb', 'updatedAt': FieldValue.serverTimestamp(),
+                        'title': title,           // UI'da Türkçe görünsün
+                        'originalTitle': originalTitle,
+                        'posterUrl': posterUrl, 
+                        'tmdbId': tmdbId, 
+                        'year': yearInt,
+                        'titleLc': title.toLowerCase(),
+                        'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']), // Gelecek aramalar için
+                        'source': 'tmdb', 
+                        'updatedAt': FieldValue.serverTimestamp(),
                       }, SetOptions(merge: true));
 
-                      // 2. User Array Update
+                      // Kullanıcıya Ekle (Bu yeni ID'yi kullanıcının listesine ekle)
                       if (widget.target != null) {
                         final String field = widget.target!.userArrayField;
                         await db.collection('users').doc(uid).set({
@@ -206,13 +232,12 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                           'updatedAt': FieldValue.serverTimestamp(),
                         }, SetOptions(merge: true));
                         
-                        // UserTasteProfiles güncellemesi
                         if (widget.target == ShelfTarget.fiveStar) {
                            await db.collection('userTasteProfiles').doc(uid).set({'fiveStars': FieldValue.arrayUnion([primaryKey])}, SetOptions(merge: true));
                         } else if (widget.target == ShelfTarget.disliked) {
                            await db.collection('userTasteProfiles').doc(uid).set({'lowRatings': FieldValue.arrayUnion([primaryKey])}, SetOptions(merge: true));
                         }
-
+                        
                         // Local Cache Update
                         final Map<String, String> newLocalItem = {'title': title, 'poster': posterUrl, 'posterUrl': posterUrl};
                         switch (widget.target!) {
@@ -225,10 +250,11 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
 
                       if (mounted) {
                         Navigator.of(context).pop(); 
-                        Navigator.of(context).pop(true); // Başarılı döndür
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title listene eklendi'), backgroundColor: theme.colorScheme.primary));
+                        Navigator.of(context).pop(true);
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title listene eklendi (ID: $primaryKey)'), backgroundColor: theme.colorScheme.primary));
                       }
                     } catch (e) {
+                      print('HATA: $e');
                       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
                     }
                   },

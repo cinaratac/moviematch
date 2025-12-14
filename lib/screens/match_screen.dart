@@ -14,6 +14,7 @@ import 'package:fluttergirdi/screens/passes_page.dart';
 import 'package:swipe_cards/swipe_cards.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
+// FilmItem sınıfı burada tanımlı olduğu varsayılarak import ediliyor.
 import 'package:fluttergirdi/widgets/match_card.dart'; 
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
@@ -292,7 +293,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
   }
 
   Future<void> _openIncomingLikes() async {
-    // ... (Mevcut kod aynı kalıyor) ...
     final me = FirebaseAuth.instance.currentUser?.uid;
     if (me == null) return;
     final db = FirebaseFirestore.instance;
@@ -387,6 +387,8 @@ class _MatchScreenState extends State<MatchScreen> {
         );
         final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
         
+        // HATA DÜZELTME: Async işlemden sonra mounted kontrolü
+        if (!mounted) return;
         Navigator.pop(context); // Loading'i kapat
 
         if (res.statusCode == 200) {
@@ -408,9 +410,17 @@ class _MatchScreenState extends State<MatchScreen> {
             );
             return;
           }
+        } else {
+           // HTTP Hata durumu
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text('Bağlantı hatası oluştu.'))
+           );
+           return;
         }
       } catch (e) {
-        Navigator.pop(context); // Loading'i kapat
+        // HATA DÜZELTME: Catch bloğunda mounted kontrolü
+        if (!mounted) return;
+        Navigator.pop(context); // Loading'i kapat (eğer açıksa)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Bağlantı hatası oluştu.'))
         );
@@ -418,7 +428,7 @@ class _MatchScreenState extends State<MatchScreen> {
       }
     }
 
-    if (id != null) {
+    if (id != null && mounted) {
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -511,7 +521,7 @@ class _MatchScreenState extends State<MatchScreen> {
                           (ctx, i) {
                             final film = data.fiveStars[i];
                             return GestureDetector( 
-                              onTap: () => _handleFilmTap(context, film), // GÜNCELLENDİ
+                              onTap: () => _handleFilmTap(context, film), 
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: PosterImage(
@@ -547,8 +557,8 @@ class _MatchScreenState extends State<MatchScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.favorites[i];
-                            return GestureDetector( // GESTURE DETECTOR EKLENDİ
-                              onTap: () => _handleFilmTap(context, film), // GÜNCELLENDİ
+                            return GestureDetector( 
+                              onTap: () => _handleFilmTap(context, film), 
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: PosterImage(
@@ -584,8 +594,8 @@ class _MatchScreenState extends State<MatchScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.watchlist[i];
-                            return GestureDetector( // GESTURE DETECTOR EKLENDİ
-                              onTap: () => _handleFilmTap(context, film), // GÜNCELLENDİ
+                            return GestureDetector( 
+                              onTap: () => _handleFilmTap(context, film),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: PosterImage(
@@ -680,7 +690,7 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
           id: doc.id, 
           title: t.isNotEmpty ? t : 'İsimsiz', 
           posterUrl: p,
-          tmdbId: tmdbId // EKLENDİ
+          tmdbId: tmdbId 
         ));
       }
     }
