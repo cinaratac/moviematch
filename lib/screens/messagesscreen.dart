@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/screens/clubs_tab.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
@@ -1055,7 +1056,9 @@ class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAli
                     Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateClubScreen()));
                   },
                   child: const Text("Yeni Bir Kulüp Kur"),
-                )
+                ),
+                 const SizedBox(height: 5),
+                 FilledButton.tonal(onPressed: () {Navigator.push(context,  MaterialPageRoute(builder: (_) => const ClubsScreen()));}, child: const Text("Kulüpleri Keşfet"))
               ],
             ),
           );

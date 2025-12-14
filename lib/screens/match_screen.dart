@@ -618,14 +618,7 @@ class _MatchScreenState extends State<MatchScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await LikeService.instance.likeUser(m.uid, commonFavoritesCount: m.commonFavCount, commonFiveStarsCount: m.commonFiveCount);
-          if(mounted) Navigator.pop(context);
-        },
-        icon: const Icon(Icons.favorite),
-        label: const Text('Beğen'),
-      ),
+      
     );
   }
 }
