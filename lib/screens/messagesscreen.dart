@@ -20,7 +20,6 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   
-  // İki sekme için ayrı arama metinleri
   String _chatSearchText = '';
   String _clubSearchText = '';
 
@@ -33,8 +32,6 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
 
   void _handleTabSelection() {
     if (!mounted) return;
-
-    // Sekme değiştiğinde arama çubuğundaki metni güncelle
     if (_tabController.indexIsChanging || 
         _tabController.animation!.value == _tabController.index.toDouble()) {
       _updateSearchControllerText();
@@ -43,10 +40,7 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
 
   void _updateSearchControllerText() {
     if (!mounted) return;
-
     final targetText = _tabController.index == 0 ? _chatSearchText : _clubSearchText;
-    
-    // Sadece metin farklıysa güncelle
     if (_searchController.text != targetText) {
       setState(() {
         _searchController.text = targetText;
@@ -67,17 +61,11 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
 
   void _onSearchChanged(String val) {
     if (!mounted) return;
-
     final rawInput = val.toLowerCase();
-    
     if (_tabController.index == 0) {
-      if (_chatSearchText != rawInput) {
-        setState(() => _chatSearchText = rawInput);
-      }
+      if (_chatSearchText != rawInput) setState(() => _chatSearchText = rawInput);
     } else {
-      if (_clubSearchText != rawInput) {
-        setState(() => _clubSearchText = rawInput);
-      }
+      if (_clubSearchText != rawInput) setState(() => _clubSearchText = rawInput);
     }
   }
 
@@ -197,7 +185,6 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   @override
   void initState() {
     super.initState();
-    // Sohbetler için stream'i burada oluşturuyoruz
     _chatsStream = FirebaseFirestore.instance
         .collection('chats')
         .where('participants', arrayContains: widget.uid)
@@ -205,9 +192,16 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   }
 
   Future<void> _fetchMissingUsers(List<String> uids) async {
+    // Cache'te olmayanları tespit et
     final missing = uids.where((id) => !_userCache.containsKey(id)).toSet().toList();
     if (missing.isEmpty) return;
 
+    // Önce hepsini "boş" olarak işaretle (Silinmiş varsayımı ve loop engelleme)
+    for (final id in missing) {
+      _userCache[id] = {}; 
+    }
+
+    // Veritabanından çekmeye çalış
     for (var i = 0; i < missing.length; i += 10) {
       final chunk = missing.sublist(i, i + 10 > missing.length ? missing.length : i + 10);
       try {
@@ -216,13 +210,17 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
             .where(FieldPath.documentId, whereIn: chunk)
             .get();
         
+        // Bulunanları güncelle
         for (var doc in qs.docs) {
           _userCache[doc.id] = doc.data();
         }
+        // Bulunamayanlar {} olarak kalır (yani silinmiş)
       } catch (e) {
         debugPrint('Kullanıcı verisi çekilemedi: $e');
       }
     }
+    
+    // UI'ı güncelle ki silinenler listeden kaybolsun
     if (mounted) setState(() {});
   }
 
@@ -232,7 +230,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
     
     return Scaffold(
     floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 65.0), // 60.0 değerini isteğine göre artırıp azaltabilirsin
+        padding: const EdgeInsets.only(bottom: 65.0),
         child: _TrashFab(currentUid: widget.uid),
       ),
       body: Column(
@@ -250,14 +248,32 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                 
                 var docs = s.data?.docs.toList() ?? [];
                 
+                // 1. Gizli sohbetleri, grupları ve SİLİNMİŞ kullanıcıları filtrele
                 docs.removeWhere((doc) {
                    final data = doc.data();
+                   
+                   // Gizlilik kontrolü
                    final isGroup = data['isGroup'] == true;
                    final vis = (data['visibleFor'] as Map?) ?? {};
                    final isHidden = vis[widget.uid] == false;
-                   return isGroup || isHidden;
+                   if (isGroup || isHidden) return true;
+
+                   // Silinmiş Kullanıcı Kontrolü
+                   final parts = List.from(data['participants'] ?? []);
+                   final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                   
+                   if (otherId == null) return true; // Bozuk veri
+
+                   final cached = _userCache[otherId];
+                   // Eğer cache'te {} varsa, bu kullanıcı silinmiş demektir -> Listeden çıkar.
+                   if (cached != null && cached.isEmpty) {
+                       return true; 
+                   }
+
+                   return false;
                 });
 
+                // 2. Eksik kullanıcıları tespit et (henüz cache'te olmayanlar)
                 final otherUids = <String>{};
                 for (var doc in docs) {
                   final parts = List.from(doc.data()['participants'] ?? []);
@@ -269,6 +285,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                   Future.microtask(() => _fetchMissingUsers(otherUids.toList()));
                 }
 
+                // 3. Arama Filtresi
                 if (widget.filterText.isNotEmpty) {
                   docs = docs.where((doc) {
                     final data = doc.data();
@@ -278,7 +295,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                     if (otherId == null) return false;
 
                     final cachedUser = _userCache[otherId];
-                    if (cachedUser != null) {
+                    if (cachedUser != null && cachedUser.isNotEmpty) {
                       final name = (cachedUser['displayName'] ?? '').toString().toLowerCase();
                       final username = (cachedUser['username'] ?? '').toString().toLowerCase();
                       return name.contains(widget.filterText) || username.contains(widget.filterText);
@@ -313,6 +330,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                     final doc = docs[index];
                     final parts = List.from(doc.data()['participants'] ?? []);
                     final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                    
                     final cachedData = (otherId != null) ? _userCache[otherId] : null;
 
                     return ChatListTile(
@@ -332,8 +350,170 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   }
 }
 
-// --- YARDIMCI SINIFLAR ---
-// (NewMatchHeader, ChatListTile, _UnreadCountBadge, _TrashFab, _HiddenMessagesSheet, _TrashItem, _formatTime, _ForestFace, _EmptyMessagesInteractive, _HiddenChatItem kodları aynı kalıyor, buraya tekrar eklenmiştir.)
+// --- YARDIMCI WIDGET'LAR ---
+
+class ChatListTile extends StatelessWidget {
+  final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
+  final String currentUid;
+  final Map<String, dynamic>? cachedUserData; 
+
+  const ChatListTile({
+    super.key,
+    required this.chatDoc,
+    required this.currentUid,
+    this.cachedUserData, 
+  });
+  
+  Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime, {bool isDeleted = false}) {
+    if (isDeleted) return const SizedBox.shrink(); // Silinmişse (Fallback) gösterme
+
+    return ListTile(
+        onTap: () {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(chatId: chatDoc.id, otherUid: otherUid, otherTitle: displayName)));
+            ChatService.instance.markAsRead(chatDoc.id, currentUid);
+        },
+        onLongPress: () => _showHideDialog(context, chatDoc.id),
+        leading: InkWell(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid))),
+            child: CircleAvatar(
+                backgroundImage: (photoUrl != null && photoUrl.isNotEmpty) ? NetworkImage(photoUrl) : null,
+                child: (photoUrl == null || photoUrl.isEmpty) ? const Icon(Icons.person) : null,
+            ),
+        ),
+        title: Text(
+          displayName, 
+          maxLines: 1, 
+          overflow: TextOverflow.ellipsis, 
+          style: const TextStyle(fontWeight: FontWeight.bold)
+        ),
+        subtitle: Row(
+            children: [
+                Expanded(
+                    child: Text(
+                        lastMsg.isNotEmpty ? lastMsg : 'Fotoğraf / Medya',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: lastMsg.isEmpty ? Colors.grey : null,
+                            fontStyle: lastMsg.isEmpty ? FontStyle.italic : null,
+                        ),
+                    ),
+                ),
+                if (lastMsgTime != null)
+                    Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Text(_formatTime(lastMsgTime), style: Theme.of(context).textTheme.bodySmall),
+                    ),
+            ],
+        ),
+        trailing: _UnreadCountBadge(chatId: chatDoc.id, uid: currentUid),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = chatDoc.data();
+    final parts = (data['participants'] as List<dynamic>?) ?? [];
+    final otherUid = parts.firstWhere((id) => id != currentUid, orElse: () => null);
+
+    if (otherUid == null) return const SizedBox.shrink();
+
+    final lastMsg = (data['lastMessage'] ?? '').toString();
+    final lastMsgTime = (data['lastMessageAt'] as Timestamp?)?.toDate();
+    final titles = (data['titles'] as Map?) ?? {};
+    final photos = (data['photos'] as Map?) ?? {};
+    
+    // 1. Sohbet belgesinde özel isim/foto varsa kullan
+    String displayName = (titles[currentUid] as String?) ?? ''; 
+    String? photoUrl = (photos[currentUid] as String?); 
+    
+    if (displayName.isNotEmpty || (photoUrl != null && photoUrl.isNotEmpty)) {
+        return _buildTile(context, otherUid, displayName.isNotEmpty ? displayName : 'Kullanıcı', photoUrl, lastMsg, lastMsgTime);
+    }
+
+    // 2. Cache verisi kullan
+    if (cachedUserData != null) {
+      if (cachedUserData!.isEmpty) {
+        // Silinmişse (Parent genelde filtreler ama garanti olsun)
+        return const SizedBox.shrink(); 
+      }
+      final username = cachedUserData!['username'] as String?;
+      final name = cachedUserData!['displayName'] as String?;
+      final pUrl = cachedUserData!['photoURL'] as String?;
+      
+      String finalName = 'Kullanıcı';
+      if (username != null && username.isNotEmpty) finalName = username;
+      else if (name != null && name.isNotEmpty) finalName = name;
+
+      return _buildTile(context, otherUid, finalName, pUrl, lastMsg, lastMsgTime);
+    }
+    
+    // 3. Son çare FutureBuilder (Eğer cache gecikirse)
+    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
+        builder: (context, userSnap) {
+            // Silinmişse gösterme
+            if (userSnap.hasData && !userSnap.data!.exists) {
+               return const SizedBox.shrink();
+            }
+
+            String fetchedDisplayName = 'Kullanıcı';
+            String? fetchedPhotoUrl;
+            
+            if (userSnap.hasData && userSnap.data!.exists) {
+                final userData = userSnap.data!.data()!;
+                final username = userData['username'] as String?;
+                final name = userData['displayName'] as String?;
+                fetchedPhotoUrl = userData['photoURL'] as String?;
+                if (username != null && username.isNotEmpty) fetchedDisplayName = username;
+                else if (name != null && name.isNotEmpty) fetchedDisplayName = name;
+            } else if (userSnap.connectionState == ConnectionState.waiting) {
+                 // Yüklenirken de boş gösterelim ki titreme olmasın, ya da loading dönebilirsiniz.
+                 return const Center(child: Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
+            }
+            return _buildTile(context, otherUid, fetchedDisplayName, fetchedPhotoUrl, lastMsg, lastMsgTime);
+        },
+    );
+  }
+  
+  Future<void> _showHideDialog(BuildContext context, String docId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sohbeti gizle?'),
+        content: const Text('Sohbet listenizden kaldırılacak (karşı taraf etkilenmez).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Gizle')),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await FirebaseFirestore.instance.collection('chats').doc(docId).set({
+        'visibleFor': {currentUid: false},
+      }, SetOptions(merge: true));
+    }
+  }
+}
+
+// ... (NewMatchHeader, _UnreadCountBadge, _TrashFab, _HiddenMessagesSheet, _TrashItem, _formatTime, _ForestFace, _EmptyMessagesInteractive, _HiddenChatItem, JoinedClubsList ve diğer tüm yardımcı sınıflar AYNI KALACAK. Kod tekrarı olmaması için buraya eklemiyorum, önceki dosyanızdaki mevcut halleriyle kalabilirler.) ...
+
+// Aşağıdaki sınıfları kopyalamak için önceki kodunuzdan alabilirsiniz:
+// class NewMatchHeader ...
+// class _UnreadCountBadge ...
+// class _TrashFab ...
+// class _HiddenMessagesSheet ...
+// class _TrashItem ...
+// String _formatTime ...
+// class _ForestFace ...
+// class _EmptyMessagesInteractive ...
+// class _HiddenChatItem ...
+// class JoinedClubsList ...
+
+// Bu sınıflar yukarıda verdiğim StreamBuilder ve ChatListTile ile uyumlu çalışacaktır.
+
+// Eksik sınıfları (kod bütünlüğü için) aşağıya ekliyorum:
 
 class NewMatchHeader extends StatefulWidget {
   final String currentUid;
@@ -468,117 +648,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
         );
       },
     );
-  }
-}
-
-class ChatListTile extends StatelessWidget {
-  final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
-  final String currentUid;
-  const ChatListTile({
-    super.key,
-    required this.chatDoc,
-    required this.currentUid,
-    Map<String, dynamic>? cachedUserData, 
-  });
-  
-  Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime) {
-    return ListTile(
-        onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(chatId: chatDoc.id, otherUid: otherUid, otherTitle: displayName)));
-            ChatService.instance.markAsRead(chatDoc.id, currentUid);
-        },
-        onLongPress: () => _showHideDialog(context, chatDoc.id),
-        leading: InkWell(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid))),
-            child: CircleAvatar(
-                backgroundImage: (photoUrl != null && photoUrl.isNotEmpty) ? NetworkImage(photoUrl) : null,
-                child: (photoUrl == null || photoUrl.isEmpty) ? const Icon(Icons.person) : null,
-            ),
-        ),
-        title: Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Row(
-            children: [
-                Expanded(
-                    child: Text(
-                        lastMsg.isNotEmpty ? lastMsg : 'Fotoğraf / Medya',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: lastMsg.isEmpty ? Colors.grey : null,
-                            fontStyle: lastMsg.isEmpty ? FontStyle.italic : null,
-                        ),
-                    ),
-                ),
-                if (lastMsgTime != null)
-                    Padding(
-                        padding: const EdgeInsets.only(left: 8.0),
-                        child: Text(_formatTime(lastMsgTime), style: Theme.of(context).textTheme.bodySmall),
-                    ),
-            ],
-        ),
-        trailing: _UnreadCountBadge(chatId: chatDoc.id, uid: currentUid),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final data = chatDoc.data();
-    final parts = (data['participants'] as List<dynamic>?) ?? [];
-    final otherUid = parts.firstWhere((id) => id != currentUid, orElse: () => null);
-
-    if (otherUid == null) return const SizedBox.shrink();
-
-    final lastMsg = (data['lastMessage'] ?? '').toString();
-    final lastMsgTime = (data['lastMessageAt'] as Timestamp?)?.toDate();
-    final titles = (data['titles'] as Map?) ?? {};
-    final photos = (data['photos'] as Map?) ?? {};
-    
-    String displayName = (titles[currentUid] as String?) ?? ''; 
-    String? photoUrl = (photos[currentUid] as String?); 
-    
-    if (displayName.isNotEmpty || (photoUrl != null && photoUrl.isNotEmpty)) {
-        return _buildTile(context, otherUid, displayName.isNotEmpty ? displayName : 'Kullanıcı', photoUrl, lastMsg, lastMsgTime);
-    }
-    
-    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
-        builder: (context, userSnap) {
-            String fetchedDisplayName = 'Kullanıcı';
-            String? fetchedPhotoUrl;
-            
-            if (userSnap.hasData && userSnap.data!.exists) {
-                final userData = userSnap.data!.data()!;
-                final username = userData['username'] as String?;
-                final name = userData['displayName'] as String?;
-                fetchedPhotoUrl = userData['photoURL'] as String?;
-                if (username != null && username.isNotEmpty) fetchedDisplayName = username;
-                else if (name != null && name.isNotEmpty) fetchedDisplayName = name;
-            } else if (userSnap.connectionState == ConnectionState.waiting) {
-                 return const Center(child: Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
-            }
-            return _buildTile(context, otherUid, fetchedDisplayName, fetchedPhotoUrl, lastMsg, lastMsgTime);
-        },
-    );
-  }
-  
-  Future<void> _showHideDialog(BuildContext context, String docId) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sohbeti gizle?'),
-        content: const Text('Sohbet listenizden kaldırılacak (karşı taraf etkilenmez).'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Gizle')),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await FirebaseFirestore.instance.collection('chats').doc(docId).set({
-        'visibleFor': {currentUid: false},
-      }, SetOptions(merge: true));
-    }
   }
 }
 
@@ -919,9 +988,8 @@ class _HiddenChatItem {
   _HiddenChatItem({required this.chatId, required this.otherUid, required this.title, required this.photoURL, required this.lastMessage, required this.lastAt});
 }
 
-// --- KATILINAN KULÜPLER LİSTESİ WIDGET'I (DÜZELTME: Stream InitState'e taşındı) ---
 class JoinedClubsList extends StatefulWidget {
-  final String filterText; // Arama filtresi
+  final String filterText;
   
   const JoinedClubsList({super.key, this.filterText = ''});
 
@@ -930,18 +998,16 @@ class JoinedClubsList extends StatefulWidget {
 }
 
 class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAliveClientMixin {
-  late Stream<QuerySnapshot> _clubsStream; // Stream'i saklayacağız
+  late Stream<QuerySnapshot> _clubsStream;
 
   @override
-  bool get wantKeepAlive => true; // Sayfanın ölmesini engeller
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      // Stream'i burada bir kere oluşturuyoruz.
-      // Böylece filterText değiştiğinde StreamBuilder sıfırlanmıyor.
       _clubsStream = ClubService.instance.getUserClubsStream(uid);
     } else {
       _clubsStream = const Stream.empty();
@@ -950,13 +1016,12 @@ class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAli
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Mixin için gerekli
+    super.build(context);
     
-    // uid kontrolü (Stream boşsa zaten data gelmeyecek ama yine de)
     if (FirebaseAuth.instance.currentUser?.uid == null) return const SizedBox.shrink();
 
     return StreamBuilder<QuerySnapshot>(
-      stream: _clubsStream, // Sabit stream kullanımı
+      stream: _clubsStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -964,7 +1029,6 @@ class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAli
 
         var docs = snapshot.data?.docs ?? [];
         
-        // Filtreleme işlemi
         if (widget.filterText.isNotEmpty) {
           docs = docs.where((d) {
              final data = d.data() as Map<String, dynamic>;
@@ -974,12 +1038,10 @@ class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAli
         }
 
         if (docs.isEmpty) {
-          // Filtreli aramada sonuç yoksa
           if (widget.filterText.isNotEmpty) {
              return const Center(child: Text("Eşleşen kulüp bulunamadı.", style: TextStyle(color: Colors.grey)));
           }
           
-          // Hiç kulüp yoksa
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,

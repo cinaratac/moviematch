@@ -259,77 +259,121 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _logout() async {
-    showCupertinoDialog(
-      context: context,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('Çıkış Yap'),
-        content: const Text('Hesabınızdan çıkış yapmak istediğinize emin misiniz?'),
-        actions: [
-          CupertinoDialogAction(child: const Text('Vazgeç'), onPressed: () => Navigator.pop(ctx)),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await FirebaseAuth.instance.signOut();
-            },
-            child: const Text('Çıkış'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<bool> _reauthenticateUser() async {
-    final user = _user;
-    if (user == null || user.email == null) return false;
-    final password = await _promptText(title: 'Güvenlik Doğrulaması', hint: 'Şifreniz');
-    if (password == null || password.isEmpty) return false;
-    try {
-      await user.reauthenticateWithCredential(EmailAuthProvider.credential(email: user.email!, password: password));
-      return true;
-    } catch (e) {
-      _toast('Doğrulama başarısız: $e');
-      return false;
-    }
-  }
-
-  Future<void> _deleteAccount() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Hesabı Sil'),
-        content: const Text('Bu işlem geri alınamaz. Tüm verileriniz kalıcı olarak silinecektir.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sil', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-    
-    try {
-      setState(() => _busy = true);
-      final user = _user;
-      if (user != null) {
-         try {
-            await user.delete();
-         } on FirebaseAuthException catch (e) {
-            if (e.code == 'requires-recent-login') {
-               bool reauth = await _reauthenticateUser();
-               if(reauth) await user.delete();
+  showCupertinoDialog(
+    context: context,
+    builder: (ctx) => CupertinoAlertDialog(
+      title: const Text('Çıkış Yap'),
+      content: const Text('Hesabınızdan çıkış yapmak istediğinize emin misiniz?'),
+      actions: [
+        CupertinoDialogAction(
+          child: const Text('Vazgeç'), 
+          onPressed: () => Navigator.pop(ctx)
+        ),
+        CupertinoDialogAction(
+          isDestructiveAction: true,
+          child: const Text('Çıkış'),
+          onPressed: () async {
+            // 1. Önce diyaloğu kapat
+            Navigator.pop(ctx); 
+            
+            // 2. Firebase'den çıkış yap
+            await FirebaseAuth.instance.signOut();
+            
+            // 3. KRİTİK ADIM: Tüm sayfaları kapat ve en başa (Login'e) dön
+            if (mounted) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
             }
-         }
-      }
-    } catch(e) {
-      _toast("Hata: $e");
-    } finally {
-      if(mounted) setState(() => _busy = false);
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+ 
+
+  // lib/screens/settings_page.dart içinde _deleteAccount fonksiyonunu bununla değiştirin:
+
+Future<void> _deleteAccount() async {
+  // 1. Onay Diyaloğu
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Hesabı Sil'),
+      content: const Text(
+          'Bu işlem geri alınamaz. Profiliniz ve tüm verileriniz kalıcı olarak silinecektir.'),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Vazgeç')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Sil', style: TextStyle(color: Colors.red)),
+        ),
+      ],
+    ),
+  );
+
+  if (confirm != true) return;
+
+  final user = _user;
+  if (user == null || user.email == null) return;
+
+  // 2. Güvenlik Doğrulaması (Şifre İste)
+  final password = await _promptText(
+    title: 'Güvenlik Doğrulaması',
+    hint: 'Hesabınızı silmek için şifrenizi girin',
+    keyboardType: TextInputType.visiblePassword,
+  );
+
+  if (password == null || password.isEmpty) return;
+
+  setState(() => _busy = true);
+
+  try {
+    // 3. Re-Authenticate (Tekrar Giriş Yaparak Yetki Tazele)
+    AuthCredential credential = EmailAuthProvider.credential(
+      email: user.email!,
+      password: password,
+    );
+    await user.reauthenticateWithCredential(credential);
+
+    // 4. Verileri Sil (Firestore Batch)
+    final uid = user.uid;
+    final batch = FirebaseFirestore.instance.batch();
+
+    // Kullanıcı dokümanlarını sil
+    batch.delete(FirebaseFirestore.instance.collection('users').doc(uid));
+    batch.delete(FirebaseFirestore.instance.collection('userTasteProfiles').doc(uid));
+    batch.delete(FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('recommendations')
+        .doc('feed'));
+
+    await batch.commit();
+
+    // 5. Hesabı Sil (Authentication)
+    await user.delete();
+
+    // 6. KRİTİK ADIM: Yönlendirme
+    if (mounted) {
+      // Tüm sayfaları kapat, AuthGate (Login) ekranına düş
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
+
+  } on FirebaseAuthException catch (e) {
+    if (e.code == 'wrong-password') {
+      _toast('Hatalı şifre.');
+    } else {
+      _toast('Hata: ${e.message}');
+    }
+  } catch (e) {
+    _toast('Bir sorun oluştu: $e');
+  } finally {
+    if (mounted) setState(() => _busy = false);
   }
+}
 
   void _showAboutApp() {
     showCupertinoDialog(
