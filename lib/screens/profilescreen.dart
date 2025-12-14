@@ -27,26 +27,36 @@ import 'package:fluttergirdi/services/gamification_service.dart';
 
 // --- MODEL SINIFLARI ---
 
+/// Diğer sayfaların (Chat, Search vb.) erişebilmesi için gerekli önbellek sınıfı.
+/// Veri sızıntısını önlemek için sayfa kapandığında temizlenir.
 class UserShelfCache {
-  static List<Map<String, String>> favorites = const [];
-  static List<Map<String, String>> fiveStar = const [];
-  static List<Map<String, String>> disliked = const [];
-  static List<Map<String, String>> watchlist = const [];
+  static List<Map<String, String>> favorites = [];
+  static List<Map<String, String>> fiveStar = [];
+  static List<Map<String, String>> disliked = [];
+  static List<Map<String, String>> watchlist = [];
 
   static void setFavorites(List<LetterboxdFilm> items) {
-    favorites = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList(growable: false);
+    favorites = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList();
   }
   static void setFiveStar(List<LetterboxdFilm> items) {
-    fiveStar = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList(growable: false);
+    fiveStar = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList();
   }
   static void setDisliked(List<LetterboxdFilm> items) {
-    disliked = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList(growable: false);
+    disliked = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList();
   }
   static void setWatchlistFromMaps(List<Map<String, dynamic>> items) {
     watchlist = items.map((m) => {
       'title': (m['title'] ?? '').toString(),
       'poster': (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '').toString(),
-    }).toList(growable: false);
+    }).toList();
+  }
+  
+  /// Verileri temizler
+  static void clear() {
+    favorites = [];
+    fiveStar = [];
+    disliked = [];
+    watchlist = [];
   }
 }
 
@@ -117,7 +127,7 @@ Widget _profileHeaderSection({
     showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withOpacity(0.9), // withValues yerine eski uyumluluk için withOpacity
+      barrierColor: Colors.black.withOpacity(0.9),
       builder: (ctx) {
         return GestureDetector(
           onTap: () => Navigator.pop(ctx),
@@ -272,24 +282,23 @@ class _ProfilePageState extends State<ProfilePage> {
   int? _followersCount;
   int? _followingCount;
   StreamSubscription<FollowEvent>? _followSub;
-  bool _initialSyncTriggered = false;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
 
   @override
   void initState() {
     super.initState();
+    // Cache'i temizleyerek başla (Güvenlik)
+    UserShelfCache.clear();
     _loadPrefs();
     _bindLbFromFirestore();
     _bootstrapCounts();
   }
   
-  // !!! GÜNCELLENEN KISIM: GEREKSİZ YAZMAYI ENGELLEYEN MANTIK !!!
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final svc = FollowSystemService.I;
     try {
-      // Servisten güncel sayıları çek
       final f1 = await svc.fetchFollowerCountOnce(uid);
       final f2 = await svc.fetchFollowingCountOnce(uid);
       
@@ -300,12 +309,10 @@ class _ProfilePageState extends State<ProfilePage> {
         });
       }
 
-      // Firestore'a yazmadan önce mevcut veriyle karşılaştır
-      // Eğer _lastUserData henüz yüklenmediyse bir seferlik yazabilir, sorun değil.
       final int? currentStoredFollowers = _lastUserData?['followersCount'];
       final int? currentStoredFollowing = _lastUserData?['followingCount'];
 
-      // SADECE değerler değişmişse Firestore'a yaz
+      // Sadece değerler değişmişse Firestore'a yaz (Optimization)
       if (f1 != currentStoredFollowers || f2 != currentStoredFollowing) {
         await FirebaseFirestore.instance.collection('users').doc(uid).update({
            'followersCount': f1,
@@ -334,6 +341,7 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       if (_futureFavs != null) {
         final favs = await _futureFavs!;
+        // Hem local cache'i hem de statik cache'i güncelle
         UserShelfCache.setFavorites(favs);
       }
       if (_futureFiveStar != null) {
@@ -341,8 +349,8 @@ class _ProfilePageState extends State<ProfilePage> {
         UserShelfCache.setFiveStar(five);
       }
       if (_futureDisliked != null) {
-        final low = await _futureDisliked!;
-        UserShelfCache.setDisliked(low);
+        final dis = await _futureDisliked!;
+        UserShelfCache.setDisliked(dis);
       }
     } catch (_) {}
   }
@@ -370,45 +378,14 @@ class _ProfilePageState extends State<ProfilePage> {
     } catch (_) {}
   }
 
-  Future<void> _ensureInitialSyncIfNeeded() async {
-    if (_initialSyncTriggered) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final lb = (_lbUsername ?? '').trim();
-    if (uid == null || lb.isEmpty) return;
-    try {
-      final db = FirebaseFirestore.instance;
-      Map<String, dynamic>? userData;
-      try {
-        final c = await db.collection('users').doc(uid).get(const GetOptions(source: Source.cache));
-        if (c.exists) userData = c.data();
-      } catch (_) {}
-      if (userData == null) {
-        try {
-          final s = await db.collection('users').doc(uid).get(const GetOptions(source: Source.server));
-          if (s.exists) userData = s.data();
-        } catch (_) {}
-      }
-      final favKeys = List<String>.from((userData?['favoritesKeys'] ?? const []));
-      final fiveKeys = List<String>.from((userData?['fiveStarKeys'] ?? const []));
-      
-      final tasteRef = db.collection('userTasteProfiles').doc(uid);
-      final tSnap = await tasteRef.get();
-      
-      final missing = favKeys.isEmpty || fiveKeys.isEmpty || !tSnap.exists;
-      
-      if (missing) {
-        _initialSyncTriggered = true; 
-        await _syncLetterboxdToFirestore(lb);
-      }
-    } catch (_) {}
-  }
-
   void _checkGuideVisibility() {
     if (!mounted) return;
     final favKeys = _lastUserData?['favoritesKeys'];
     final hasFirestoreFavs = (favKeys is List && favKeys.isNotEmpty);
     final fiveStarKeys = _lastUserData?['fiveStarKeys'];
     final hasFirestoreFiveStar = (fiveStarKeys is List && fiveStarKeys.isNotEmpty);
+    
+    // Cache dolu mu?
     final hasCacheFavs = UserShelfCache.favorites.isNotEmpty;
     final hasCacheFiveStar = UserShelfCache.fiveStar.isNotEmpty;
 
@@ -432,14 +409,12 @@ class _ProfilePageState extends State<ProfilePage> {
     final u = uid != null ? sp.getString('lb_username_$uid') : sp.getString('lb_username');
     setState(() {
       _lbUsername = u;
-      // Fetch UI data immediately for quick display (read-only)
       _futureFavs = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFavorites(u);
       _futureFiveStar = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFiveStar(u);
       _futureDisliked = (u == null || u.isEmpty) ? null : LetterboxdService.fetchDisliked(u);
     });
     _primeShelfCache().then((_) { _checkGuideVisibility(); });
     _forceWriteLbUsernameIfMissing();
-    _ensureInitialSyncIfNeeded();
   }
 
   void _bindLbFromFirestore() {
@@ -463,6 +438,7 @@ class _ProfilePageState extends State<ProfilePage> {
         });
   }
 
+  // Sadece ekranda görünenleri yeniler, veritabanına sync yapmaz.
   Future<void> _refreshFavorites() async {
     if (_lbUsername == null || _lbUsername!.isEmpty) {
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -478,7 +454,7 @@ class _ProfilePageState extends State<ProfilePage> {
       if (_lbUsername == null || _lbUsername!.isEmpty) return;
     }
 
-    // Cache temizliği
+    // Cache temizliği ve yeniden çekme (Sadece Read)
     final sp = await SharedPreferences.getInstance();
     final key = 'lb_cache_${_lbUsername?.toLowerCase()}';
     await sp.remove(key);
@@ -493,45 +469,7 @@ class _ProfilePageState extends State<ProfilePage> {
       }
     });
 
-    // Veritabanına TAM senkronizasyon (Watchlist dahil)
-    // Eğer burada her çekmede veritabanına yazmak istemiyorsanız bu satırı yoruma alabilirsiniz.
-    // Ancak orijinal isteğinizde tam kod istendiği için bırakıyorum, döngü sorunu _bootstrapCounts içinde çözüldü.
-    if (_lbUsername != null) {
-      await _syncLetterboxdToFirestore(_lbUsername!);
-    }
-
     _primeShelfCache();
-  }
-
-  Future<void> _syncLetterboxdToFirestore(String lbUsername) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || lbUsername.isEmpty) return;
-
-    try {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profil ve Watchlist güncelleniyor...'), duration: Duration(seconds: 2)),
-        );
-      }
-
-      await LetterboxdService.fullSyncOnboarding(
-        uid: uid,
-        lbUsername: lbUsername,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profil başarıyla güncellendi!'), backgroundColor: Colors.green),
-        );
-      }
-    } catch (e) {
-      debugPrint("Sync error: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Güncelleme hatası: $e')),
-        );
-      }
-    }
   }
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
@@ -541,6 +479,8 @@ class _ProfilePageState extends State<ProfilePage> {
     _userSub?.cancel();
     _followSub?.cancel();
     _showGuideNotifier.dispose();
+    // Cache'i temizle ki diğer kullanıcılar görmesin (Güvenlik)
+    UserShelfCache.clear();
     super.dispose();
   }
 
@@ -625,6 +565,8 @@ class _ProfilePageState extends State<ProfilePage> {
           return const SizedBox(height: 140, child: Center(child: CircularProgressIndicator()));
         }
         final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+        
+        // Cache'i doldur (Diğer ekranlar için)
         UserShelfCache.setWatchlistFromMaps(films);
         
         return SizedBox(
@@ -714,55 +656,50 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // --- 1. SEKME: FİLMLER ---
+  // RefreshIndicator kaldırıldı, sadece ListView
    Widget _buildProfileContentAfterHeader() {
-    return RefreshIndicator(
-      onRefresh: () async {
-        await _refreshFavorites();
-        await _bootstrapCounts();
-      },
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          if (_lbUsername == null) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: const [Icon(Icons.alternate_email), SizedBox(width: 8), Text('Letterboxd bağlı değil')])),
-          const SizedBox(height: 12),
-          Builder(builder: (context) {
-             final bio = (_lastUserData?['bio'] ?? '').toString();
-             if(bio.isNotEmpty) return Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4)));
-             return const SizedBox.shrink();
-          }),
-          Builder(builder: (context) {
-             final age = _lastUserData?['age'];
-             final genres = List<String>.from(_lastUserData?['favGenres'] ?? []);
-             final dirs = List<String>.from(_lastUserData?['favDirectors'] ?? []);
-             final acts = List<String>.from(_lastUserData?['favActors'] ?? []);
-             if((age==null || age<=0) && genres.isEmpty && dirs.isEmpty && acts.isEmpty) return const SizedBox.shrink();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        if (_lbUsername == null) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: const [Icon(Icons.alternate_email), SizedBox(width: 8), Text('Letterboxd bağlı değil')])),
+        const SizedBox(height: 12),
+        Builder(builder: (context) {
+           final bio = (_lastUserData?['bio'] ?? '').toString();
+           if(bio.isNotEmpty) return Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4)));
+           return const SizedBox.shrink();
+        }),
+        Builder(builder: (context) {
+           final age = _lastUserData?['age'];
+           final genres = List<String>.from(_lastUserData?['favGenres'] ?? []);
+           final dirs = List<String>.from(_lastUserData?['favDirectors'] ?? []);
+           final acts = List<String>.from(_lastUserData?['favActors'] ?? []);
+           if((age==null || age<=0) && genres.isEmpty && dirs.isEmpty && acts.isEmpty) return const SizedBox.shrink();
 
-             Widget cw(String t, List<String> i) {
-               if(i.isEmpty) return const SizedBox.shrink();
-               return Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: Theme.of(context).textTheme.titleSmall), const SizedBox(height: 8), Wrap(spacing: 8, runSpacing: 8, children: i.map((e)=>Chip(label: Text(e))).toList())]));
-             }
-             return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-               if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [const Icon(Icons.cake, size: 18), const SizedBox(width: 6), Text('Yaş: $age')])),
-               cw('Sevdiğin türler', genres), cw('Sevdiğin yönetmenler', dirs), cw('Sevdiğin oyuncular', acts)
-             ]);
-          }),
-          const SizedBox(height: 16),
-          Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text('Favori Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          const SizedBox(height: 8),
-          _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 30),
-          Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevdiği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          const SizedBox(height: 8),
-          _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 30),
-          Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevmediği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          const SizedBox(height: 8),
-          _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 30),
-          Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Watchlist', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-          const SizedBox(height: 8),
-          _watchlistSectionFromKeys(List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(), maxItems: 30),
+           Widget cw(String t, List<String> i) {
+             if(i.isEmpty) return const SizedBox.shrink();
+             return Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: Theme.of(context).textTheme.titleSmall), const SizedBox(height: 8), Wrap(spacing: 8, runSpacing: 8, children: i.map((e)=>Chip(label: Text(e))).toList())]));
+           }
+           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+             if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [const Icon(Icons.cake, size: 18), const SizedBox(width: 6), Text('Yaş: $age')])),
+             cw('Sevdiğin türler', genres), cw('Sevdiğin yönetmenler', dirs), cw('Sevdiğin oyuncular', acts)
+           ]);
+        }),
+        const SizedBox(height: 16),
+        Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text('Favori Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+        const SizedBox(height: 8),
+        _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 30),
+        Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevdiği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+        const SizedBox(height: 8),
+        _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 30),
+        Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevmediği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+        const SizedBox(height: 8),
+        _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 30),
+        Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Watchlist', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
+        const SizedBox(height: 8),
+        _watchlistSectionFromKeys(List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(), maxItems: 30),
 
-          const SizedBox(height: 52),
-        ],
-      ),
+        const SizedBox(height: 52),
+      ],
     );
   }
 
@@ -788,7 +725,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         floating: true, snap: true, backgroundColor: Colors.black, elevation: 0, scrolledUnderElevation: 0, surfaceTintColor: Colors.transparent, automaticallyImplyLeading: false,
                         actions: [
                           IconButton(tooltip: 'Düzenle', icon: const Icon(Icons.edit_outlined), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
-                          IconButton(tooltip: 'Yenile', icon: const Icon(Icons.refresh), onPressed: () async { await _refreshFavorites(); await _bootstrapCounts(); }),
+                          // Yenile butonu kaldırıldı.
                           IconButton(tooltip: 'Ayarlar', icon: const Icon(Icons.settings_outlined), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
                         ],
                       ),
@@ -921,39 +858,37 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
     return '${diff.inDays}g';
   }
 
+  // RefreshIndicator kaldırıldı.
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return RefreshIndicator(
-      onRefresh: _loadActivities,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)]),
-          const SizedBox(height: 10),
-          if (_loadingActivities)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
-          else if (_activities.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
-          else
-            ListView.separated(
-              itemCount: _activities.length,
-              physics: const NeverScrollableScrollPhysics(),
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
-              itemBuilder: (context, i) {
-                final a = _activities[i];
-                final when = a.createdAt;
-                String timeLabel = '';
-                if (when != null) {
-                  timeLabel = _timeAgo(when);
-                }
-                return _ActivityWidget(item: a, timeLabel: timeLabel);
-              },
-            ),
-        ],
-      ),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)]),
+        const SizedBox(height: 10),
+        if (_loadingActivities)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
+        else if (_activities.isEmpty)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
+        else
+          ListView.separated(
+            itemCount: _activities.length,
+            physics: const NeverScrollableScrollPhysics(),
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
+            itemBuilder: (context, i) {
+              final a = _activities[i];
+              final when = a.createdAt;
+              String timeLabel = '';
+              if (when != null) {
+                timeLabel = _timeAgo(when);
+              }
+              return _ActivityWidget(item: a, timeLabel: timeLabel);
+            },
+          ),
+      ],
     );
   }
 }
@@ -1046,41 +981,36 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if(uid == null) return const SizedBox.shrink();
 
-    return RefreshIndicator(
-      onRefresh: () async {
-        await Future.delayed(const Duration(milliseconds: 500));
-        setState((){});
-      },
-      child: StreamBuilder<List<CustomList>>(
-        stream: CustomListService.instance.getUserLists(uid),
-        builder: (context, snapshot) {
-           if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-           final lists = snapshot.data ?? [];
-           
-           if (lists.isEmpty) {
-             return ListView(
-               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-               children: [
-                 _CreateListTile(onTap: () => _showCreateListDialog(context)),
-                 const SizedBox(height: 20),
-                 const Center(child: Text("Henüz liste oluşturmadın.")),
-               ],
-             );
-           }
-
-           return ListView.builder(
+    // RefreshIndicator kaldırıldı
+    return StreamBuilder<List<CustomList>>(
+      stream: CustomListService.instance.getUserLists(uid),
+      builder: (context, snapshot) {
+         if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+         final lists = snapshot.data ?? [];
+         
+         if (lists.isEmpty) {
+           return ListView(
              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-             itemCount: lists.length + 1,
-             itemBuilder: (context, index) {
-               if(index == 0) {
-                 return _CreateListTile(onTap: () => _showCreateListDialog(context));
-               }
-               final list = lists[index - 1];
-               return _CustomListCard(list: list, isMine: true);
-             }
+             children: [
+               _CreateListTile(onTap: () => _showCreateListDialog(context)),
+               const SizedBox(height: 20),
+               const Center(child: Text("Henüz liste oluşturmadın.")),
+             ],
            );
-        }
-      )
+         }
+
+         return ListView.builder(
+           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+           itemCount: lists.length + 1,
+           itemBuilder: (context, index) {
+             if(index == 0) {
+               return _CreateListTile(onTap: () => _showCreateListDialog(context));
+             }
+             final list = lists[index - 1];
+             return _CustomListCard(list: list, isMine: true);
+           }
+         );
+      }
     );
   }
 
