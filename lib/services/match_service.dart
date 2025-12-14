@@ -68,7 +68,7 @@ class MatchService {
 
   // In-memory short-term cache
   final Map<String, _FindCache> _findCache = {};
-
+  static const Duration _findCacheTtl = Duration(minutes: 5);
 
   void clearCache() => _findCache.clear();
 
@@ -214,104 +214,63 @@ class MatchService {
   /* ---------------------------------------------------------------------- */
   /* 1) EŞLEŞME LİSTESİ HESAPLA (findMatches)                               */
   /* ---------------------------------------------------------------------- */
-
-Future<List<MatchResult>> findMatches(String myUid, {int candidateLimit = 100}) async {
-  // 1. Kendi verini çek
-  final meDoc = await _users.doc(myUid).get();
-  if (!meDoc.exists) return [];
-  final myData = meDoc.data() ?? {};
-
-  // --- İMLEÇ MANTIĞI BAŞLANGICI ---
-  // Kullanıcının en son hangi tarihteki kullanıcıyı çektiğini alıyoruz.
-  final lastCursorTs = myData['lastFetchCursor'] as Timestamp?;
-  // --- İMLEÇ MANTIĞI BİTİŞİ ---
-
-  // 2. Etkileşime geçilenleri filtrele (Cache ve Likes tablosundan)
-  final hiddenUids = <String>{myUid};
-  
-  // Cache'teki sonuçları da hidden listesine ekle ki tekrar hesaplamasın
-  final cachedResults = _findCache[myUid]?.results;
-  if (cachedResults != null) {
-    hiddenUids.addAll(cachedResults.map((e) => e.uid));
-  }
-
-  try {
-    // Beğendiklerini ve geçtiklerini al
-    final likesQs = await _likes.where('uids', arrayContains: myUid).get();
-    for (final doc in likesQs.docs) {
-      final m = doc.data();
-      final a = m['a'] as String?;
-      final b = m['b'] as String?;
-      if (a == null || b == null) continue;
-      // Karşı tarafın ID'sini bul ve gizlenenlere ekle
-      hiddenUids.add(myUid == a ? b : a);
-    }
-  } catch (_) {}
-
-  // 3. Adayları Getir (İyileştirilmiş Sorgu)
-  // 'createdAt' alanına göre sırala. En yeniler veya en eskiler fark etmez,
-  // önemli olan sıranın sabit olmasıdır. (Burada 'descending: true' = En yeniler önce)
-  Query<Map<String, dynamic>> query = _users.orderBy('createdAt', descending: true);
-
-  // Eğer daha önce bir yerde kaldıysak, oradan sonrasını getir
-  if (lastCursorTs != null) {
-    query = query.startAfter([lastCursorTs]);
-  }
-
-  // LIMIT: hiddenUids kontrolünü hesaba katarak biraz fazla çekiyoruz
-  // çünkü çektiğimiz 100 kişinin 50'si zaten beğenilmiş olabilir.
-  final allCandidates = await query.limit(candidateLimit + hiddenUids.length).get();
-  
-  // Eğer hiç aday kalmadıysa ve cursor varsa (yani sona geldiysek),
-  // belki cursor'ı sıfırlayıp başa dönmek isteyebilirsiniz (opsiyonel).
-  if (allCandidates.docs.isEmpty) {
-     // Kullanıcı bitti.
-     return [];
-  }
-
-  final List<MatchResult> out = [];
-  Timestamp? newLastCursor; // Bu batch'teki son kişinin tarihi
-
-  // 4. Her aday için hesapla
-  for (final d in allCandidates.docs) {
-    final uid = d.id;
-    final docData = d.data();
-    
-    // İşlenen son dokümanın tarihini takip et
-    if (docData['createdAt'] is Timestamp) {
-      newLastCursor = docData['createdAt'] as Timestamp;
+  Future<List<MatchResult>> findMatches(String myUid, {int candidateLimit = 100}) async {
+    // 1. Cache Kontrolü
+    final now = DateTime.now();
+    final cached = _findCache[myUid];
+    if (cached != null && now.difference(cached.ts) < _findCacheTtl) {
+      if (cached.results.isNotEmpty) return cached.results;
     }
 
-    if (hiddenUids.contains(uid)) continue;
+    // 2. Kendi verini çek
+    final meDoc = await _users.doc(myUid).get();
+    if (!meDoc.exists) return [];
+    final myData = meDoc.data() ?? {};
 
-    // Hesaplama Motoru
-    final result = _computeMatch(myUid, uid, myData, docData);
-    if (result != null) {
-      out.add(result);
+    // 3. Etkileşime geçilenleri filtrele
+    final hiddenUids = <String>{myUid};
+    try {
+      final likesQs = await _likes.where('uids', arrayContains: myUid).get();
+      for (final doc in likesQs.docs) {
+        final m = doc.data();
+        final a = m['a'] as String?;
+        final b = m['b'] as String?;
+        if (a == null || b == null) continue;
+        final meIsA = (myUid == a);
+        final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
+        final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
+        final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
+        if (myLiked || myPass || (myLiked && otherLiked)) {
+          hiddenUids.add(meIsA ? b : a);
+        }
+      }
+    } catch (_) {}
+
+    // 4. Adayları Getir
+    final allCandidates = await _users.limit(candidateLimit).get();
+    final List<MatchResult> out = [];
+
+    // 5. Her aday için _computeMatch çağır
+    for (final d in allCandidates.docs) {
+      final uid = d.id;
+      if (hiddenUids.contains(uid)) continue;
+
+      final result = _computeMatch(myUid, uid, myData, d.data());
+      if (result != null) {
+        out.add(result);
+      }
     }
-  }
 
-  // --- İMLECİ GÜNCELLE ---
-  // Çekilen son kişinin tarihini kullanıcının profiline kaydet.
-  // Böylece bir sonraki sefer aynı kişileri çekmeyiz.
-  if (newLastCursor != null) {
-    await _users.doc(myUid).update({
-      'lastFetchCursor': newLastCursor
+    // 6. Sırala
+    out.sort((a, b) {
+      final s = b.score.compareTo(a.score);
+      if (s != 0) return s;
+      return b.commonFiveCount.compareTo(a.commonFiveCount);
     });
+
+    _findCache[myUid] = _FindCache(out, DateTime.now());
+    return out;
   }
-
-  // 5. Sırala
-  out.sort((a, b) {
-    final s = b.score.compareTo(a.score);
-    if (s != 0) return s;
-    return b.commonFiveCount.compareTo(a.commonFiveCount);
-  });
-
-  // Cache'i güncelle
-  _findCache[myUid] = _FindCache(out, DateTime.now());
-  
-  return out;
-}
 
   /* ---------------------------------------------------------------------- */
   /* 2) TEKİL KULLANICI UYUMU HESAPLA (Profil Ekranı İçin)                  */

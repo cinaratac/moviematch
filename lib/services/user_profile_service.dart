@@ -306,7 +306,7 @@ class UserProfileService {
   // favoritesKeys sadece gerçek favoriler (4'lü vitrin) için kullanılmalı.
   // Bu fonksiyon artık saveTasteProfile içinden 'loved' listesiyle ÇAĞRILMIYOR.
   // LetterboxdService.syncFavoritesToFirestore tarafından yönetilmeli.
-  
+
 
   /// Mirror a user's Letterboxd watchlist keys into users/{uid} for visibility
   /// Keeps this service the single place that shapes root user doc mirrors.
