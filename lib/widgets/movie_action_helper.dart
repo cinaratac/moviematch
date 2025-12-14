@@ -7,7 +7,13 @@ import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/models/shelf_target.dart'; 
-import 'package:fluttergirdi/services/feed_service.dart'; // FeedService için import
+import 'package:fluttergirdi/services/feed_service.dart';
+
+// --- YENİ İMPORTLAR ---
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:fluttergirdi/secrets.dart';
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
 class MovieActionHelper {
   static void show(
@@ -55,6 +61,68 @@ class _MovieActionSheet extends StatelessWidget {
       case ShelfTarget.disliked: return 'dislikedKeys';
       case ShelfTarget.favorites: return 'favoritesKeys';
       case ShelfTarget.watchlist: return 'watchlistKeys';
+    }
+  }
+
+  // --- YENİ FONKSİYON: ID BUL VE GİT ---
+  Future<void> _fetchAndNavigateToDetails(BuildContext context) async {
+    // Önce katalogdan tmdbId'yi kontrol et
+    int? tmdbId;
+    if (docId != null) {
+      final doc = await FirebaseFirestore.instance.collection('catalog_films').doc(docId).get();
+      if (doc.exists) {
+        tmdbId = doc.data()?['tmdbId'];
+      }
+    }
+
+    if (tmdbId == null) {
+      // Bulunamadıysa API'den ara
+      // Loading dialog açmayalım çünkü sheet kapanınca context değişebilir, 
+      // direkt arayıp varsa gidelim, yoksa hata verelim.
+      try {
+        final searchUrl = Uri.parse(
+          'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(title)}&language=tr-TR&include_adult=false'
+        );
+        final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
+        
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          final results = data['results'] as List?;
+          if (results != null && results.isNotEmpty) {
+            tmdbId = results[0]['id'];
+            
+            // Bulduysak kataloğa kaydedelim
+            if (docId != null && tmdbId != null) {
+              FirebaseFirestore.instance
+                  .collection('catalog_films')
+                  .doc(docId)
+                  .set({'tmdbId': tmdbId}, SetOptions(merge: true));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!context.mounted) return;
+    
+    // Sheet'i kapat
+    Navigator.pop(context);
+
+    if (tmdbId != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MovieDetailScreen(
+            tmdbId: tmdbId!,
+            title: title,
+            posterUrl: posterUrl,
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Film detayları bulunamadı.'))
+      );
     }
   }
 
@@ -152,6 +220,12 @@ class _MovieActionSheet extends StatelessWidget {
             ),
           ),
           const Divider(),
+          // --- YENİ SEÇENEK: FİLM DETAYLARI ---
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('Film Detayları'),
+            onTap: () => _fetchAndNavigateToDetails(context),
+          ),
           ListTile(
             leading: const Icon(Icons.edit_note_outlined),
             title: const Text('Feed\'de Paylaş'),
@@ -190,7 +264,6 @@ class _MovieActionSheet extends StatelessWidget {
         builder: (_) => ComposePostPage(
           maxChars: 280,
           initialMovie: {'title': title, 'poster': posterUrl}, 
-          // DÜZELTME: required isSpoiler eklendi
           onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
              final user = FirebaseAuth.instance.currentUser;
              if (user == null) return;
@@ -209,8 +282,6 @@ class _MovieActionSheet extends StatelessWidget {
                photoURL: postImageUrl,
                displayName: user.displayName,
                handle: user.email?.split('@')[0],
-               
-               // Yeni Alanlar
                rating: rating,
                isSpoiler: isSpoiler,
                tags: tags,
@@ -241,7 +312,7 @@ class _MovieActionSheet extends StatelessWidget {
   }
 }
 
-// ... (InboxPickerSheet ve _sendMovieMessage kodları aynen kalsın) ...
+// ... (_InboxPickerSheet ve _sendMovieMessage vb. aynı kalıyor) ...
 class _InboxPickerSheet extends StatelessWidget {
   final String movieTitle;
   final String moviePoster;

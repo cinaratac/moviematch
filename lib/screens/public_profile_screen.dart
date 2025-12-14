@@ -15,21 +15,24 @@ import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
-import 'package:fluttergirdi/widgets/movie_action_helper.dart';
-import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/models/gamification.dart'; // Rozetler için
+
+// --- YENİ EKLENEN İMPORTLAR (Detay Sayfası ve API için) ---
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:fluttergirdi/secrets.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
-  final String id; 
+  final String id;
   final String text;
   final DateTime? createdAt;
-  final String posterUrl; 
-  final String title; 
+  final String posterUrl;
+  final String title;
   final int likeCount;
   final int replyCount;
-  final int repostCount;
-  final int? tmdbId; 
+  final int? tmdbId;
 
   const _ActivityItemData({
     required this.id,
@@ -39,7 +42,6 @@ class _ActivityItemData {
     this.title = '',
     this.likeCount = 0,
     this.replyCount = 0,
-    this.repostCount = 0,
     this.tmdbId,
   });
 }
@@ -75,16 +77,79 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return null;
   }
 
+  // --- YENİ EKLENEN FONKSİYON: TMDB ID BULMA VE YÖNLENDİRME ---
+  Future<void> _handleFilmTap(String title, String posterUrl, String? docId, int? existingTmdbId) async {
+    int? id = existingTmdbId;
+
+    if (id == null) {
+      // ID yoksa ara
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => const Center(child: CircularProgressIndicator()),
+      );
+
+      try {
+        final searchUrl = Uri.parse(
+            'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(title)}&language=tr-TR&include_adult=false');
+        final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
+
+        if (!mounted) return;
+        Navigator.pop(context); // Loading kapa
+
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          final results = data['results'] as List?;
+          if (results != null && results.isNotEmpty) {
+            id = results[0]['id'];
+
+            // Bulunan ID'yi kataloğa kaydet
+            if (docId != null && docId.isNotEmpty && id != null) {
+              FirebaseFirestore.instance
+                  .collection('catalog_films')
+                  .doc(docId)
+                  .set({'tmdbId': id}, SetOptions(merge: true));
+            }
+          } else {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('Film detayları bulunamadı.')));
+            return;
+          }
+        }
+      } catch (e) {
+        if (!mounted) return;
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Bağlantı hatası oluştu.')));
+        return;
+      }
+    }
+
+    if (id != null && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MovieDetailScreen(
+            tmdbId: id!,
+            title: title,
+            posterUrl: posterUrl,
+          ),
+        ),
+      );
+    }
+  }
+
   // --- PROFİL RESMİ BÜYÜTME ---
   void _showEnlargedImage(String imageUrl) {
     if (imageUrl.isEmpty) return;
     showDialog(
       context: context,
-      barrierDismissible: true, 
-      barrierColor: Colors.black.withOpacity(0.9), 
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.9),
       builder: (ctx) {
         return GestureDetector(
-          onTap: () => Navigator.pop(ctx), 
+          onTap: () => Navigator.pop(ctx),
           child: InteractiveViewer(
             child: Center(
               child: Image.network(
@@ -196,31 +261,36 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '') as String;
                   final t = _catalogTitle(m);
                   final tmdbId = _extractTmdbId(m);
+                  final docId = limited[i];
 
-                  return AspectRatio(
-                    aspectRatio: 2 / 3,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          PosterImage(posterUrl: poster, tmdbId: tmdbId, title: t, fit: BoxFit.cover),
-                          if (t.isNotEmpty)
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                color: Colors.black54,
-                                child: Text(
-                                  t,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12, color: Colors.white),
-                                  textAlign: TextAlign.center,
+                  return GestureDetector(
+                    onTap: () => _handleFilmTap(t, poster, docId, tmdbId),
+                    child: AspectRatio(
+                      aspectRatio: 2 / 3,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            PosterImage(
+                                posterUrl: poster, tmdbId: tmdbId, title: t, fit: BoxFit.cover),
+                            if (t.isNotEmpty)
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  color: Colors.black54,
+                                  child: Text(
+                                    t,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12, color: Colors.white),
+                                    textAlign: TextAlign.center,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -251,8 +321,13 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       final part = clean.sublist(i, i + chunk > clean.length ? clean.length : i + chunk);
       if (part.isEmpty) continue;
       try {
-        final qs = await fs.collection('catalog_films').where(FieldPath.documentId, whereIn: part).get();
-        for (final d in qs.docs) found[d.id] = d.data();
+        final qs = await fs
+            .collection('catalog_films')
+            .where(FieldPath.documentId, whereIn: part)
+            .get();
+        for (final d in qs.docs) {
+          found[d.id] = d.data();
+        }
       } catch (_) {}
     }
     final missing = ordered.where((id) => !found.containsKey(id)).toList();
@@ -263,14 +338,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       } catch (_) {}
     }
     final out = <Map<String, dynamic>?>[];
-    for (final id in ordered) out.add(found[id]);
+    for (final id in ordered) {
+      out.add(found[id]);
+    }
     return out;
   }
 
   @override
   void initState() {
     super.initState();
-    _userStream = FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(includeMetadataChanges: false);
+    _userStream = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.uid)
+        .snapshots(includeMetadataChanges: false);
     _loadFollowing();
     _bootstrapFollowCounts();
     _loadBlockStatus();
@@ -311,13 +391,23 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       return;
     }
     try {
-      final snap = await FirebaseFirestore.instance.collection('users').doc(myUid).collection('following').doc(widget.uid).get(const GetOptions(source: Source.server));
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(myUid)
+          .collection('following')
+          .doc(widget.uid)
+          .get(const GetOptions(source: Source.server));
       if (!mounted) return;
       final v = snap.exists;
       if (_isFollowing != v) setState(() => _isFollowing = v);
     } catch (_) {
       try {
-        final snap = await FirebaseFirestore.instance.collection('users').doc(myUid).collection('following').doc(widget.uid).get(const GetOptions(source: Source.cache));
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(myUid)
+            .collection('following')
+            .doc(widget.uid)
+            .get(const GetOptions(source: Source.cache));
         if (!mounted) return;
         final v = snap.exists;
         if (_isFollowing != v) setState(() => _isFollowing = v);
@@ -365,8 +455,18 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final other = widget.uid;
     try {
       final fs = FirebaseFirestore.instance;
-      final meBlocked = await fs.collection('users').doc(myUid).collection('blocked').doc(other).get(const GetOptions(source: Source.server));
-      final heBlocked = await fs.collection('users').doc(other).collection('blocked').doc(myUid).get(const GetOptions(source: Source.server));
+      final meBlocked = await fs
+          .collection('users')
+          .doc(myUid)
+          .collection('blocked')
+          .doc(other)
+          .get(const GetOptions(source: Source.server));
+      final heBlocked = await fs
+          .collection('users')
+          .doc(other)
+          .collection('blocked')
+          .doc(myUid)
+          .get(const GetOptions(source: Source.server));
       if (!mounted) return;
       setState(() {
         _isBlocked = meBlocked.exists;
@@ -397,14 +497,33 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 children: [
                   const Text('Bu kullanıcıyı neden bildiriyorsunuz?'),
                   const SizedBox(height: 10),
-                  RadioListTile<String>(title: const Text('Spam veya Yanıltıcı'), value: 'Spam', groupValue: selectedReason, onChanged: (v) => setDialogState(() => selectedReason = v!)),
-                  RadioListTile<String>(title: const Text('Hakaret / Zorbalık'), value: 'Harassment', groupValue: selectedReason, onChanged: (v) => setDialogState(() => selectedReason = v!)),
-                  RadioListTile<String>(title: const Text('Uygunsuz İçerik'), value: 'Inappropriate', groupValue: selectedReason, onChanged: (v) => setDialogState(() => selectedReason = v!)),
-                  RadioListTile<String>(title: const Text('Diğer'), value: 'Other', groupValue: selectedReason, onChanged: (v) => setDialogState(() => selectedReason = v!)),
+                  RadioListTile<String>(
+                      title: const Text('Spam veya Yanıltıcı'),
+                      value: 'Spam',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!)),
+                  RadioListTile<String>(
+                      title: const Text('Hakaret / Zorbalık'),
+                      value: 'Harassment',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!)),
+                  RadioListTile<String>(
+                      title: const Text('Uygunsuz İçerik'),
+                      value: 'Inappropriate',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!)),
+                  RadioListTile<String>(
+                      title: const Text('Diğer'),
+                      value: 'Other',
+                      groupValue: selectedReason,
+                      onChanged: (v) => setDialogState(() => selectedReason = v!)),
                   if (selectedReason == 'Other')
                     TextField(
                       controller: detailsCtrl,
-                      decoration: const InputDecoration(hintText: 'Lütfen açıklayın...', labelText: 'Açıklama', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                          hintText: 'Lütfen açıklayın...',
+                          labelText: 'Açıklama',
+                          border: OutlineInputBorder()),
                       maxLines: 3,
                     ),
                 ],
@@ -415,10 +534,17 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               FilledButton(
                 onPressed: () {
                   Navigator.of(ctx).pop();
-                  UserProfileService.instance.reportUser(
-                    reporterId: myUid, reportedId: targetUid, reason: selectedReason, details: detailsCtrl.text.trim(),
-                  ).then((_) {
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bildirim için teşekkürler.')));
+                  UserProfileService.instance
+                      .reportUser(
+                    reporterId: myUid,
+                    reportedId: targetUid,
+                    reason: selectedReason,
+                    details: detailsCtrl.text.trim(),
+                  )
+                      .then((_) {
+                    if (mounted)
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(const SnackBar(content: Text('Bildirim için teşekkürler.')));
                   });
                 },
                 child: const Text('Bildir'),
@@ -429,7 +555,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       },
     );
   }
-  // --- YENİ STAT WIDGET'I (Sayı Kalın, Yazı Gri) ---
+
   Widget _buildStatItem(BuildContext context, String label, int count, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
@@ -442,27 +568,28 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           Text(
             '$count',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              fontSize: 16,
-            ),
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  fontSize: 16,
+                ),
           ),
           const SizedBox(width: 4),
           Text(
             label,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontSize: 15,
-            ),
+                  color: Colors.white.withValues(alpha: 0.6),
+                  fontSize: 15,
+                ),
           ),
         ],
       ),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3, // 3 SEKME
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: Colors.transparent,
@@ -478,7 +605,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                 if (value == 'report') _showReportDialog(myUid, widget.uid);
               },
               itemBuilder: (ctx) => const [
-                PopupMenuItem(value: 'report', child: ListTile(leading: Icon(Icons.flag_outlined), title: Text('Kişiyi bildir'), contentPadding: EdgeInsets.zero)),
+                PopupMenuItem(
+                    value: 'report',
+                    child: ListTile(
+                        leading: Icon(Icons.flag_outlined),
+                        title: Text('Kişiyi bildir'),
+                        contentPadding: EdgeInsets.zero)),
               ],
             ),
           ],
@@ -487,290 +619,360 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: _userStream,
           builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-            if (!snap.hasData || !snap.data!.exists) return const Center(child: Text('Kullanıcı bulunamadı'));
-            
+            if (snap.connectionState == ConnectionState.waiting)
+              return const Center(child: CircularProgressIndicator());
+            if (!snap.hasData || !snap.data!.exists)
+              return const Center(child: Text('Kullanıcı bulunamadı'));
+
             final data = snap.data!.data()!;
             final displayName = (data['displayName'] ?? '') as String;
             final lb = (data['letterboxdUsername'] ?? '') as String;
             final photoURL = (data['photoURL'] ?? '') as String;
             final appUsername = (data['username'] ?? '') as String;
 
-            final titleText = appUsername.isNotEmpty ? appUsername : (displayName.isNotEmpty ? displayName : (lb.isNotEmpty ? '@$lb' : '(İsimsiz)'));
+            final titleText = appUsername.isNotEmpty
+                ? appUsername
+                : (displayName.isNotEmpty
+                    ? displayName
+                    : (lb.isNotEmpty ? '@$lb' : '(İsimsiz)'));
 
             return NestedScrollView(
-  headerSliverBuilder: (context, inner) {
-    return [
-      SliverToBoxAdapter(
-        child: Stack(
-          children: [
-            // 1. ARKA PLAN BLUR (Film Afişinden)
-            SizedBox(
-              height: MediaQuery.of(context).padding.top + kToolbarHeight + 165,
-              child: Stack(
-                children: [_blurBackdropFromKeys(List<String>.from((data['favoritesKeys'] ?? const [])))],
-              ),
-            ),
-            
-            // 2. PROFİL İÇERİĞİ
-            Padding(
-              padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + kToolbarHeight + 12, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // --- AVATAR (İnce Çerçeveli & Büyütülmüş) ---
-                      GestureDetector(
-                        onTap: () => _showEnlargedImage(photoURL),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1),
-                          ),
-                          child: CircleAvatar(
-                            radius: 40, 
-                            backgroundColor: Colors.grey.shade800,
-                            backgroundImage: photoURL.isNotEmpty ? NetworkImage(photoURL) : null,
-                            child: photoURL.isEmpty
-                                ? Text(
-                                    displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-                                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-                                  )
-                                : null,
+              headerSliverBuilder: (context, inner) {
+                return [
+                  SliverToBoxAdapter(
+                    child: Stack(
+                      children: [
+                        SizedBox(
+                          height: MediaQuery.of(context).padding.top + kToolbarHeight + 165,
+                          child: Stack(
+                            children: [
+                              _blurBackdropFromKeys(
+                                  List<String>.from((data['favoritesKeys'] ?? const [])))
+                            ],
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 20),
-                      
-                      // --- İSİM & BİLGİLER ---
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            // İsim
-                            Text(
-                              titleText, 
-                              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w800, 
-                                letterSpacing: -0.5,
-                              ),
-                              overflow: TextOverflow.ellipsis
-                            ),
-                            if (displayName.isNotEmpty && titleText != displayName)
-                              Text(displayName, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70), overflow: TextOverflow.ellipsis),
-                            
-                            // Letterboxd "Hap" Kartı (Glassmorphism)
-                            if (lb.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 6, bottom: 6),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: BackdropFilter(
-                                    filter: ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(16,
+                              MediaQuery.of(context).padding.top + kToolbarHeight + 12, 16, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  GestureDetector(
+                                    onTap: () => _showEnlargedImage(photoURL),
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                       decoration: BoxDecoration(
-                                        color: Theme.of(context).brightness == Brightness.dark 
-                                            ? Colors.white.withValues(alpha: 0.15) 
-                                            : Colors.black.withValues(alpha: 0.08),
-                                        borderRadius: BorderRadius.circular(12),
+                                        shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: Colors.white.withValues(alpha: 0.1),
-                                          width: 0.5
-                                        ),
+                                            color: Colors.white.withValues(alpha: 0.1), width: 1),
                                       ),
-                                      child: Text(
-                                        'Letterboxd: @$lb',
-                                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          color: Colors.white.withValues(alpha: 0.9),
-                                          fontWeight: FontWeight.w500,
-                                          fontSize: 13,
-                                        ),
+                                      child: CircleAvatar(
+                                        radius: 40,
+                                        backgroundColor: Colors.grey.shade800,
+                                        backgroundImage:
+                                            photoURL.isNotEmpty ? NetworkImage(photoURL) : null,
+                                        child: photoURL.isEmpty
+                                            ? Text(
+                                                displayName.isNotEmpty
+                                                    ? displayName[0].toUpperCase()
+                                                    : '?',
+                                                style: const TextStyle(
+                                                    fontSize: 28,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white),
+                                              )
+                                            : null,
                                       ),
                                     ),
                                   ),
-                                ),
-                              ),
+                                  const SizedBox(width: 20),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text(titleText,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .headlineSmall
+                                                ?.copyWith(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w800,
+                                                  letterSpacing: -0.5,
+                                                ),
+                                            overflow: TextOverflow.ellipsis),
+                                        if (displayName.isNotEmpty && titleText != displayName)
+                                          Text(displayName,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(color: Colors.white70),
+                                              overflow: TextOverflow.ellipsis),
+                                        if (lb.isNotEmpty)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 6, bottom: 6),
+                                            child: ClipRRect(
+                                              borderRadius: BorderRadius.circular(12),
+                                              child: BackdropFilter(
+                                                filter:
+                                                    ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                                                child: Container(
+                                                  padding: const EdgeInsets.symmetric(
+                                                      horizontal: 10, vertical: 5),
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context).brightness ==
+                                                            Brightness.dark
+                                                        ? Colors.white.withValues(alpha: 0.15)
+                                                        : Colors.black.withValues(alpha: 0.08),
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    border: Border.all(
+                                                        color: Colors.white
+                                                            .withValues(alpha: 0.1),
+                                                        width: 0.5),
+                                                  ),
+                                                  child: Text(
+                                                    'Letterboxd: @$lb',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodyMedium
+                                                        ?.copyWith(
+                                                          color: Colors.white
+                                                              .withValues(alpha: 0.9),
+                                                          fontWeight: FontWeight.w500,
+                                                          fontSize: 13,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        StreamBuilder<DocumentSnapshot>(
+                                          stream: FirebaseFirestore.instance
+                                              .collection('users')
+                                              .doc(widget.uid)
+                                              .snapshots(),
+                                          builder: (context, snap) {
+                                            if (!snap.hasData || !snap.data!.exists)
+                                              return const SizedBox.shrink();
+                                            final uData =
+                                                snap.data!.data() as Map<String, dynamic>?;
+                                            final badges =
+                                                List<String>.from(uData?['badges'] ?? []);
+                                            if (badges.isEmpty) return const SizedBox.shrink();
 
-                            // Rozetler
-                            StreamBuilder<DocumentSnapshot>(
-                              stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
-                              builder: (context, snap) {
-                                if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
-                                final uData = snap.data!.data() as Map<String, dynamic>?;
-                                final badges = List<String>.from(uData?['badges'] ?? []);
-                                if (badges.isEmpty) return const SizedBox.shrink();
-
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
-                                  child: Wrap(
-                                    spacing: 6,
-                                    runSpacing: 4,
-                                    children: badges.map((badgeId) {
-                                      final badge = AppBadge.allBadges.firstWhere(
-                                        (b) => b.id == badgeId, 
-                                        orElse: () => AppBadge.allBadges.first
-                                      );
-                                      return Container(
-                                        padding: const EdgeInsets.all(4),
-                                        decoration: BoxDecoration(
-                                          color: badge.color.withOpacity(0.15),
-                                          shape: BoxShape.circle,
+                                            return Padding(
+                                              padding: const EdgeInsets.only(bottom: 8.0),
+                                              child: Wrap(
+                                                spacing: 6,
+                                                runSpacing: 4,
+                                                children: badges.map((badgeId) {
+                                                  final badge = AppBadge.allBadges.firstWhere(
+                                                      (b) => b.id == badgeId,
+                                                      orElse: () => AppBadge.allBadges.first);
+                                                  return Container(
+                                                    padding: const EdgeInsets.all(4),
+                                                    decoration: BoxDecoration(
+                                                      color: badge.color.withValues(alpha: 0.15),
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: Icon(badge.icon,
+                                                        size: 12, color: badge.color),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            );
+                                          },
                                         ),
-                                        child: Icon(badge.icon, size: 12, color: badge.color),
-                                      );
-                                    }).toList(),
+                                        Row(
+                                          children: [
+                                            _buildStatItem(
+                                              context,
+                                              'Takipçi',
+                                              _followersCount ?? 0,
+                                              () => _showUserList('Takipçiler', 'followers'),
+                                            ),
+                                            const SizedBox(width: 24),
+                                            _buildStatItem(
+                                              context,
+                                              'Takip',
+                                              _followingCount ?? 0,
+                                              () => _showUserList('Takip Edilenler', 'following'),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                );
-                              },
-                            ),
-
-                            // --- YENİ MİNİMALİST İSTATİSTİKLER ---
-                            Row(
-                              children: [
-                                _buildStatItem(
-                                  context,
-                                  'Takipçi', 
-                                  _followersCount ?? 0,
-                                  () => _showUserList('Takipçiler', 'followers'),
-                                ),
-                                const SizedBox(width: 24),
-                                _buildStatItem(
-                                  context,
-                                  'Takip', 
-                                  _followingCount ?? 0,
-                                  () => _showUserList('Takip Edilenler', 'following'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 16),
-
-                  // Engel Durumu Uyarısı
-                  if (_isBlocked || _hasBlockedMe)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Theme.of(context).colorScheme.error.withOpacity(0.4)),
-                      ),
-                      child: Row(children: const [Icon(Icons.block, size: 16), SizedBox(width: 8), Expanded(child: Text('Bu kullanıcıyla etkileşim engellendi.'))]),
-                    ),
-                  
-                  // --- AKSİYON BUTONLARI (Mesaj & Takip) ---
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Row(
-                      children: [
-                        if (!_isBlocked && !_hasBlockedMe && FirebaseAuth.instance.currentUser?.uid != widget.uid) ...[
-                          Expanded(
-                            child: FilledButton.tonalIcon(
-                              onPressed: () async {
-                                final myUid = FirebaseAuth.instance.currentUser?.uid;
-                                if (myUid == null) return;
-                                final chatId = await ChatService.instance.getOrCreateChat(myUid, widget.uid);
-                                if (!context.mounted) return;
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(chatId: chatId, otherUid: widget.uid)));
-                              },
-                              style: FilledButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12), 
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                                ],
                               ),
-                              icon: const Icon(Icons.message_rounded, size: 20),
-                              label: const Text('Mesaj'),
-                            ),
+                              const SizedBox(height: 16),
+                              if (_isBlocked || _hasBlockedMe)
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .error
+                                            .withValues(alpha: 0.4)),
+                                  ),
+                                  child: Row(children: const [
+                                    Icon(Icons.block, size: 16),
+                                    SizedBox(width: 8),
+                                    Expanded(child: Text('Bu kullanıcıyla etkileşim engellendi.'))
+                                  ]),
+                                ),
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 12.0),
+                                child: Row(
+                                  children: [
+                                    if (!_isBlocked &&
+                                        !_hasBlockedMe &&
+                                        FirebaseAuth.instance.currentUser?.uid != widget.uid) ...[
+                                      Expanded(
+                                        child: FilledButton.tonalIcon(
+                                          onPressed: () async {
+                                            final myUid =
+                                                FirebaseAuth.instance.currentUser?.uid;
+                                            if (myUid == null) return;
+                                            final chatId = await ChatService.instance
+                                                .getOrCreateChat(myUid, widget.uid);
+                                            if (!context.mounted) return;
+                                            Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                    builder: (_) => ChatRoomScreen(
+                                                        chatId: chatId, otherUid: widget.uid)));
+                                          },
+                                          style: FilledButton.styleFrom(
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(12))),
+                                          icon: const Icon(Icons.message_rounded, size: 20),
+                                          label: const Text('Mesaj'),
+                                        ),
+                                      ),
+                                      if (FirebaseAuth.instance.currentUser?.uid != null &&
+                                          FirebaseAuth.instance.currentUser!.uid != widget.uid)
+                                        const SizedBox(width: 10),
+                                    ],
+                                    if (FirebaseAuth.instance.currentUser?.uid != null &&
+                                        FirebaseAuth.instance.currentUser!.uid != widget.uid)
+                                      Expanded(
+                                        child: FilledButton.icon(
+                                          onPressed: _followBusy ? null : _toggleFollow,
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: _isFollowing == true
+                                                ? Colors.grey.shade800
+                                                : Colors.blue,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(12)),
+                                          ),
+                                          icon: _followBusy
+                                              ? const SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child: CircularProgressIndicator(
+                                                      strokeWidth: 2, color: Colors.white))
+                                              : Icon(
+                                                  _isFollowing == true
+                                                      ? Icons.check
+                                                      : Icons.person_add,
+                                                  size: 20),
+                                          label: Text(_isFollowing == true
+                                              ? 'Takip Ediliyor'
+                                              : 'Takip Et'),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              TabBar(
+                                indicator: UnderlineTabIndicator(
+                                    borderSide: BorderSide(
+                                        width: 2,
+                                        color: Theme.of(context).colorScheme.primary)),
+                                indicatorSize: TabBarIndicatorSize.tab,
+                                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                                labelPadding: const EdgeInsets.symmetric(vertical: 6),
+                                labelStyle: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w700),
+                                unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
+                                labelColor: Theme.of(context).colorScheme.onSurface,
+                                unselectedLabelColor: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.7),
+                                tabs: const [
+                                  Tab(text: 'Filmler'),
+                                  Tab(text: 'Aktiviteler'),
+                                  Tab(text: 'Listeler'),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                            ],
                           ),
-                          if (FirebaseAuth.instance.currentUser?.uid != null && FirebaseAuth.instance.currentUser!.uid != widget.uid)
-                            const SizedBox(width: 10),
-                        ],
-                        if (FirebaseAuth.instance.currentUser?.uid != null && FirebaseAuth.instance.currentUser!.uid != widget.uid)
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: _followBusy ? null : _toggleFollow,
-                              style: FilledButton.styleFrom(
-                                backgroundColor: _isFollowing == true ? Colors.grey.shade800 : Colors.blue, 
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), 
+                        ),
+                        if (_matchScore != null && _matchScore! > 0)
+                          Positioned(
+                            top: MediaQuery.of(context).padding.top + kToolbarHeight + 10,
+                            right: 16,
+                            child: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade600,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.3),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 3))
+                                ],
                               ),
-                              icon: _followBusy
-                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                  : Icon(_isFollowing == true ? Icons.check : Icons.person_add, size: 20),
-                              label: Text(_isFollowing == true ? 'Takip Ediliyor' : 'Takip Et'),
+                              alignment: Alignment.center,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text('%$_matchScore',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w900,
+                                          height: 1.0)),
+                                  const Text('UYUM',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 7,
+                                          fontWeight: FontWeight.w500,
+                                          height: 1.0)),
+                                ],
+                              ),
                             ),
                           ),
                       ],
                     ),
                   ),
-
-                  // TAB BAR
-                  TabBar(
-                    indicator: UnderlineTabIndicator(borderSide: BorderSide(width: 2, color: Theme.of(context).colorScheme.primary)),
-                    indicatorSize: TabBarIndicatorSize.tab,
-                    overlayColor: WidgetStateProperty.all(Colors.transparent),
-                    labelPadding: const EdgeInsets.symmetric(vertical: 6),
-                    labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                    unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
-                    labelColor: Theme.of(context).colorScheme.onSurface,
-                    unselectedLabelColor: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                    tabs: const [
-                      Tab(text: 'Filmler'),
-                      Tab(text: 'Aktiviteler'),
-                      Tab(text: 'Listeler'),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
+                ];
+              },
+              body: TabBarView(
+                children: [
+                  _buildProfileTabBody(data),
+                  _ActivitiesTab(uid: widget.uid),
+                  _PublicListsTab(uid: widget.uid),
                 ],
               ),
-            ),
-            
-            // 3. UYUM SKORU (Sağ Üst Köşe)
-            if (_matchScore != null && _matchScore! > 0)
-              Positioned(
-                top: MediaQuery.of(context).padding.top + kToolbarHeight + 10,
-                right: 16,
-                child: Container(
-                  width: 50, height: 50,
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade600,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 6, offset: const Offset(0, 3))],
-                  ),
-                  alignment: Alignment.center,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text('%$_matchScore', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900, height: 1.0)),
-                      const Text('UYUM', style: TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.w500, height: 1.0)),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    ];
-  },
-  body: TabBarView(
-    children: [
-      _buildProfileTabBody(data),
-      _ActivitiesTab(uid: widget.uid),
-      _PublicListsTab(uid: widget.uid),
-    ],
-  ),
-);
+            );
           },
         ),
       ),
@@ -790,21 +992,49 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        if (bio.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 16.0), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4))),
-        if (age != null || genres.isNotEmpty || directors.isNotEmpty || actors.isNotEmpty)
+        if (bio.isNotEmpty)
+          Padding(
+              padding: const EdgeInsets.only(bottom: 16.0),
+              child: Text(bio,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4))),
+        if (age != null ||
+            genres.isNotEmpty ||
+            directors.isNotEmpty ||
+            actors.isNotEmpty)
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (age is int && age > 0) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: [const Icon(Icons.cake, size: 18), const SizedBox(width: 6), Text('Yaş: $age')])),
+            if (age is int && age > 0)
+              Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: Row(children: [
+                    const Icon(Icons.cake, size: 18),
+                    const SizedBox(width: 6),
+                    Text('Yaş: $age')
+                  ])),
             if (genres.isNotEmpty) _ChipsSection(title: 'Sevdiği türler', items: genres),
-            if (directors.isNotEmpty) _ChipsSection(title: 'Sevdiği yönetmenler', items: directors),
+            if (directors.isNotEmpty)
+              _ChipsSection(title: 'Sevdiği yönetmenler', items: directors),
             if (actors.isNotEmpty) _ChipsSection(title: 'Sevdiği oyuncular', items: actors),
             const SizedBox(height: 12),
           ]),
-        if (favKeys.isNotEmpty) ...[_shelfSectionFromKeys('Favori Filmler', favKeys, maxItems: 30), const SizedBox(height: 16)],
-        if (fiveKeys.isNotEmpty) ...[_shelfSectionFromKeys('Sevdiği Filmler', fiveKeys, maxItems: 30), const SizedBox(height: 16)],
-        if (disKeys.isNotEmpty) ...[_shelfSectionFromKeys('Sevmediği Filmler', disKeys, maxItems: 30), const SizedBox(height: 16)],
+        if (favKeys.isNotEmpty) ...[
+          _shelfSectionFromKeys('Favori Filmler', favKeys, maxItems: 30),
+          const SizedBox(height: 16)
+        ],
+        if (fiveKeys.isNotEmpty) ...[
+          _shelfSectionFromKeys('Sevdiği Filmler', fiveKeys, maxItems: 30),
+          const SizedBox(height: 16)
+        ],
+        if (disKeys.isNotEmpty) ...[
+          _shelfSectionFromKeys('Sevmediği Filmler', disKeys, maxItems: 30),
+          const SizedBox(height: 16)
+        ],
         Text('Watchlist', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        _WatchlistSection(data: data, watchlistFutureCache: _watchlistFutureCache, fetchCatalog: _fetchCatalogForKeys),
+        _WatchlistSection(
+            data: data,
+            watchlistFutureCache: _watchlistFutureCache,
+            fetchCatalog: _fetchCatalogForKeys,
+            onFilmTap: _handleFilmTap),
       ],
     );
   }
@@ -819,10 +1049,11 @@ class _ActivitiesTab extends StatefulWidget {
   State<_ActivitiesTab> createState() => _ActivitiesTabState();
 }
 
-class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveClientMixin {
+class _ActivitiesTabState extends State<_ActivitiesTab>
+    with AutomaticKeepAliveClientMixin {
   bool _loadingActivities = false;
   List<_ActivityItemData> _activities = [];
-  
+
   @override
   bool get wantKeepAlive => true;
 
@@ -839,14 +1070,27 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
     final db = FirebaseFirestore.instance;
     final List<_ActivityItemData> items = [];
     try {
-      final q = db.collection('posts').where('authorId', isEqualTo: widget.uid).orderBy('createdAt', descending: true).limit(30);
+      final q = db
+          .collection('posts')
+          .where('authorId', isEqualTo: widget.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(30);
       final qs = await q.get();
       for (final d in qs.docs) {
         final m = d.data();
         final ts = m['createdAt'];
-        final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
-        final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
-        
+        final poster = (m['moviePoster'] ??
+                m['moviePosterUrl'] ??
+                m['poster'] ??
+                (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ??
+                '')
+            .toString();
+        final title = (m['movieTitle'] ??
+                m['title'] ??
+                (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ??
+                '')
+            .toString();
+
         final tmdbId = (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
 
         items.add(_ActivityItemData(
@@ -861,8 +1105,9 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
         ));
       }
     } catch (_) {}
-    
-    items.sort((a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(a.createdAt?.millisecondsSinceEpoch ?? 0));
+
+    items.sort((a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0)
+        .compareTo(a.createdAt?.millisecondsSinceEpoch ?? 0));
 
     if (mounted) {
       setState(() {
@@ -871,7 +1116,7 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
       });
     }
   }
-  
+
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
@@ -887,12 +1132,18 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)]),
+          Row(children: [
+            Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)
+          ]),
           const SizedBox(height: 10),
           if (_loadingActivities)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
+            const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: CircularProgressIndicator()))
           else if (_activities.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
+            const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('Henüz aktivite yok.'))
           else
             ListView.separated(
               itemCount: _activities.length,
@@ -924,7 +1175,6 @@ class _ActivityWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     return GestureDetector(
       onTap: () {
@@ -938,7 +1188,11 @@ class _ActivityWidget extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color.fromARGB(3, 255, 255, 255), width: 1)),
+        decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: const Color.fromARGB(3, 255, 255, 255), width: 1)),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -946,13 +1200,12 @@ class _ActivityWidget extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: PosterImage(
-                  posterUrl: item.posterUrl, 
-                  title: item.title,
-                  tmdbId: item.tmdbId, 
-                  width: 44, 
-                  height: 66, 
-                  fit: BoxFit.cover
-                ),
+                    posterUrl: item.posterUrl,
+                    title: item.title,
+                    tmdbId: item.tmdbId,
+                    width: 44,
+                    height: 66,
+                    fit: BoxFit.cover),
               ),
               const SizedBox(width: 12),
             ],
@@ -960,19 +1213,41 @@ class _ActivityWidget extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 4, overflow: TextOverflow.ellipsis)),
-                  if (item.title.isNotEmpty && item.posterUrl.isEmpty && item.tmdbId == null)
-                    Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [const Icon(Icons.local_movies, size: 16), const SizedBox(width: 6), Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall))])),
+                  if (item.text.isNotEmpty)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Text(item.text,
+                            maxLines: 4, overflow: TextOverflow.ellipsis)),
+                  if (item.title.isNotEmpty &&
+                      item.posterUrl.isEmpty &&
+                      item.tmdbId == null)
+                    Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(children: [
+                          const Icon(Icons.local_movies, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                              child: Text(item.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall))
+                        ])),
                   Padding(
                     padding: const EdgeInsets.only(top: 6.0),
                     child: Row(children: [
-                      const Icon(Icons.favorite_border, size: 16), const SizedBox(width: 4), Text('${item.likeCount}'), 
-                      const SizedBox(width: 12), 
-                      const Icon(Icons.mode_comment_outlined, size: 16), const SizedBox(width: 4), Text('${item.replyCount}'), 
-                      const SizedBox(width: 12), 
+                      const Icon(Icons.favorite_border, size: 16),
+                      const SizedBox(width: 4),
+                      Text('${item.likeCount}'),
+                      const SizedBox(width: 12),
+                      const Icon(Icons.mode_comment_outlined, size: 16),
+                      const SizedBox(width: 4),
+                      Text('${item.replyCount}'),
+                      const SizedBox(width: 12),
                       const Icon(Icons.repeat, size: 16),
                       const Spacer(),
-                      if (timeLabel.isNotEmpty) Text('Paylaştı  $timeLabel', style: Theme.of(context).textTheme.labelSmall),
+                      if (timeLabel.isNotEmpty)
+                        Text('Paylaştı  $timeLabel',
+                            style: Theme.of(context).textTheme.labelSmall),
                     ]),
                   ),
                 ],
@@ -994,7 +1269,8 @@ class _PublicListsTab extends StatefulWidget {
   State<_PublicListsTab> createState() => _PublicListsTabState();
 }
 
-class _PublicListsTabState extends State<_PublicListsTab> with AutomaticKeepAliveClientMixin {
+class _PublicListsTabState extends State<_PublicListsTab>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -1002,34 +1278,32 @@ class _PublicListsTabState extends State<_PublicListsTab> with AutomaticKeepAliv
   Widget build(BuildContext context) {
     super.build(context);
     return RefreshIndicator(
-      onRefresh: () async {
-        await Future.delayed(const Duration(milliseconds: 500));
-        setState((){});
-      },
-      child: StreamBuilder<List<CustomList>>(
-        stream: CustomListService.instance.getUserLists(widget.uid),
-        builder: (context, snapshot) {
-           if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-           final lists = snapshot.data ?? [];
-           
-           // Sadece herkese açık listeler
-           final publicLists = lists.where((l) => l.isPublic).toList();
+        onRefresh: () async {
+          await Future.delayed(const Duration(milliseconds: 500));
+          setState(() {});
+        },
+        child: StreamBuilder<List<CustomList>>(
+            stream: CustomListService.instance.getUserLists(widget.uid),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting)
+                return const Center(child: CircularProgressIndicator());
+              final lists = snapshot.data ?? [];
 
-           if (publicLists.isEmpty) {
-             return const Center(child: Text("Henüz liste oluşturulmamış."));
-           }
+              // Sadece herkese açık listeler
+              final publicLists = lists.where((l) => l.isPublic).toList();
 
-           return ListView.builder(
-             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-             itemCount: publicLists.length,
-             itemBuilder: (context, index) {
-               final list = publicLists[index];
-               return _CustomListCard(list: list);
-             }
-           );
-        }
-      )
-    );
+              if (publicLists.isEmpty) {
+                return const Center(child: Text("Henüz liste oluşturulmamış."));
+              }
+
+              return ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  itemCount: publicLists.length,
+                  itemBuilder: (context, index) {
+                    final list = publicLists[index];
+                    return _CustomListCard(list: list);
+                  });
+            }));
   }
 }
 
@@ -1041,7 +1315,11 @@ class _CustomListCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => CustomListDetailScreen(list: list, isMyList: false)));
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) =>
+                    CustomListDetailScreen(list: list, isMyList: false)));
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
@@ -1058,8 +1336,13 @@ class _CustomListCard extends StatelessWidget {
                 width: 70,
                 height: double.infinity,
                 child: list.coverImageUrl != null
-                    ? PosterImage(posterUrl: list.coverImageUrl!, title: list.title, fit: BoxFit.cover)
-                    : Container(color: Colors.grey.shade800, child: const Icon(Icons.list, color: Colors.white24)),
+                    ? PosterImage(
+                        posterUrl: list.coverImageUrl!,
+                        title: list.title,
+                        fit: BoxFit.cover)
+                    : Container(
+                        color: Colors.grey.shade800,
+                        child: const Icon(Icons.list, color: Colors.white24)),
               ),
             ),
             const SizedBox(width: 16),
@@ -1068,48 +1351,19 @@ class _CustomListCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(list.title,
+                      style:
+                          const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
-                  Text('${list.movieCount} film', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                  Text('${list.movieCount} film',
+                      style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
                 ],
               ),
             ),
             const Icon(Icons.chevron_right, color: Colors.grey),
             const SizedBox(width: 12),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatContainer extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final int count;
-  final VoidCallback? onTap; // Tıklanabilir yapıldı
-
-  const _StatContainer({required this.icon, required this.label, required this.count, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant, width: 0.6),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 16),
-            const SizedBox(width: 6),
-            Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(width: 6),
-            Text(count.toString(), style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
       ),
@@ -1130,7 +1384,10 @@ class _ChipsSection extends StatelessWidget {
         children: [
           Text(title, style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: items.map((e) => Chip(label: Text(e))).toList()),
+          Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: items.map((e) => Chip(label: Text(e))).toList()),
         ],
       ),
     );
@@ -1141,8 +1398,13 @@ class _WatchlistSection extends StatelessWidget {
   final Map<String, dynamic> data;
   final Map<String, Future<List<Map<String, dynamic>?>>> watchlistFutureCache;
   final Future<List<Map<String, dynamic>?>> Function(List<String>) fetchCatalog;
+  final Function(String, String, String?, int?) onFilmTap; // Callback eklendi
 
-  const _WatchlistSection({required this.data, required this.watchlistFutureCache, required this.fetchCatalog});
+  const _WatchlistSection(
+      {required this.data,
+      required this.watchlistFutureCache,
+      required this.fetchCatalog,
+      required this.onFilmTap});
 
   int? _extractTmdbId(Map<String, dynamic> m) {
     final val = m['tmdbId'];
@@ -1155,15 +1417,21 @@ class _WatchlistSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<dynamic> keysDyn = (data['watchlistKeys'] ?? []) as List<dynamic>;
-    final keys = keysDyn.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+    final keys =
+        keysDyn.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
     final limited = keys.take(30).toList();
     final hash = limited.join('|');
-    
+
     return FutureBuilder<List<Map<String, dynamic>?>>(
-      future: limited.isEmpty ? Future.value([]) : (watchlistFutureCache[hash] ??= fetchCatalog(limited)),
+      future: limited.isEmpty
+          ? Future.value([])
+          : (watchlistFutureCache[hash] ??= fetchCatalog(limited)),
       builder: (context, fsnap) {
-        if (fsnap.connectionState == ConnectionState.waiting) return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
-        final films = (fsnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+        if (fsnap.connectionState == ConnectionState.waiting)
+          return const SizedBox(
+              height: 180, child: Center(child: CircularProgressIndicator()));
+        final films =
+            (fsnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
         if (films.isEmpty) return const Text('Watchlist boş.');
         return SizedBox(
           height: 180,
@@ -1176,17 +1444,38 @@ class _WatchlistSection extends StatelessWidget {
               final poster = (film['poster'] ?? film['posterUrl'] ?? '') as String;
               final title = (film['title'] ?? '') as String;
               final tmdbId = _extractTmdbId(film);
-              return AspectRatio(
-                aspectRatio: 2 / 3,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      PosterImage(posterUrl: poster, tmdbId: tmdbId, title: title, fit: BoxFit.cover),
-                      if (title.isNotEmpty)
-                        Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center))),
-                    ],
+              final docId = (film['docId'] ?? limited[i]).toString();
+
+              return GestureDetector(
+                // TIKLAMA EKLENDİ
+                onTap: () => onFilmTap(title, poster, docId, tmdbId),
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PosterImage(
+                            posterUrl: poster,
+                            tmdbId: tmdbId,
+                            title: title,
+                            fit: BoxFit.cover),
+                        if (title.isNotEmpty)
+                          Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 4),
+                                  color: Colors.black54,
+                                  child: Text(title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.white),
+                                      textAlign: TextAlign.center))),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -1204,7 +1493,8 @@ class _UserListSheet extends StatelessWidget {
   final String uid;
   final String collection; // 'followers' or 'following'
 
-  const _UserListSheet({required this.title, required this.uid, required this.collection});
+  const _UserListSheet(
+      {required this.title, required this.uid, required this.collection});
 
   @override
   Widget build(BuildContext context) {
@@ -1213,7 +1503,11 @@ class _UserListSheet extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            child: Text(title,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
           ),
           const Divider(height: 1),
           Expanded(
@@ -1237,24 +1531,34 @@ class _UserListSheet extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final docId = docs[index].id; // docId = user UID
                     return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance.collection('users').doc(docId).get(),
+                      future: FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(docId)
+                          .get(),
                       builder: (context, userSnap) {
-                        if (!userSnap.hasData) return const ListTile(title: Text('Yükleniyor...'));
-                        final data = userSnap.data!.data() as Map<String, dynamic>?;
-                        final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
+                        if (!userSnap.hasData)
+                          return const ListTile(title: Text('Yükleniyor...'));
+                        final data =
+                            userSnap.data!.data() as Map<String, dynamic>?;
+                        final name = data?['displayName'] ??
+                            data?['username'] ??
+                            'Kullanıcı';
                         final photo = data?['photoURL'];
-                        
+
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundImage: (photo != null) ? NetworkImage(photo) : null,
+                            backgroundImage: (photo != null)
+                                ? NetworkImage(photo)
+                                : null,
                             child: photo == null ? const Icon(Icons.person) : null,
                           ),
                           title: Text(name),
                           onTap: () {
                             Navigator.push(
-                              context, 
-                              MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: docId))
-                            );
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        PublicProfileScreen(uid: docId)));
                           },
                         );
                       },

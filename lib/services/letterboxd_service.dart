@@ -29,7 +29,7 @@ class _Http {
   static Future<http.Response?> get(
     Uri uri, {
     Map<String, String>? headers,
-    Duration timeout = const Duration(seconds: 30), // Timeout artırıldı
+    Duration timeout = const Duration(seconds: 30),
     int retries = 2,
   }) async {
     http.Response? res;
@@ -154,6 +154,92 @@ class LetterboxdService {
     }
   }
 
+  // --- Core Parser Logic (Düzeltildi ve Merkezileştirildi) ---
+  
+  static Future<List<LetterboxdFilm>> _parseFilmsFromElements(List<dom.Element> elements) async {
+    final items = <LetterboxdFilm>[];
+    final seenHref = <String>{};
+
+    for (final li in elements) {
+      // Farklı element yapılarını kontrol et
+      final a = li.querySelector('a.frame') ?? li.querySelector('a.frame.has-menu') ?? li.querySelector('a');
+      final img = li.querySelector('img.image') ?? li.querySelector('img');
+      final rc = li.querySelector('div.react-component');
+      final divPoster = li.querySelector('div.poster'); // Bazı durumlarda div.poster ana taşıyıcıdır
+
+      // En azından biri olmalı
+      if (a == null && rc == null && img == null && divPoster == null) continue;
+
+      // 1. Başlık Çıkarma
+      String title = (a?.attributes['data-original-title'] ??
+              img?.attributes['alt'] ??
+              rc?.attributes['data-item-name'] ??
+              rc?.attributes['data-item-full-display-name'] ??
+              divPoster?.attributes['data-film-name'] ?? // Eklenen kontrol
+              a?.querySelector('.frame-title')?.text ??
+              '')
+          .replaceAll(RegExp(r'^Poster for '), '')
+          .trim();
+          
+      if (title.isEmpty) continue;
+
+      // 2. Link (Href) Çıkarma
+      String href = a?.attributes['href'] ??
+          rc?.attributes['data-item-link'] ??
+          rc?.attributes['data-target-link'] ??
+          divPoster?.attributes['data-target-link'] ?? // Eklenen kontrol
+          '';
+          
+      if (href.isEmpty) continue;
+      if (href.startsWith('//')) href = 'https:$href';
+      if (href.startsWith('/')) href = 'https://letterboxd.com$href';
+      if (!seenHref.add(href)) continue;
+
+      // 3. Poster URL Çıkarma
+      String? poster = (img?.attributes['srcset'] ?? img?.attributes['data-srcset'])
+          ?.split(',')
+          .last
+          .trim()
+          .split(' ')
+          .first;
+      poster ??= img?.attributes['src'] ?? img?.attributes['data-src'];
+
+      if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
+      if (poster != null && poster.startsWith('/')) poster = 'https://a.ltrbxd.com$poster';
+
+      // 4. Poster Fallback ve İyileştirme
+      final filmId = rc?.attributes['data-film-id'] ?? img?.attributes['data-film-id'] ?? divPoster?.attributes['data-film-id'] ?? li.attributes['data-film-id'];
+      final slug = rc?.attributes['data-item-slug'] ?? img?.attributes['data-item-slug'] ?? divPoster?.attributes['data-film-slug'] ?? li.attributes['data-film-slug'];
+      
+      final isPlaceholder = poster != null && poster.contains('empty-poster');
+      final looksImg = _looksLikeImageUrl(poster);
+
+      // ID ve Slug varsa yüksek çözünürlüklü poster oluştur
+      if (filmId != null && slug != null) {
+        poster = _buildPosterFromIdSlug(filmId, slug, w: 300, h: 450);
+      } else if (!looksImg || isPlaceholder) {
+        // Detay sayfasından çekmeyi dene
+        final details = rc?.attributes['data-details-endpoint'] ?? a?.attributes['data-details-endpoint'];
+        if (details != null) {
+          final via = await _resolvePosterFromDetails(details);
+          if (via != null) poster = via;
+        }
+      }
+
+      if ((poster == null || !_looksLikeImageUrl(poster)) && (rc != null || img != null)) {
+        final viaAttrs = _posterFromDataAttrs(rc: rc, img: img, w: 300, h: 450);
+        if (viaAttrs != null) poster = viaAttrs;
+      }
+
+      if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
+      // Hala geçerli bir poster yoksa atla (veya placeholder kullanabilirsin)
+      if (poster == null || !_looksLikeImageUrl(poster)) continue;
+
+      items.add(LetterboxdFilm(title: title, url: href, posterUrl: poster));
+    }
+    return items;
+  }
+
   // --- Scrapers ---
 
   static Future<List<LetterboxdFilm>> _fetchRated(
@@ -179,76 +265,17 @@ class LetterboxdService {
     if (res == null) throw Exception('$rating★ sayfası alınamadı');
 
     final doc = html.parse(res.body);
+    // Tüm olası film liste elemanlarını topla
     final candidates = <dom.Element>[
       ...doc.querySelectorAll('div.poster-grid ul.grid li.griditem'),
       ...doc.querySelectorAll('section.col-main .poster-grid ul.grid li.griditem'),
       ...doc.querySelectorAll('section.col-main ul.grid li.griditem'),
       ...doc.querySelectorAll('ul.grid.-p70 li.griditem'),
       ...doc.querySelectorAll('ul.grid li.griditem'),
+      ...doc.querySelectorAll('li.poster-container'), // Bunları da ekledik
     ];
 
-    final items = <LetterboxdFilm>[];
-    final seenHref = <String>{};
-
-    for (final li in candidates) {
-      final a = li.querySelector('a.frame') ?? li.querySelector('a.frame.has-menu');
-      final img = li.querySelector('img.image') ?? li.querySelector('img');
-      final rc = li.querySelector('div.react-component');
-      if (a == null && rc == null && img == null) continue;
-
-      String title = (a?.attributes['data-original-title'] ??
-              img?.attributes['alt'] ??
-              rc?.attributes['data-item-name'] ??
-              rc?.attributes['data-item-full-display-name'] ??
-              a?.querySelector('.frame-title')?.text ??
-              '')
-          .replaceAll(RegExp(r'^Poster for '), '')
-          .trim();
-      if (title.isEmpty) continue;
-
-      String href = a?.attributes['href'] ??
-          rc?.attributes['data-item-link'] ??
-          rc?.attributes['data-target-link'] ??
-          '';
-      if (href.isEmpty) continue;
-      if (href.startsWith('//')) href = 'https:$href';
-      if (href.startsWith('/')) href = 'https://letterboxd.com$href';
-      if (!seenHref.add(href)) continue;
-
-      String? poster = (img?.attributes['srcset'] ?? img?.attributes['data-srcset'])
-          ?.split(',')
-          .last
-          .trim()
-          .split(' ')
-          .first;
-      poster ??= img?.attributes['src'] ?? img?.attributes['data-src'];
-
-      if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
-      if (poster != null && poster.startsWith('/')) poster = 'https://a.ltrbxd.com$poster';
-
-      final filmId = rc?.attributes['data-film-id'] ?? img?.attributes['data-film-id'];
-      final slug = rc?.attributes['data-item-slug'] ?? img?.attributes['data-item-slug'];
-      final isPlaceholder = poster != null && poster.contains('empty-poster');
-      final looksImg = _looksLikeImageUrl(poster);
-
-      if (filmId != null && slug != null) {
-        poster = _buildPosterFromIdSlug(filmId, slug, w: 300, h: 450);
-      } else if (!looksImg || isPlaceholder) {
-        final details = rc?.attributes['data-details-endpoint'] ?? a?.attributes['data-details-endpoint'];
-        final via = await _resolvePosterFromDetails(details);
-        if (via != null) poster = via;
-      }
-
-      if ((poster == null || !_looksLikeImageUrl(poster)) && (rc != null || img != null)) {
-        final viaAttrs = _posterFromDataAttrs(rc: rc, img: img, w: 300, h: 450);
-        if (viaAttrs != null) poster = viaAttrs;
-      }
-
-      if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
-      if (poster == null || !_looksLikeImageUrl(poster)) continue;
-
-      items.add(LetterboxdFilm(title: title, url: href, posterUrl: poster));
-    }
+    final items = await _parseFilmsFromElements(candidates);
 
     if (items.isEmpty) {
       final cached = prefs.getString('${_cacheKeyFor(username)}$cacheSuffix');
@@ -293,56 +320,44 @@ class LetterboxdService {
     return _fetchRated(username, '5', cacheSuffix: '_rated5');
   }
 
+  // --- DÜZELTİLEN METOD ---
   static Future<List<LetterboxdFilm>> fetchFavorites(String username) async {
     final prefs = await SharedPreferences.getInstance();
     try {
       final url = Uri.parse('https://letterboxd.com/$username/');
       final res = await _Http.get(url, headers: _Http.baseHeaders(referer: 'https://letterboxd.com/'));
       if (res == null || res.statusCode != 200) throw Exception('HTTP ${res?.statusCode}');
+      
       final doc = html.parse(res.body);
-      final films = <LetterboxdFilm>[];
-
+      
+      // Favoriler bölümünü bul
       final section = doc.querySelector('section#favourites');
-      final ul = section?.querySelector('ul.poster-list.-p150.-horizontal') ?? doc.querySelector('ul.poster-list.-p150.-horizontal');
+      // Daha esnek bir seçim
+      var ul = section?.querySelector('ul.poster-list'); 
+      ul ??= doc.querySelector('ul.poster-list.-p150') ?? doc.querySelector('ul.poster-list');
 
       if (ul != null) {
-        for (final li in ul.querySelectorAll('li.posteritem')) {
-          final img = li.querySelector('img');
-          final a = li.querySelector('a.frame') ?? li.querySelector('a');
+        // li.posteritem YERİNE li.poster-container veya genel li kullanıyoruz
+        final lis = ul.querySelectorAll('li.poster-container, li.posteritem, li');
+        
+        // Ortak parser'ı kullan
+        final films = await _parseFilmsFromElements(lis);
+
+        if (films.isNotEmpty) {
+          final deduped = <LetterboxdFilm>[];
+          final seen = <String>{};
+          for (final f in films) {
+            if (seen.add(f.url)) deduped.add(f);
+          }
+          final result = deduped.take(4).toList(); // Sadece ilk 4 favori
           
-          String? posterUrl = img?.attributes['src'] ?? img?.attributes['data-src'];
-          // Try to get higher res from srcset
-          final srcset = img?.attributes['srcset'];
-          if (srcset != null) {
-             posterUrl = srcset.split(',').last.trim().split(' ').first;
-          }
-
-          if (posterUrl != null) {
-             if (posterUrl.startsWith('//')) posterUrl = 'https:$posterUrl';
-             if (posterUrl.startsWith('/')) posterUrl = 'https://a.ltrbxd.com$posterUrl';
-          }
-
-          String? title = img?.attributes['alt'];
-          String? href = a?.attributes['href'];
-
-          if (href != null && title != null && posterUrl != null && !_looksLikeImageUrl(posterUrl) == false) {
-             final absHref = href.startsWith('http') ? href : 'https://letterboxd.com$href';
-             films.add(LetterboxdFilm(title: title, url: absHref, posterUrl: posterUrl));
-          }
+          await prefs.setString(_cacheKeyFor(username), jsonEncode(result.map((e) => e.toJson()).toList()));
+          return result;
         }
       }
 
-      if (films.isEmpty) throw Exception('Favori filmler bulunamadı');
+      throw Exception('Favori filmler bulunamadı');
 
-      final deduped = <LetterboxdFilm>[];
-      final seen = <String>{};
-      for (final f in films) {
-        if (seen.add(f.url)) deduped.add(f);
-      }
-      final result = deduped.take(4).toList();
-
-      await prefs.setString(_cacheKeyFor(username), jsonEncode(result.map((e) => e.toJson()).toList()));
-      return result;
     } catch (_) {
       final cached = prefs.getString(_cacheKeyFor(username));
       if (cached != null) {
@@ -352,56 +367,43 @@ class LetterboxdService {
     }
   }
 
+  // --- DÜZELTİLEN METOD ---
   static Future<List<LetterboxdFilm>> fetchWatchlist(String username) async {
     final prefs = await SharedPreferences.getInstance();
     final List<LetterboxdFilm> all = [];
     int page = 1;
-    // Limit pages to avoid long wait (max 3 pages = ~90 films for onboarding)
-    while (page <= 3) {
+    
+    while (page <= 3) { // Maksimum 3 sayfa (yaklaşık 90-100 film)
       final uri = page == 1
           ? Uri.parse('https://letterboxd.com/$username/watchlist/')
           : Uri.parse('https://letterboxd.com/$username/watchlist/page/$page/');
       
       final res = await _Http.get(uri, headers: _reqHeaders);
       if (res == null || res.statusCode != 200) break;
+      
       final doc = html.parse(res.body);
       
-      final items = <LetterboxdFilm>[];
-      final lis = doc.querySelectorAll('li.poster-container, li.griditem'); // Simplified selector
+      // Watchlist genellikle grid yapısındadır
+      final candidates = <dom.Element>[
+         ...doc.querySelectorAll('ul.poster-list li.poster-container'),
+         ...doc.querySelectorAll('ul.grid li.griditem'),
+         ...doc.querySelectorAll('div.poster-grid li.griditem'),
+      ];
       
-      for(final li in lis) {
-         final img = li.querySelector('img');
-         final div = li.querySelector('div.poster');
-         final filmId = div?.attributes['data-film-id'] ?? img?.attributes['data-film-id'];
-         final slug = div?.attributes['data-film-slug'] ?? li.attributes['data-owner'] ?? ''; // Fallback
-         
-         String? title = img?.attributes['alt'];
-         String? poster = img?.attributes['src'];
-         
-         // Basic extraction
-         if(poster != null && poster.startsWith('//')) poster = 'https:$poster';
-         if(poster != null && poster.startsWith('/')) poster = 'https://a.ltrbxd.com$poster';
-         
-         if(filmId != null && title != null) {
-            // Reconstruct URL and High-Res Poster manually to be fast
-            // Note: Watchlist slug might need better extraction, but for onboarding we need speed.
-            // Using placeholder slug if needed or skip complex parsing
-            // Let's rely on what we have.
-            items.add(LetterboxdFilm(
-              title: title, 
-              url: 'https://letterboxd.com/film/$slug/', // Approximate
-              posterUrl: poster ?? '',
-              key: 'film:$filmId' // Use ID as key if available
-            )); 
-         }
-      }
+      // Ortak güçlü parser kullanımı
+      final items = await _parseFilmsFromElements(candidates);
+      
       if(items.isEmpty) break;
       all.addAll(items);
+      
+      // Sayfalama kontrolü: Eğer "sonraki sayfa" butonu yoksa dur
+      final next = doc.querySelector('.paginate-nextprev a.next');
+      if (next == null) break;
+      
       page++;
     }
     
     if(all.isEmpty) {
-       // Cache check
        final cached = prefs.getString('${_cacheKeyFor(username)}_watchlist');
        if(cached != null) return (jsonDecode(cached) as List).map((e)=>LetterboxdFilm.fromJson(e)).toList();
     } else {
@@ -468,20 +470,14 @@ class LetterboxdService {
     });
   }
 
-  // ===========================================================================
-  // TAM SENKRONİZASYON (ATOMİK & GÜVENLİ)
-  // ===========================================================================
   static Future<void> fullSyncOnboarding({
     required String uid,
     required String lbUsername,
   }) async {
-    // 1. ADIM: Verileri Paralel Çek
-    // 'safeFetch' kullanarak bir hata olsa bile akışı kesmiyoruz
     Future<List<LetterboxdFilm>> safeFetch(Future<List<LetterboxdFilm>> Function(String) f) async {
       try { return await f(lbUsername); } catch (_) { return []; }
     }
 
-    // Favorileri ayrıca çekiyoruz çünkü kullanıcı adı kontrolü için önemli
     List<LetterboxdFilm> favs = [];
     try {
       favs = await fetchFavorites(lbUsername);
@@ -489,7 +485,6 @@ class LetterboxdService {
       if (e.toString().contains('HTTP 404')) {
         throw Exception('Letterboxd kullanıcısı bulunamadı: $lbUsername');
       }
-      // Boş olabilir (favorisi yoktur), devam et.
     }
 
     final results = await Future.wait([
@@ -502,18 +497,12 @@ class LetterboxdService {
     final disliked = results[1];
     final watchlist = results[2];
 
-    // 2. ADIM: Katalog Yazma (Batch ile, parçalı)
-    // Bu kısım çok fazla veri içerdiği için ayrı batchlerde olmak zorunda
     final allFilms = [...favs, ...fiveStar, ...disliked, ...watchlist];
     for (int i = 0; i < allFilms.length; i += 50) {
       final end = (i + 50 < allFilms.length) ? i + 50 : allFilms.length;
       await _upsertCatalog(allFilms.sublist(i, end));
     }
 
-    // 3. ADIM: TEK SEFERDE KULLANICI PROFİLİ YAZMA (ATOMİK BATCH)
-    // Bu adım sayesinde "Unavailable" hatası ve veri tutarsızlığı engellenir.
-    // User ve UserTasteProfile dökümanlarını tek bir paket halinde gönderiyoruz.
-    
     final db = FirebaseFirestore.instance;
     final userRef = db.collection('users').doc(uid);
     final tasteRef = db.collection('userTasteProfiles').doc(uid);
@@ -523,7 +512,6 @@ class LetterboxdService {
     final fiveKeys = LetterboxdFilm.keysOf(fiveStar);
     final disKeys = LetterboxdFilm.keysOf(disliked);
 
-    // Vitrin için özet veriler
     final favLite = favs.take(4).map((f) => {
       'title': f.title, 'url': f.url, 'posterUrl': f.posterUrl, 'key': f.key
     }).toList();
@@ -532,9 +520,7 @@ class LetterboxdService {
       'title': f.title, 'url': f.url, 'posterUrl': f.posterUrl, 'key': f.key
     }).toList();
 
-    // Poster Haritası (Taste Profile için)
     final postersMap = <String, String>{};
-    // Sadece 5 yıldız ve sevilmeyenlerin posterlerini sakla (yer tasarrufu)
     for (var f in [...fiveStar, ...disliked]) {
       if (f.key.isNotEmpty && f.posterUrl.isNotEmpty) {
         postersMap[f.key] = f.posterUrl;
@@ -543,26 +529,19 @@ class LetterboxdService {
 
     await _retryFirestore(() async {
       final batch = db.batch();
-
-      // A) Users Dökümanı (Tüm datalar tek seferde)
       batch.set(userRef, {
         'lbUsername': lbUsername,
-        // Favoriler
         'favoritesKeys': favKeys,
         'favorites': favLite,
-        // Watchlist
         'watchlistKeys': wlKeys,
         'watchlist': wLite,
         'watchlistUpdatedAt': FieldValue.serverTimestamp(),
-        // Beğenilen/Sevilmeyen (Ayna veriler)
         'fiveStarKeys': fiveKeys,
         'dislikedKeys': disKeys,
-        // Meta
         'updatedAt': FieldValue.serverTimestamp(),
         'lastSyncedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
-      // B) Taste Profile Dökümanı
       batch.set(tasteRef, {
         'letterboxdUsername': lbUsername,
         'loved': fiveKeys,
@@ -575,8 +554,6 @@ class LetterboxdService {
       await batch.commit();
     });
 
-    // 4. ADIM: Eşleşmeleri Hesapla (Arka Plan)
-    // Hata alsa bile kullanıcıyı engellememesi için try-catch
     try {
       await _retryFirestore(() async {
         await MatchService.instance.autoCreateMatchesFiveOnly(uid, minCommonFive: 1);

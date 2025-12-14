@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
-import 'package:fluttergirdi/services/match_service.dart'
-    as global_match;
+import 'dart:convert'; // EKLENDİ: JSON decode için
+import 'package:http/http.dart' as http; // EKLENDİ: API isteği için
+import 'package:fluttergirdi/secrets.dart'; // EKLENDİ: Token için
+
+import 'package:fluttergirdi/services/match_service.dart' as global_match;
 import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
-import 'package:fluttergirdi/screens/likes_page.dart'; // Geri açıldı
-import 'package:fluttergirdi/screens/passes_page.dart'; // Geri açıldı
+import 'package:fluttergirdi/screens/likes_page.dart'; 
+import 'package:fluttergirdi/screens/passes_page.dart'; 
 import 'package:swipe_cards/swipe_cards.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
@@ -147,7 +150,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
     }
 
     return DefaultTabController(
-      initialIndex: 1, // Eşleşmeler sekmesi varsayılan
+      initialIndex: 1, 
       length: 3,
       child: PageStorage(
         bucket: _bucket,
@@ -163,7 +166,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
             titleSpacing: 16,
             title: Row(
               children: [
-                // SOL TARAF: BUBBLE TAB
                 Expanded(
                   child: Container(
                     height: 42,
@@ -198,10 +200,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
                     ),
                   ),
                 ),
-                
                 const SizedBox(width: 8),
-
-                // SAĞ TARAF: KALP İKONU
                 Container(
                   height: 42,
                   width: 42,
@@ -216,7 +215,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
           ),
           body: Stack(
             children: [
-              // --- GÜNCELLEME BURADA YAPILDI ---
               Column(
                 children: [
                   Expanded(
@@ -225,7 +223,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
                       children: [
                         const PassesListBody(), 
                         
-                        // --- ORTA SEKME (KARTLAR) ---
                         _loading
                             ? const Center(child: CircularProgressIndicator())
                             : (_swipeItems.isEmpty || _finished
@@ -269,11 +266,9 @@ class _MatchListScreenState extends State<MatchListScreen> {
                       ],
                     ),
                   ),
-                  // İSTENİLEN BOŞLUK
                   const SizedBox(height: 56),
                 ],
               ),
-              // ---------------------------------
 
               ValueListenableBuilder<bool>(
                 valueListenable: _showGuideNotifier,
@@ -297,6 +292,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
   }
 
   Future<void> _openIncomingLikes() async {
+    // ... (Mevcut kod aynı kalıyor) ...
     final me = FirebaseAuth.instance.currentUser?.uid;
     if (me == null) return;
     final db = FirebaseFirestore.instance;
@@ -371,6 +367,69 @@ class _MatchScreenState extends State<MatchScreen> {
   void initState() {
     super.initState();
     _future = _resolveCommonFilms(widget.result);
+  }
+
+  // YENİ EKLENEN FONKSİYON: TMDB ID'si yoksa arayıp bulur
+  Future<void> _handleFilmTap(BuildContext context, FilmItem film) async {
+    int? id = film.tmdbId;
+
+    if (id == null) {
+      // ID yok, arama yapmamız lazım. Kullanıcıya bir loading gösterelim.
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => const Center(child: CircularProgressIndicator()),
+      );
+
+      try {
+        final searchUrl = Uri.parse(
+          'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(film.title)}&language=tr-TR&include_adult=false'
+        );
+        final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
+        
+        Navigator.pop(context); // Loading'i kapat
+
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body);
+          final results = data['results'] as List?;
+          if (results != null && results.isNotEmpty) {
+            id = results[0]['id'];
+            
+            // Gelecekte tekrar aramayalım diye Firestore'a kaydedelim
+            if (film.id.isNotEmpty && id != null) {
+              FirebaseFirestore.instance
+                  .collection('catalog_films')
+                  .doc(film.id)
+                  .set({'tmdbId': id}, SetOptions(merge: true));
+            }
+          } else {
+             ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Film detayları bulunamadı.'))
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        Navigator.pop(context); // Loading'i kapat
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bağlantı hatası oluştu.'))
+        );
+        return;
+      }
+    }
+
+    if (id != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => MovieDetailScreen(
+            tmdbId: id!,
+            title: film.title,
+            posterUrl: film.posterUrl,
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -451,21 +510,8 @@ class _MatchScreenState extends State<MatchScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.fiveStars[i];
-                            return GestureDetector( // EKLENDİ
-                              onTap: () {
-                                if (film.tmdbId != null) {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => MovieDetailScreen(
-                                        tmdbId: film.tmdbId!,
-                                        title: film.title,
-                                        posterUrl: film.posterUrl,
-                                      ),
-                                    ),
-                                  );
-                                }
-                              },
+                            return GestureDetector( 
+                              onTap: () => _handleFilmTap(context, film), // GÜNCELLENDİ
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
                                 child: PosterImage(
@@ -501,11 +547,14 @@ class _MatchScreenState extends State<MatchScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.favorites[i];
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: PosterImage(
-                                posterUrl: film.posterUrl, 
-                                title: film.title
+                            return GestureDetector( // GESTURE DETECTOR EKLENDİ
+                              onTap: () => _handleFilmTap(context, film), // GÜNCELLENDİ
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: PosterImage(
+                                  posterUrl: film.posterUrl, 
+                                  title: film.title
+                                ),
                               ),
                             );
                           },
@@ -535,11 +584,14 @@ class _MatchScreenState extends State<MatchScreen> {
                         delegate: SliverChildBuilderDelegate(
                           (ctx, i) {
                             final film = data.watchlist[i];
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: PosterImage(
-                                posterUrl: film.posterUrl, 
-                                title: film.title
+                            return GestureDetector( // GESTURE DETECTOR EKLENDİ
+                              onTap: () => _handleFilmTap(context, film), // GÜNCELLENDİ
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: PosterImage(
+                                  posterUrl: film.posterUrl, 
+                                  title: film.title
+                                ),
                               ),
                             );
                           },
@@ -621,7 +673,15 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
         final d = doc.data();
         final t = (d['title'] ?? d['name'] ?? '').toString();
         final p = (d['posterUrl'] ?? d['poster'] ?? d['poster_path'] ?? '').toString();
-        items.add(FilmItem(id: doc.id, title: t.isNotEmpty ? t : 'İsimsiz', posterUrl: p));
+        // TMDB ID'yi de çekiyoruz
+        final tmdbId = d['tmdbId'] as int?;
+
+        items.add(FilmItem(
+          id: doc.id, 
+          title: t.isNotEmpty ? t : 'İsimsiz', 
+          posterUrl: p,
+          tmdbId: tmdbId // EKLENDİ
+        ));
       }
     }
     return items;
@@ -638,8 +698,7 @@ Future<_Resolved> _resolveCommonFilms(global_match.MatchResult m) async {
   );
 }
 
-// --- Components for Incoming Likes Bottom Sheet ---
-
+// ... (_IncomingLikesSheet ve diğer widgetlar aynı kalıyor) ...
 class _IncomingLikesSheet extends StatelessWidget {
   final List<_IncomingLike> items;
   const _IncomingLikesSheet({required this.items});
@@ -783,17 +842,15 @@ class _LikesIndicatorHeart extends StatelessWidget {
         return Stack(
           alignment: Alignment.center,
           children: [
-            // Arkaplanı üstteki Container sağladığı için burada sildik.
             IconButton(
               onPressed: onPressed,
-              iconSize: 26, // Kutuya uygun boyut
+              iconSize: 26, 
               padding: EdgeInsets.zero,
               icon: Icon(
                 hasUnread ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: hasUnread ? Colors.red : null, // Okunmamışsa kırmızı, değilse tema rengi
+                color: hasUnread ? Colors.red : null, 
               ),
             ),
-            // Kırmızı Bildirim Noktası
             if (hasUnread)
               Positioned(
                 right: 10,
