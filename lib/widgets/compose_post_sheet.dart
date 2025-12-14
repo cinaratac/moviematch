@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; 
 import 'package:fluttergirdi/widgets/poster_image.dart';
-import 'package:fluttergirdi/screens/profilescreen.dart';
+
 import '../services/text_filter_service.dart';
 import 'dart:math' as math; 
 
@@ -47,14 +47,14 @@ class _ComposePostPageState extends State<ComposePostPage> {
   
   double _rating = 0.0;
   bool _isSpoiler = false;
-  bool _showReviewOptions = false; 
+
 
   @override
   void initState() {
     super.initState();
     if (widget.initialMovie != null) {
       _selectedMovie = widget.initialMovie;
-      _showReviewOptions = true;
+  
     }
   }
   
@@ -228,7 +228,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
     if (result != null && mounted) {
       setState(() {
         _selectedMovie = result;
-        _showReviewOptions = true; 
+        
       });
     }
   }
@@ -356,7 +356,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                   IconButton(
                                     onPressed: () => setState(() {
                                       _selectedMovie = null;
-                                      _showReviewOptions = false;
+                                      
                                       _rating = 0;
                                     }),
                                     icon: const Icon(Icons.close),

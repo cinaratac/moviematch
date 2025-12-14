@@ -285,7 +285,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
         primaryKey = byTmdb.docs.first.id;
       } else {
         final slugId = 'film:$guessLbSlug';
-        final slugDoc = await db.collection('catalog_films').doc(slugId).get();
+        
         primaryKey = slugId; 
       }
 

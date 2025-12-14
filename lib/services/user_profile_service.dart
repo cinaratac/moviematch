@@ -306,21 +306,7 @@ class UserProfileService {
   // favoritesKeys sadece gerçek favoriler (4'lü vitrin) için kullanılmalı.
   // Bu fonksiyon artık saveTasteProfile içinden 'loved' listesiyle ÇAĞRILMIYOR.
   // LetterboxdService.syncFavoritesToFirestore tarafından yönetilmeli.
-  Future<void> _mirrorFavoritesKeysToUsers({
-    required String uid,
-    required List<String> lovedKeys,
-    String? letterboxdUsername,
-  }) async {
-    // BU FONKSİYON ARTIK DOĞRUDAN LOVED KEYS'İ FAVORITES KEYS'E EŞİTLEMEZ.
-    // Ancak geriye dönük uyumluluk veya farklı bir kullanım için burada tutulabilir.
-    // Şimdilik boş bırakıyorum veya sadece username update için kullanıyorum.
-    
-    final payload = <String, dynamic>{
-      if (letterboxdUsername != null) 'letterboxdUsername': letterboxdUsername,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    await _usersRef(uid).set(payload, SetOptions(merge: true));
-  }
+  
 
   /// Mirror a user's Letterboxd watchlist keys into users/{uid} for visibility
   /// Keeps this service the single place that shapes root user doc mirrors.

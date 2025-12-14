@@ -336,7 +336,7 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                             height: 100,
                             child: ListView.separated(
                               scrollDirection: Axis.horizontal,
-                              itemCount: cd!.allFilms.length,
+                              itemCount: cd.allFilms.length,
                               separatorBuilder: (_, __) => const SizedBox(width: 8),
                               itemBuilder: (ctx, i) {
                                 final film = cd.allFilms[i];
@@ -540,7 +540,7 @@ class _UserProfileData {
 
 // Ortak filmleri yükler (Eski fonksiyon)
 Future<_CardData> _loadCommonData(global_match.MatchResult m) async {
-  final db = FirebaseFirestore.instance;
+
   final allKeys = <String>{
     ...m.commonFiveStars.take(4),
     ...m.commonFavorites.take(4),

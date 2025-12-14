@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
-import 'package:fluttergirdi/services/match_service.dart';
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui' as ui;
@@ -901,7 +901,7 @@ class _ActivityWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+   
 
     return GestureDetector(
       onTap: () {

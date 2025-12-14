@@ -1,11 +1,11 @@
 import 'dart:async'; 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/create_club_screen.dart';
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/club_card.dart'; // <--- YENİ KART TASARIMI EKLENDİ
-import 'dart:io';
+
 
 // --- 1. DRAWER'DAN AÇILAN HAVALI EKRAN ---
 class ClubsScreen extends StatelessWidget {

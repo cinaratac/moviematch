@@ -5,7 +5,6 @@ import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
-import 'package:fluttergirdi/screens/clubs_tab.dart'; 
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/club_card.dart';
 import 'package:fluttergirdi/screens/create_club_screen.dart'; 

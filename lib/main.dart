@@ -2,14 +2,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:fluttergirdi/services/push_token_service.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
 

@@ -161,7 +161,7 @@ class _LeaderboardList extends StatelessWidget {
                   color: bgColor,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: borderColor ?? Colors.transparent, 
+                    color: borderColor,
                     width: index < 3 ? 1.5 : 0 
                   ),
                 ),

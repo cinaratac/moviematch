@@ -11,7 +11,7 @@ import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
-import 'package:fluttergirdi/screens/profilescreen.dart';
+
 import 'package:fluttergirdi/theme.dart';
 
 class CustomDrawer extends StatefulWidget {

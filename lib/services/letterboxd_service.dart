@@ -5,10 +5,10 @@ import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
 
 // Gerekli servis importları
-import 'package:fluttergirdi/services/user_profile_service.dart';
+
 import 'package:fluttergirdi/services/match_service.dart';
 
 // --- HTTP client & helpers ---------------------------------------------------
