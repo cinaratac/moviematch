@@ -13,7 +13,7 @@ import '../widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:fluttergirdi/widgets/custom_drawer.dart';
 // YENİ İMPORTLAR
- 
+import 'package:fluttergirdi/widgets/dashboard_stats_row.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -291,7 +291,17 @@ class _FeedPageState extends State<FeedPage> {
                             itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
                             separatorBuilder: (_, __) => const SizedBox(height: 12),
                             itemBuilder: (context, i) {
-                              if (i == 0) return const RecommendationCard();
+                              // 1. ÖĞE: ÖNERİ KARTI + DASHBOARD
+if (i == 0) {
+  return const Column(
+    children: [
+      RecommendationCard(),
+      // Araya biraz boşluk bırakmak istersen SizedBox ekleyebilirsin
+      // SizedBox(height: 8), 
+      DashboardStatsRow(),
+    ],
+  );
+}
                               
                               final postIndex = i - 1;
                               if (_loadingMore && postIndex == _posts.length) {

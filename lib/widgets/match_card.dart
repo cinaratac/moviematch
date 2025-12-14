@@ -11,15 +11,24 @@ class FilmItem {
   final String id;
   final String title;
   final String posterUrl;
-  final int? tmdbId; // EKLENDİ
+  final int? tmdbId;
 
   const FilmItem({
     required this.id, 
     required this.title, 
     required this.posterUrl,
-    this.tmdbId, // EKLENDİ
+    this.tmdbId,
   });
 }
+
+// --- STATİK CACHE (HAFIZA) ---
+// Bu değişkenler uygulamanın yaşamı boyunca verileri tutar.
+// Böylece kart yeniden oluşsa bile internete gitmez, buradan anında okur.
+class _MatchCardCache {
+  static final Map<String, _UserProfileData> profiles = {};
+  static final Map<String, _CardData> commonData = {};
+}
+
 class MatchCard extends StatefulWidget {
   final global_match.MatchResult result;
   final VoidCallback onOpen;
@@ -39,16 +48,37 @@ class MatchCard extends StatefulWidget {
 }
 
 class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixin {
-  late final Future<_CardData> _commonDataFuture;
-  late final Future<_UserProfileData> _profileDataFuture;
+  // Future yerine doğrudan veriyi tutabiliriz veya FutureBuilder'a initialData verebiliriz.
+  Future<_UserProfileData>? _profileFuture;
+  Future<_CardData>? _commonDataFuture;
 
   @override
   void initState() {
     super.initState();
-    // 1. Ortak filmleri yükle (Mevcut mantık)
-    _commonDataFuture = _loadCommonData(widget.result);
-    // 2. Kullanıcının detaylı profilini yükle (YENİ)
-    _profileDataFuture = _loadUserProfile(widget.result.uid);
+    final uid = widget.result.uid;
+
+    // 1. Profil Verisi Kontrolü
+    if (_MatchCardCache.profiles.containsKey(uid)) {
+      // Zaten hafızada var, Future oluşturmaya gerek yok (Build içinde initialData kullanacağız)
+      _profileFuture = null; 
+    } else {
+      // Hafızada yok, çek ve kaydet
+      _profileFuture = _loadUserProfile(uid).then((data) {
+        _MatchCardCache.profiles[uid] = data;
+        return data;
+      });
+    }
+
+    // 2. Ortak Veri Kontrolü
+    // Cache key olarak UID kullanıyoruz çünkü her kullanıcının ortak verisi o kişiye özeldir.
+    if (_MatchCardCache.commonData.containsKey(uid)) {
+      _commonDataFuture = null;
+    } else {
+      _commonDataFuture = _loadCommonData(widget.result).then((data) {
+        _MatchCardCache.commonData[uid] = data;
+        return data;
+      });
+    }
   }
 
   @override
@@ -66,6 +96,11 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
         : (m.letterboxdUsername != null ? '@${m.letterboxdUsername}' : 'Kullanıcı');
 
     final hasPhoto = m.photoURL != null && m.photoURL!.isNotEmpty;
+    final uid = m.uid;
+
+    // Cache'deki veriyi al (varsa)
+    final initialProfile = _MatchCardCache.profiles[uid];
+    final initialCommon = _MatchCardCache.commonData[uid];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -89,6 +124,7 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
             Image.network(
               m.photoURL!,
               fit: BoxFit.cover,
+              gaplessPlayback: true, // [ÖNEMLİ] Resmin titremesini engeller
               errorBuilder: (_, __, ___) => _buildDefaultBackground(theme),
             )
           else
@@ -103,9 +139,9 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                 colors: [
                   Colors.transparent,
                   Colors.transparent,
-                  Colors.black54, // Yazıların arkası
+                  Colors.black54, 
                   Colors.black87,
-                  Colors.black, // En alt kısım tamamen siyah
+                  Colors.black, 
                 ],
                 stops: [0.0, 0.3, 0.5, 0.8, 1.0],
               ),
@@ -114,14 +150,14 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
 
           // --- 3. KATMAN: İÇERİK (Scrollable) ---
           Positioned.fill(
-            bottom: 90, // Butonlar için alttan boşluk
+            bottom: 90, 
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(height: MediaQuery.of(context).size.height * 0.35), // Resmi boş bırak
+                  SizedBox(height: MediaQuery.of(context).size.height * 0.35), 
 
                   // --- İsim & Uyum ---
                   Row(
@@ -192,12 +228,14 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
 
                   const SizedBox(height: 20),
 
-                  // --- YENİ BÖLÜM: Biyografi ve Profil Detayları ---
+                  // --- Biyografi ve Profil Detayları ---
+                  // Eğer initialProfile varsa FutureBuilder beklemez, direkt gösterir.
                   FutureBuilder<_UserProfileData>(
-                    future: _profileDataFuture,
+                    future: _profileFuture, // Eğer cache varsa bu null olabilir veya tamamlanmış future olabilir
+                    initialData: initialProfile, // [KRİTİK] Cache varsa anında göster
                     builder: (context, snap) {
-                      if (!snap.hasData) return const SizedBox.shrink();
-                      final p = snap.data!;
+                      final p = snap.data;
+                      if (p == null) return const SizedBox.shrink();
                       
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -249,22 +287,19 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                             ),
                             const SizedBox(height: 8),
                             SizedBox(
-                              height: 110, // Kırmızı çember için biraz yer açtık
+                              height: 110, 
                               child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 itemCount: p.favorites.length,
                                 separatorBuilder: (_, __) => const SizedBox(width: 12),
                                 itemBuilder: (ctx, i) {
                                   final film = p.favorites[i];
-                                  
-                                  // KONTROL: Bu film bizimle ortak mı?
-                                  // MatchResult içindeki commonFavorites listesine bakıyoruz
                                   final isCommon = m.commonFavorites.contains(film.id);
 
                                   return Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      GestureDetector( // GESTURE DETECTOR EKLENDİ
+                                      GestureDetector(
                                         onTap: () {
                                           if (film.tmdbId != null) {
                                             Navigator.push(
@@ -301,7 +336,6 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                                           ),
                                         ),
                                       ),
-                                      // ... geri kalan kodlar aynı ...
                                     ],
                                   );
                                 },
@@ -314,11 +348,10 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                     },
                   ),
 
-                  // --- Ortak Filmler (Eski Bölüm - Aşağıda Yedek Olarak Kalabilir veya Kaldırılabilir) ---
-                  // Kullanıcı favorilerini yukarıya aldığımız için burayı sadeleştirebiliriz.
-                  // Ama "Ortak 5 Yıldızlar" gibi diğer kategoriler için tutuyoruz.
+                  // --- Ortak Filmler ---
                   FutureBuilder<_CardData>(
                     future: _commonDataFuture,
+                    initialData: initialCommon, // [KRİTİK] Cache kullanımı
                     builder: (context, snap) {
                       final cd = snap.data;
                       final hasFilms = cd != null && cd.allFilms.isNotEmpty;
@@ -359,7 +392,7 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                     },
                   ),
                   
-                  const SizedBox(height: 24), // En alttaki butonlar için ekstra boşluk
+                  const SizedBox(height: 24),
                 ],
               ),
             ),
@@ -527,7 +560,7 @@ class _UserProfileData {
   final int? age;
   final List<String> favDirectors;
   final List<String> favActors;
-  final List<FilmItem> favorites; // Karşı tarafın tüm favorileri
+  final List<FilmItem> favorites; 
 
   const _UserProfileData({
     this.bio = '',
@@ -538,9 +571,8 @@ class _UserProfileData {
   });
 }
 
-// Ortak filmleri yükler (Eski fonksiyon)
+// Ortak filmleri yükler 
 Future<_CardData> _loadCommonData(global_match.MatchResult m) async {
-
   final allKeys = <String>{
     ...m.commonFiveStars.take(4),
     ...m.commonFavorites.take(4),
@@ -552,7 +584,7 @@ Future<_CardData> _loadCommonData(global_match.MatchResult m) async {
   return _CardData(allFilms: films);
 }
 
-// Kullanıcı detaylarını yükler (YENİ)
+// Kullanıcı detaylarını yükler 
 Future<_UserProfileData> _loadUserProfile(String uid) async {
   try {
     final db = FirebaseFirestore.instance;
@@ -566,11 +598,7 @@ Future<_UserProfileData> _loadUserProfile(String uid) async {
     final dirs = List<String>.from(data['favDirectors'] ?? []);
     final actors = List<String>.from(data['favActors'] ?? []);
     
-    // Kullanıcının favori film listesini al (ID'ler)
     final favKeys = List<String>.from(data['favoritesKeys'] ?? []);
-    
-    // ID'leri Film Objelerine çevir
-    // Performans için sadece ilk 10 favoriyi çekiyoruz
     final resolvedFavs = await _fetchFilmsByKeys(favKeys.take(10).toList());
 
     return _UserProfileData(
@@ -585,7 +613,6 @@ Future<_UserProfileData> _loadUserProfile(String uid) async {
   }
 }
 
-// ID listesinden FilmItem listesi üreten yardımcı fonksiyon
 Future<List<FilmItem>> _fetchFilmsByKeys(List<String> keys) async {
   if (keys.isEmpty) return [];
   final db = FirebaseFirestore.instance;
@@ -604,14 +631,14 @@ Future<List<FilmItem>> _fetchFilmsByKeys(List<String> keys) async {
         final data = d.data();
         final p = (data['posterUrl'] ?? data['poster'] ?? '').toString();
         final t = (data['title'] ?? data['name'] ?? '').toString();
-        final tmdbId = data['tmdbId'] as int?; // EKLENDİ
+        final tmdbId = data['tmdbId'] as int?;
 
         if (t.isNotEmpty) {
           films.add(FilmItem(
             id: d.id, 
             title: t, 
             posterUrl: p, 
-            tmdbId: tmdbId // EKLENDİ
+            tmdbId: tmdbId 
           ));
         }
       }

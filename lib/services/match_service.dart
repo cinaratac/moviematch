@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart'; // YENİ EKLENDİ
 import 'dart:math' as math;
 
 // --- Cache Yardımcı Sınıfı ---
@@ -109,8 +110,7 @@ class MatchService {
   };
 
   // ---------------------------------------------------------------------------
-  // YENİ: MERKEZİ HESAPLAMA MOTORU (Daha Cömert Algoritma)
-  // Bu fonksiyon hem findMatches hem de calculateMatchScore tarafından kullanılır.
+  // MERKEZİ HESAPLAMA MOTORU
   // ---------------------------------------------------------------------------
   MatchResult? _computeMatch(String myUid, String otherUid, Map<String, dynamic> myData, Map<String, dynamic> theirData) {
     // 1. Verileri Hazırla
@@ -142,21 +142,18 @@ class MatchService {
     final commonDir = myDirectors.intersection(theirDirectors).toList()..sort();
     final commonAct = myActors.intersection(theirActors).toList()..sort();
 
-    // Hiçbir ortak nokta yoksa null dön (Listede hiç çıkmasın)
+    // Hiçbir ortak nokta yoksa null dön
     if (common5.isEmpty && commonF.isEmpty && commonW.isEmpty &&
         commonD.isEmpty && commonG.isEmpty && commonDir.isEmpty && commonAct.isEmpty) {
       return null;
     }
 
-    // 3. PUANLAMA ALGORİTMASI (Daha Cömert Versiyon)
-    
-    // Yardımcı: Doygunluk Fonksiyonu
+    // 3. PUANLAMA ALGORİTMASI
     double calcPart(int count, double weight, double k) {
       if (count <= 0) return 0.0;
       return weight * (count / (count + k));
     }
 
-    // Ağırlıklar (Toplamı ~100)
     const w5 = 30.0;     
     const wFav = 40.0;   
     const wWatch = 10.0; 
@@ -164,31 +161,23 @@ class MatchService {
     const wDir = 10.0;   
     const wAct = 5.0;    
 
-    // --- CÖMERT AYARLAR ---
     final score5 = calcPart(common5.length, w5, 2.0);      
-    final scoreFav = calcPart(commonF.length, wFav, 1.0);  // 1 ortak favori = 20 puan!
+    final scoreFav = calcPart(commonF.length, wFav, 1.0);
     final scoreWatch = calcPart(commonW.length, wWatch, 3.0); 
     
     final scoreG = calcPart(commonG.length, wG, 1.0);
     final scoreDir = calcPart(commonDir.length, wDir, 1.0);
     final scoreAct = calcPart(commonAct.length, wAct, 1.0);
 
-    // Ham Toplam
     double totalScore = score5 + scoreFav + scoreWatch + scoreG + scoreDir + scoreAct;
 
-    // Beğenilmeyenler Bonusu
     if (commonD.isNotEmpty) totalScore += 3.0;
 
-    // --- BOOST (YÜKSELTME) ---
     if (totalScore > 0) {
-      // 1. Taban puan ekle (Herhangi bir ortaklık varsa en az 15 puan cebe girsin)
       totalScore += 15.0; 
-      
-      // 2. Düşük puanları yukarı çeken eğri uygula
       totalScore = math.sqrt(totalScore) * 10.0;
     }
 
-    // Son limit
     final finalScore = math.min(100.0, totalScore);
 
     return MatchResult(
@@ -208,7 +197,8 @@ class MatchService {
   }
 
   /* ---------------------------------------------------------------------- */
-  /* 1) EŞLEŞME LİSTESİ HESAPLA (findMatches) - DÜZELTİLMİŞ                 */
+  /* 1) EŞLEŞME LİSTESİ HESAPLA (findMatches) - HİBRİT VERSİYON             */
+  /* Cloud Function'ı dener, hata verirse yerel sorguya düşer.           */
   /* ---------------------------------------------------------------------- */
   Future<List<MatchResult>> findMatches(String myUid, {int candidateLimit = 100}) async {
     // 1. Cache Kontrolü
@@ -236,60 +226,96 @@ class MatchService {
         final myLiked = (m[meIsA ? 'aLiked' : 'bLiked'] == true);
         final myPass = (m[meIsA ? 'aPass' : 'bPass'] == true);
         final otherLiked = (m[meIsA ? 'bLiked' : 'aLiked'] == true);
-        // Beğendiklerim, Geçtiklerim veya Eşleştiklerim karşıma tekrar çıkmasın
+        
         if (myLiked || myPass || (myLiked && otherLiked)) {
           hiddenUids.add(meIsA ? b : a);
         }
       }
     } catch (_) {}
 
-    final List<MatchResult> out = [];
-    DocumentSnapshot? lastDoc;
-    bool keepFetching = true;
-    int fetchCycles = 0;
-    const int maxCycles = 15; // Sonsuz döngü koruması: En fazla 15 kere 50'lik paket çeksin
+    List<MatchResult> out = [];
+    bool cloudFailed = false;
 
-    // 4. Adayları Getir (DÜZELTME: Sayfalama ile döngü)
-    // Yeterli aday bulana kadar veya DB bitene kadar çekmeye devam et
-    while (keepFetching && out.length < candidateLimit && fetchCycles < maxCycles) {
-      fetchCycles++;
-
-      // Document ID'ye göre sıralı çekiyoruz ki sayfalama yapabilelim
-      Query query = _users.orderBy(FieldPath.documentId).limit(50);
+    // --- YÖNTEM A: CLOUD FUNCTION DENEMESİ ---
+    try {
+      print("🔍 Cloud Function ile eşleşme aranıyor...");
+      final callable = FirebaseFunctions.instance.httpsCallable('findMatchesCallable');
+      final resp = await callable.call();
       
-      if (lastDoc != null) {
-        query = query.startAfterDocument(lastDoc);
-      }
+      final rawList = resp.data['results'] as List<dynamic>;
+      
+      for (final item in rawList) {
+        final map = Map<String, dynamic>.from(item as Map);
+        final uid = map['uid'] as String;
 
-      final snapshot = await query.get();
-
-      if (snapshot.docs.isEmpty) {
-        keepFetching = false;
-        break;
-      }
-
-      lastDoc = snapshot.docs.last;
-
-      for (final d in snapshot.docs) {
-        final uid = d.id;
-        
-        // Zaten etkileşime geçilmişse atla
         if (hiddenUids.contains(uid)) continue;
 
-        // Hesapla
-        final result = _computeMatch(myUid, uid, myData, d.data() as Map<String, dynamic>);
+        final result = _computeMatch(myUid, uid, myData, map);
         if (result != null) {
           out.add(result);
         }
       }
+
+      // Eğer Cloud sonuç döndürdüyse işlem tamam
+      if (out.isNotEmpty) {
+        out.sort((a, b) => b.score.compareTo(a.score));
+        _findCache[myUid] = _FindCache(out, DateTime.now());
+        print("✅ Cloud Function ${out.length} eşleşme buldu.");
+        return out;
+      } else {
+         print("⚠️ Cloud Function boş döndü, yerel sorguya geçiliyor.");
+         cloudFailed = true;
+      }
+
+    } catch (e) {
+      print("❌ Cloud Function hatası: $e");
+      print("⚠️ Yerel sorguya (eski yönteme) geçiliyor...");
+      cloudFailed = true;
     }
 
-    // 5. Sırala
-    out.sort((a, b) {
-      final s = b.score.compareTo(a.score);
-      if (s != 0) return s;
-      return b.commonFiveCount.compareTo(a.commonFiveCount);
-    });
+    // --- YÖNTEM B: YEREL SORGU (FALLBACK / YEDEK PLAN) ---
+    // Eğer Cloud hata verdiyse veya sonuç bulamadıysa burası çalışır.
+    if (cloudFailed || out.isEmpty) {
+      DocumentSnapshot? lastDoc;
+      bool keepFetching = true;
+      int fetchCycles = 0;
+      const int maxCycles = 10; 
+
+      while (keepFetching && out.length < candidateLimit && fetchCycles < maxCycles) {
+        fetchCycles++;
+        Query query = _users.orderBy(FieldPath.documentId).limit(50);
+        
+        if (lastDoc != null) {
+          query = query.startAfterDocument(lastDoc);
+        }
+
+        final snapshot = await query.get();
+
+        if (snapshot.docs.isEmpty) {
+          keepFetching = false;
+          break;
+        }
+
+        lastDoc = snapshot.docs.last;
+
+        for (final d in snapshot.docs) {
+          final uid = d.id;
+          if (hiddenUids.contains(uid)) continue;
+
+          final result = _computeMatch(myUid, uid, myData, d.data() as Map<String, dynamic>);
+          if (result != null) {
+            out.add(result);
+          }
+        }
+      }
+      
+      // Sırala
+      out.sort((a, b) {
+        final s = b.score.compareTo(a.score);
+        if (s != 0) return s;
+        return b.commonFiveCount.compareTo(a.commonFiveCount);
+      });
+    }
 
     // Cache'i güncelle
     _findCache[myUid] = _FindCache(out, DateTime.now());
@@ -297,7 +323,7 @@ class MatchService {
   }
 
   /* ---------------------------------------------------------------------- */
-  /* 2) TEKİL KULLANICI UYUMU HESAPLA (Profil Ekranı İçin)                  */
+  /* 2) TEKİL KULLANICI UYUMU HESAPLA                                       */
   /* ---------------------------------------------------------------------- */
   Future<int> calculateMatchScore(String myUid, String otherUid) async {
     try {

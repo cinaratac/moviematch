@@ -11,8 +11,10 @@ import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
-
+import '../screens/trivia_quiz_screen.dart';
+import '../screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/theme.dart';
+import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; // Admin ekranı importu
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -117,7 +119,40 @@ class _CustomDrawerState extends State<CustomDrawer> {
                           color: Colors.purple,
                           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
                         ),
-
+                        // --- YENİ EKLENEN YARIŞMA BUTONU ---
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.2), // Dikkat çekici sarı renk
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.quiz_rounded, color: Colors.amber),
+            ),
+            title: const Text(
+              'Sinema Yarışması',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text(
+              'Bilgini test et, rozet kazan!',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+            onTap: () {
+              // Önce çekmeceyi kapat
+              Navigator.pop(context);
+              
+              // Sonra sayfaya git
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const TriviaWelcomeScreen(),
+                ),
+              );
+            },
+          ),
+          const Divider(indent: 16, endIndent: 16, height: 1), // Altına çizgi (Opsiyonel)
+          // ------------------------------------
                         // YENİLİKLER (Yeşil Nokta Mantığı)
                         StreamBuilder<DocumentSnapshot>(
                           stream: FirebaseFirestore.instance.collection('system').doc('announcement').snapshots(),
@@ -150,6 +185,23 @@ class _CustomDrawerState extends State<CustomDrawer> {
                         const SizedBox(height: 24),
                         Divider(height: 1, color: separatorColor),
                         const SizedBox(height: 24),
+                        if (uid == "RfpPtaZfaKYueG9b2dd2ASScqOO2") 
+                          _buildIOSMenuItem(
+                            context,
+                            icon: CupertinoIcons.lock_shield_fill, // Kilit ikonu
+                            title: 'Admin Paneli (Gizli)',
+                            color: Colors.red.shade900,
+                            onTap: () {
+                              Navigator.pop(context); // Çekmeceyi kapat
+                              Navigator.push(
+                                context, 
+                                MaterialPageRoute(builder: (_) => const AdminTriviaScreen())
+                              );
+                            },
+                          ),
+                        // ---------------------------
+
+                        
 
                         _buildSectionTitle("UYGULAMA"),
                         _buildIOSMenuItem(

@@ -101,8 +101,9 @@ exports.createNotificationOnFollow = functions.firestore
   });
 
 // --------------------------------------------------------
-// 3. TOTAL UNREAD COUNT AGGREGATOR (Chat Servisinden geldi)
-// Bir sohbet güncellendiğinde, katılımcıların toplam okunmamış mesaj sayısını hesaplar ve user profiline yazar.
+// 3. TOTAL UNREAD COUNT OPTIMIZED (Maliyet Dostu Versiyon)
+// Sohbet güncellendiğinde, aradaki farkı hesaplayıp kullanıcı profiline yansıtır.
+// Tüm sohbetleri yeniden okumaz!
 // --------------------------------------------------------
 exports.aggregateUnreadCounts = functions.firestore
   .document("chats/{chatId}")
@@ -113,35 +114,39 @@ exports.aggregateUnreadCounts = functions.firestore
     const newCounts = newData.unreadCounts || {};
     const oldCounts = oldData.unreadCounts || {};
 
+    // Sadece unreadCounts değiştiyse işlem yap (Gereksiz çalışmayı önle)
     if (JSON.stringify(newCounts) === JSON.stringify(oldCounts)) return;
 
     const participants = newData.participants || [];
+    const updates = [];
 
     for (const uid of participants) {
+      // Eski ve yeni değerleri güvenli şekilde al
+      const oldVal = (oldCounts[uid] && typeof oldCounts[uid] === 'number') ? oldCounts[uid] : 0;
+      const newVal = (newCounts[uid] && typeof newCounts[uid] === 'number') ? newCounts[uid] : 0;
       
-      const chatsSnap = await admin.firestore()
-        .collection("chats")
-        .where("participants", "array-contains", uid)
-        .get();
+      // Aradaki farkı hesapla (Örn: 3'ten 0'a düştüyse diff = -3)
+      const diff = newVal - oldVal;
 
-      let total = 0;
-      chatsSnap.docs.forEach(doc => {
-        const d = doc.data();
-        const u = d.unreadCounts || {};
-        if (u[uid] && typeof u[uid] === 'number') {
-          total += u[uid];
-        }
-      });
+      if (diff !== 0) {
+        // Kullanıcının totalUnreadCount değerini atomic olarak güncelle
+        const updatePromise = admin.firestore()
+            .collection("users")
+            .doc(uid)
+            .set({
+                totalUnreadCount: admin.firestore.FieldValue.increment(diff),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            
+        updates.push(updatePromise);
+      }
+    }
 
-      // Kullanıcı profiline yaz
-      await admin.firestore().collection("users").doc(uid).set({
-        totalUnreadCount: total,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+    // Tüm güncellemeleri paralel olarak çalıştır
+    if (updates.length > 0) {
+      await Promise.all(updates);
     }
   });
-
-
 // --------------------------------------------------------
 // 4. PUSH NOTIFICATION GÖNDERİCİ (Mevcut kodunuzdan güncellendi)
 // --------------------------------------------------------
@@ -238,3 +243,84 @@ exports.sendChatNotification = functions.firestore
 
     await admin.messaging().sendToDevice(tokens, payload);
   });
+  // --------------------------------------------------------
+// 6. MATCH FINDER (Eşleşme Bulucu) - Callable Function
+// Rastgele aramak yerine, ortak zevklere sahip adayları doğrudan sorgular.
+// --------------------------------------------------------
+exports.findMatchesCallable = functions.https.onCall(async (data, context) => {
+  // 1. Güvenlik Kontrolü
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Kullanıcı girişi gerekli.');
+  }
+
+  const myUid = context.auth.uid;
+  const db = admin.firestore();
+
+  // 2. Kendi profilini çek
+  const meSnap = await db.collection('users').doc(myUid).get();
+  if (!meSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Kullanıcı profili bulunamadı.');
+  }
+  const myData = meSnap.data();
+  const myFiveStars = (myData.fiveStarKeys || []).slice(0, 50); // En son 50 tanesi yeterli
+  const myFavorites = (myData.favoritesKeys || []).slice(0, 20);
+
+  // 3. STRATEJİ: "Rastgele" yerine "Hedefli" Arama
+  // Benim sevdiğim filmlerden rastgele 3 tanesini seçip, bunları sevenleri arayalım.
+  // Eğer hiç verim yoksa son çare rastgele bakarız.
+  
+  let candidates = [];
+  const searchPool = [...myFiveStars, ...myFavorites];
+  
+  if (searchPool.length > 0) {
+    // Rastgele 3 film ID'si seç (Array-contains-any limiti 10'dur, biz 3-4 kullanalım)
+    const randomKeys = searchPool.sort(() => 0.5 - Math.random()).slice(0, 3);
+    
+    // Bu filmlerden HERHANGİ BİRİNİ sevenleri getir
+    const query = await db.collection('users')
+      .where('fiveStarKeys', 'array-contains-any', randomKeys)
+      .limit(30)
+      .get();
+      
+    candidates = query.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  }
+
+  // Eğer aday çıkmadıysa veya hiç filmim yoksa, mecburen rastgele/son kayıt olanlardan getir
+  if (candidates.length < 5) {
+     const fallbackQuery = await db.collection('users')
+       .orderBy('createdAt', 'desc') // Veya rastgele bir field
+       .limit(20)
+       .get();
+     const fallbacks = fallbackQuery.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+     candidates = [...candidates, ...fallbacks];
+  }
+
+  // 4. Kendini ve daha önce etkileşime geçtiklerini listeden çıkar
+  // (Not: Etkileşim listesi çok büyükse bu filtreyi client'a bırakabiliriz, şimdilik burada basitçe yapalım)
+  candidates = candidates.filter(c => c.id !== myUid);
+  
+  // 5. Basit Puanlama ve Formatlama (Detaylı hesaplama yine client'ta veya burada yapılabilir)
+  // Bant genişliği tasarrufu için sadece gerekli alanları dönüyoruz.
+  const results = candidates.map(c => {
+    // Basit bir kesişim hesabı
+    const theirFive = new Set(c.fiveStarKeys || []);
+    const commonCount = myFiveStars.filter(id => theirFive.has(id)).length;
+    
+    return {
+      uid: c.id,
+      displayName: c.displayName,
+      photoURL: c.photoURL,
+      // Client tarafındaki detaylı hesaplama için gereken ham veriler:
+      fiveStarKeys: c.fiveStarKeys || [],
+      favoritesKeys: c.favoritesKeys || [],
+      watchlistKeys: c.watchlistKeys || [],
+      favGenres: c.favGenres || [],
+      favDirectors: c.favDirectors || [],
+      favActors: c.favActors || [],
+      // Ön hesaplama skoru (Client sıralamada kullanabilir)
+      preScore: commonCount * 10 
+    };
+  });
+
+  return { results };
+});

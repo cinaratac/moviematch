@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/services/user_profile_service.dart';
+import 'package:fluttergirdi/services/letterboxd_service.dart'; // EKLENDİ: Veri çekmek için gerekli
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io'; // Dosya işlemleri için
-import 'package:image_picker/image_picker.dart'; // Galeriden resim seçmek için
-import 'package:firebase_storage/firebase_storage.dart'; // Seçilen resmi yüklemek için
+import 'dart:io'; 
+import 'package:image_picker/image_picker.dart'; 
+import 'package:firebase_storage/firebase_storage.dart'; 
 import '../services/text_filter_service.dart';
 
 class EditProfilePage extends StatefulWidget {
-  final Map<String, dynamic>?
-  initialUserData; // optional pre-fetched user doc data
+  final Map<String, dynamic>? initialUserData; 
   const EditProfilePage({super.key, this.initialUserData});
 
   @override
@@ -38,15 +38,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   bool _loading = true;
   bool _saving = false;
-  File? _selectedImage; // Seçilen yeni resim dosyasını tutar
+  File? _selectedImage; 
   final ImagePicker _picker = ImagePicker();
 
-  // Galeriden resim seçme fonksiyonu
   Future<void> _pickImage() async {
     try {
       final XFile? picked = await _picker.pickImage(
         source: ImageSource.gallery,
-        maxWidth: 800, // Performansı korumak için resmi küçültüyoruz
+        maxWidth: 800,
         maxHeight: 800,
         imageQuality: 85,
       );
@@ -64,13 +63,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   }
 
   void _applyInitial(Map<String, dynamic> data) {
-    // ---------------------------------------------------------
-    // 1. KULLANICI ADI (Firestore Öncelikli, Yoksa Auth)
-    // ---------------------------------------------------------
     String val = (data['username'] ?? '').toString();
-
-    // Eğer Firestore'da 'username' alanı boşsa veya yoksa,
-    // FirebaseAuth (Google/Apple) profilindeki isme bak.
     if (val.isEmpty) {
       final user = FirebaseAuth.instance.currentUser;
       if (user?.displayName != null && user!.displayName!.isNotEmpty) {
@@ -78,78 +71,25 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
     }
     _usernameCtrl.text = val;
-    // --- BİYOGRAFİ YÜKLEME ---
     _bioCtrl.text = (data['bio'] ?? '').toString();
-    // -------------------------
     _origUsername = (_usernameCtrl.text).trim().isEmpty ? null : _usernameCtrl.text.trim();
 
-    // ---------------------------------------------------------
-    // 2. LETTERBOXD KULLANICI ADI
-    // ---------------------------------------------------------
     _letterboxdCtrl.text = (data['letterboxdUsername'] ?? '').toString();
 
-    // ---------------------------------------------------------
-    // 3. FAVORİ YÖNETMENLER (Liste veya String Desteği)
-    // ---------------------------------------------------------
     _favDirectors.clear();
     final dArr = data['favDirectors'];
     if (dArr is List) {
-      // Eğer veritabanında liste olarak kayıtlıysa (Yeni versiyon)
-      _favDirectors.addAll(
-        dArr
-            .whereType<String>()
-            .map((e) => e.trim())
-            .where((e) => e.isNotEmpty)
-            .toList(),
-      );
-    } else {
-      // Eğer veritabanında tek satır string ise (Eski versiyon fallback)
-      final v1 = data['favoriteDirector'];
-      final v2 = data['favDirector'];
-      final s = (v1 is String && v1.trim().isNotEmpty)
-          ? v1.trim()
-          : (v2 is String ? v2.trim() : '');
-      if (s.isNotEmpty) {
-        _favDirectors.addAll(
-          s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty),
-        );
-      }
+      _favDirectors.addAll(dArr.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList());
     }
-    // Ekleme kutusu boş başlasın
     _favDirectorCtrl.text = '';
 
-    // ---------------------------------------------------------
-    // 4. FAVORİ OYUNCULAR (Liste veya String Desteği)
-    // ---------------------------------------------------------
     _favActors.clear();
     final aArr = data['favActors'];
     if (aArr is List) {
-      _favActors.addAll(
-        aArr
-            .whereType<String>()
-            .map((e) => e.trim())
-            .where((e) => e.isNotEmpty)
-            .toList(),
-      );
-    } else {
-      // Fallback
-      final v1 = data['favoriteActor'];
-      final v2 = data['favActor'];
-      final s = (v1 is String && v1.trim().isNotEmpty)
-          ? v1.trim()
-          : (v2 is String ? v2.trim() : '');
-      if (s.isNotEmpty) {
-        _favActors.addAll(
-          s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty),
-        );
-      }
+      _favActors.addAll(aArr.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList());
     }
-    // Ekleme kutusu boş başlasın
     _favActorCtrl.text = '';
 
-    // ---------------------------------------------------------
-    // 5. YAŞ BİLGİSİ
-    // ---------------------------------------------------------
     final age = data['age'];
     if (age is int && age > 15) {
       _ageCtrl.text = age.toString();
@@ -159,33 +99,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _ageCtrl.text = '';
     }
 
-    // ---------------------------------------------------------
-    // 6. ORİJİNAL DEĞERLERİ SAKLA (Değişiklik Kontrolü ve Hint Text İçin)
-    // ---------------------------------------------------------
-    
-    // Kullanıcı adı hint text'i için orijinal değeri sakla
-    _origUsername = (_usernameCtrl.text).trim().isEmpty
-        ? null
-        : _usernameCtrl.text.trim();
-
-    // Letterboxd
+    _origUsername = (_usernameCtrl.text).trim().isEmpty ? null : _usernameCtrl.text.trim();
     final lbStr = (_letterboxdCtrl.text).trim();
     _origLb = lbStr.isEmpty ? null : lbStr.toLowerCase();
-
-    // Yönetmen/Oyuncu (Listeler üzerinden kontrol edildiği için text field orijinalleri boş kalabilir veya mantığına göre ayarlayabilirsin)
-    // Ancak değişiklik kontrolü (dirty check) için şimdilik null bırakıyoruz çünkü çiplerle yönetiliyor.
     _origFavDirector = null; 
     _origFavActor = null;
-
-    // Yaş
     if (_ageCtrl.text.trim().isNotEmpty) {
       _origAge = int.tryParse(_ageCtrl.text.trim());
     } else {
       _origAge = null;
     }
-    // --- BİYOGRAFİ ORİJİNAL ---
     _origBio = (_bioCtrl.text).trim().isEmpty ? null : _bioCtrl.text.trim();
-    // --------------------------
   }
 
   @override
@@ -195,14 +119,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _applyInitial(widget.initialUserData!);
       _loading = false;
     } else {
-      // Fallback: keep current behavior (single read) if no initial data passed
       _load();
     }
   }
 
   Future<void> _load() async {
     if (widget.initialUserData != null) {
-      // Already applied in initState; no network read.
       if (mounted) setState(() => _loading = false);
       return;
     }
@@ -212,7 +134,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
       return;
     }
     try {
-      // cache-first user doc
       final ref = FirebaseFirestore.instance.collection('users').doc(user.uid);
       var doc = await ref.get(const GetOptions(source: Source.cache));
       if (!doc.exists) {
@@ -221,12 +142,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
       final data = doc.data() ?? <String, dynamic>{};
       _applyInitial(data);
     } catch (_) {
-      // no-op; show empty form
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  // --- DÜZELTİLDİ: Artık sadece veritabanına yazmıyor, doğrudan sync işlemini çağırıyor ---
   Future<void> _requestLbRefresh() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -236,10 +157,23 @@ class _EditProfilePageState extends State<EditProfilePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Önce Letterboxd kullanıcı adını gir.')),
       );
-      return; // do not write refresh request when LB username is empty
+      return;
     }
+
+    setState(() => _saving = true); // İşlem olduğunu göster
+
     try {
-      // İsteği taste profile dokümanına yazarak Cloud Function / backend tetikleyelim
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Letterboxd verileri çekiliyor...')),
+      );
+
+      // 1. DOĞRUDAN SCRAPING'İ ÇAĞIR
+      await LetterboxdService.fullSyncOnboarding(
+        uid: user.uid,
+        lbUsername: currLb,
+      );
+
+      // 2. Kayıt tarihçesi tut (Opsiyonel)
       await FirebaseFirestore.instance
           .collection('userTasteProfiles')
           .doc(user.uid)
@@ -250,15 +184,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Letterboxd verileri yenileme isteği gönderildi.'),
-        ),
+        const SnackBar(content: Text('Letterboxd verileri başarıyla güncellendi!')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Yenileme isteği başarısız: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Yenileme hatası: $e')),
+      );
+    } finally {
+      if(mounted) setState(() => _saving = false);
     }
   }
 
@@ -267,7 +201,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (user == null) return;
     final raw = _favDirectorCtrl.text.trim();
     if (raw.isEmpty) return;
-    // Prevent duplicates (case-insensitive)
     final exists = _favDirectors.any(
       (e) => e.toLowerCase() == raw.toLowerCase(),
     );
@@ -286,9 +219,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Yönetmen eklenemedi: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Yönetmen eklenemedi: $e')),
+      );
     }
   }
 
@@ -305,9 +238,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Silinemedi: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Silinemedi: $e')),
+      );
     }
   }
 
@@ -332,9 +265,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Oyuncu eklenemedi: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Oyuncu eklenemedi: $e')),
+      );
     }
   }
 
@@ -351,9 +284,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Silinemedi: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Silinemedi: $e')),
+      );
     }
   }
 
@@ -377,36 +310,31 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       String? uploadedPhotoUrl;
       if (_selectedImage != null) {
-        // Dosya yolu: user_avatars/USER_UID.jpg
         final storageRef = FirebaseStorage.instance
             .ref()
             .child('user_avatars')
             .child('${user.uid}.jpg');
 
-        // Yükleme işlemi
         await storageRef.putFile(_selectedImage!);
-        
-        // İndirme URL'sini al
         uploadedPhotoUrl = await storageRef.getDownloadURL();
-
-        // 1. Firebase Auth profilindeki fotoğrafı güncelle
         await user.updatePhotoURL(uploadedPhotoUrl);
       }
       final username = _usernameCtrl.text.trim();
       final bio = _bioCtrl.text.trim();
       if (TextFilterService.hasProfanity(username)) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Kullanıcı adı uygunsuz ifadeler içeriyor.')),
-    );
-    return;
-  }
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text('Kullanıcı adı uygunsuz ifadeler içeriyor.')),
+         );
+         return;
+      }
 
-  if (TextFilterService.hasProfanity(bio)) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Biyografi uygunsuz ifadeler içeriyor.')),
-    );
-    return;
-  }
+      if (TextFilterService.hasProfanity(bio)) {
+         ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text('Biyografi uygunsuz ifadeler içeriyor.')),
+         );
+         return;
+      }
+      
       final favDirector = _favDirectorCtrl.text.trim();
       final favActor = _favActorCtrl.text.trim();
       final ageStr = _ageCtrl.text.trim();
@@ -418,43 +346,33 @@ class _EditProfilePageState extends State<EditProfilePage> {
         payload['photoURL'] = uploadedPhotoUrl;
       }
 
-
       String? prevUsername = _origUsername;
       String? currUsername = username.isEmpty ? null : username;
       if (prevUsername != currUsername) {
-        payload['username'] = (currUsername != null)
-            ? currUsername
-            : FieldValue.delete();
-            if (currUsername != null) {
+        payload['username'] = (currUsername != null) ? currUsername : FieldValue.delete();
+        if (currUsername != null) {
           payload['username_lc'] = currUsername.toLowerCase();
         } else {
           payload['username_lc'] = FieldValue.delete();
         }
       }
 
-
-      // --- BİYOGRAFİ DEĞİŞİKLİK KONTROLÜ ---
       String? prevBio = _origBio;
       String? currBio = bio.isEmpty ? null : bio;
       if (prevBio != currBio) {
-        // Eğer boşsa veritabanından 'bio' alanını sil, doluysa güncelle
         payload['bio'] = (currBio != null) ? currBio : FieldValue.delete();
       }
 
       String? prevFavDirector = _origFavDirector;
       String? currFavDirector = favDirector.isEmpty ? null : favDirector;
       if (prevFavDirector != currFavDirector) {
-        payload['favoriteDirector'] = (currFavDirector != null)
-            ? currFavDirector
-            : FieldValue.delete();
+        payload['favoriteDirector'] = (currFavDirector != null) ? currFavDirector : FieldValue.delete();
       }
 
       String? prevFavActor = _origFavActor;
       String? currFavActor = favActor.isEmpty ? null : favActor;
       if (prevFavActor != currFavActor) {
-        payload['favoriteActor'] = (currFavActor != null)
-            ? currFavActor
-            : FieldValue.delete();
+        payload['favoriteActor'] = (currFavActor != null) ? currFavActor : FieldValue.delete();
       }
 
       int? prevAge = (_origAge != null && _origAge! > 0) ? _origAge : null;
@@ -463,22 +381,29 @@ class _EditProfilePageState extends State<EditProfilePage> {
         payload['age'] = (currAge != null) ? currAge : FieldValue.delete();
       }
 
-      String? prevLb = _origLb; // already lowercased in _load originals
-      String? currLb = newLb.isEmpty ? null : newLb; // already lowercased above
+      String? prevLb = _origLb;
+      String? currLb = newLb.isEmpty ? null : newLb;
       bool lbChanged = prevLb != currLb;
+
+      // --- LETTERBOXD DEĞİŞİMİ VE YENİDEN ÇEKME ---
       if (lbChanged) {
         if (currLb != null) {
+          // Yeni kullanıcı adı kaydediliyor
           payload['letterboxdUsername'] = currLb;
-          payload['letterboxdUsername_lc'] = currLb; // normalized
-          payload['lbUsername'] = currLb; // legacy compatibility
+          payload['letterboxdUsername_lc'] = currLb;
+          payload['lbUsername'] = currLb;
+          
+          // Eskileri temizle (Önemli)
           payload['favoritesKeys'] = FieldValue.delete();
           payload['fiveStarKeys'] = FieldValue.delete();
           payload['dislikedKeys'] = FieldValue.delete();
           payload['watchlistKeys'] = FieldValue.delete();
           payload['watchlist'] = FieldValue.delete();
           payload['favorites'] = FieldValue.delete();
+          
           await UserProfileService.instance.clearTasteProfile(user.uid);
         } else {
+          // Letterboxd bağlantısını kaldır
           payload['favoritesKeys'] = FieldValue.delete();
           payload['fiveStarKeys'] = FieldValue.delete();
           payload['dislikedKeys'] = FieldValue.delete();
@@ -492,15 +417,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
         }
       }
 
-      // only set updatedAt if there is a real change
       payload['updatedAt'] = FieldValue.serverTimestamp();
 
+      // Firestore'u güncelle
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .set(payload, SetOptions(merge: true));
 
-      // Persist lbUsername in SharedPreferences for instant update in other screens
       try {
         final sp = await SharedPreferences.getInstance();
         if (currLb != null) {
@@ -510,25 +434,32 @@ class _EditProfilePageState extends State<EditProfilePage> {
         }
       } catch (_) {}
 
-      try {
-        if (lbChanged && currLb != null) {
-          await FirebaseFirestore.instance
-              .collection('userTasteProfiles')
-              .doc(user.uid)
-              .set({
-                'refreshRequestedAt': FieldValue.serverTimestamp(),
-                'refreshSource': 'edit_profile_letterboxd',
-              }, SetOptions(merge: true));
+      // --- DÜZELTME: Veri Çekme İşlemi Başlatılıyor ---
+      if (lbChanged && currLb != null) {
+        // Kullanıcıya bilgi ver
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profil güncellendi. Letterboxd verileri çekiliyor... (Bu işlem 1-2 dk sürebilir)')),
+        );
+
+        // DOĞRUDAN SENKRONİZASYON BAŞLAT (Backend trigger yerine)
+        try {
+          await LetterboxdService.fullSyncOnboarding(
+            uid: user.uid, 
+            lbUsername: currLb
+          );
+           ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Letterboxd verileri başarıyla yüklendi!')),
+          );
+        } catch (e) {
+          debugPrint("LB Sync Error: $e");
+           ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profil kaydedildi ama Letterboxd verileri çekilemedi. "Yenile" butonunu kullanın.')),
+          );
         }
-      } catch (_) {}
+      } else {
+         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellendi.')));
+      }
 
-      if (!mounted) return;
-      final msg = (lbChanged && currLb != null)
-          ? 'Profil güncellendi. Letterboxd eşitlemesi başlatıldı.'
-          : 'Profil güncellendi.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-
-      // sync originals with the just-saved state
       _origUsername = currUsername;
       _origBio = currBio;
       _origFavDirector = currFavDirector;
@@ -579,13 +510,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
           children: [
             Center(
               child: GestureDetector(
-                onTap: _pickImage, // Tıklayınca galeri açılır
+                onTap: _pickImage, 
                 child: Stack(
                   children: [
                     CircleAvatar(
                       radius: 50,
                       backgroundColor: Colors.grey.shade800,
-                      // Öncelik: 1. Yeni seçilen resim, 2. Mevcut profil fotosu, 3. Boş ikon
                       backgroundImage: _selectedImage != null
                           ? FileImage(_selectedImage!)
                           : (FirebaseAuth.instance.currentUser?.photoURL != null
@@ -596,14 +526,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           ? const Icon(Icons.person, size: 50, color: Colors.white70)
                           : null,
                     ),
-                    // Kamera ikonu
                     Positioned(
                       bottom: 0,
                       right: 0,
                       child: Container(
                         padding: const EdgeInsets.all(6),
                         decoration: const BoxDecoration(
-                          color: Colors.green, // Temanıza uygun bir renk seçebilirsiniz
+                          color: Colors.green,
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -623,7 +552,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               controller: _usernameCtrl,
               decoration: InputDecoration(
                 labelText: 'Kullanıcı adı',
-                hintText: _origUsername, // <-- MEVCUT KULLANICI ADI SİLİK YAZI OLARAK GÖRÜNÜR
+                hintText: _origUsername, 
               ),
               textInputAction: TextInputAction.next,
               validator: (v) {
@@ -645,7 +574,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               textInputAction: TextInputAction.newline,
               keyboardType: TextInputType.multiline,
               maxLines: 3,
-              maxLength: 150, // İsteğe bağlı karakter sınırı
+              maxLength: 150, 
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -659,7 +588,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               autovalidateMode: AutovalidateMode.onUserInteraction,
               validator: (v) {
                 if (v == null || v.trim().isEmpty)
-                  return null; // opsiyonel alan
+                  return null; 
                 final ok = RegExp(r'^[A-Za-z0-9_\-.]+$').hasMatch(v.trim());
                 return ok ? null : 'Sadece harf, rakam, _ . - kullan';
               },
@@ -677,7 +606,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
             const SizedBox(height: 24),
             _Section(title: 'Favoriler'),
 
-            // Directors chips + add box
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
@@ -722,7 +650,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
             const SizedBox(height: 16),
 
-            // Actors chips + add box
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(

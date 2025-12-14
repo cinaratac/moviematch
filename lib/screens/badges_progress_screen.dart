@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/models/gamification.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
-import 'package:share_plus/share_plus.dart'; // Paylaşım paketi
+import 'package:share_plus/share_plus.dart';
 
 class BadgesProgressScreen extends StatefulWidget {
   const BadgesProgressScreen({super.key});
@@ -25,14 +25,22 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
 
   Future<void> _calculateProgress() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    // DÜZELTME 1: Kullanıcı yoksa yüklemeyi durdur, aksi halde sonsuz döngü olur.
+    if (uid == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
 
     final db = FirebaseFirestore.instance;
     
     try {
-      // 1. Film Kurdu Verisi
       final userDoc = await db.collection('users').doc(uid).get();
       final userData = userDoc.data() ?? {};
+
+      // DÜZELTME 2: Kullanıcının zaten sahip olduğu rozetleri çekiyoruz.
+      final List<String> ownedBadges = List<String>.from(userData['badges'] ?? []);
+
+      // 1. Film Kurdu Verisi
       final uniqueMovies = {
         ...List.from(userData['favoritesKeys'] ?? []),
         ...List.from(userData['fiveStarKeys'] ?? []),
@@ -71,7 +79,12 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
             default: current = 0;
           }
 
+          // DÜZELTME 3: Eğer kullanıcı rozete zaten sahipse, istatistik düşse bile %100 göster.
           double pct = (current / badge.threshold).clamp(0.0, 1.0);
+          if (ownedBadges.contains(badge.id)) {
+            pct = 1.0;
+          }
+          
           _progress[badge.id] = pct;
           _labels[badge.id] = '$current / ${badge.threshold}';
         }
@@ -96,7 +109,6 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [
-                // 1. NEON HEADER ALANI
                 SliverAppBar(
                   expandedHeight: 260,
                   pinned: true,
@@ -112,7 +124,6 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
                   title: _earnedCount > -1 ? null : const Text("Başarılar"), 
                 ),
 
-                // 2. NEON LİSTE
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   sliver: SliverList(
@@ -147,7 +158,6 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
   }
 }
 
-// --- NEON HEADER WIDGET ---
 class _HeaderSection extends StatelessWidget {
   final int earned;
   final int total;
@@ -161,7 +171,6 @@ class _HeaderSection extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Arkaplan Gradyanı
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -174,8 +183,6 @@ class _HeaderSection extends StatelessWidget {
             ),
           ),
         ),
-        
-        // Dekoratif Halkalar
         Positioned(
           top: -50, right: -50,
           child: Container(
@@ -186,8 +193,6 @@ class _HeaderSection extends StatelessWidget {
             ),
           ),
         ),
-
-        // İçerik
         SafeArea(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -197,14 +202,12 @@ class _HeaderSection extends StatelessWidget {
                 style: TextStyle(letterSpacing: 2, fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
               ),
               const SizedBox(height: 20),
-              // Dairesel Gösterge
               SizedBox(
                 width: 120,
                 height: 120,
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    // Arka Halka
                     SizedBox.expand(
                       child: CircularProgressIndicator(
                         value: 1.0,
@@ -212,7 +215,6 @@ class _HeaderSection extends StatelessWidget {
                         strokeWidth: 10,
                       ),
                     ),
-                    // Ön Halka (Parlayan)
                     SizedBox.expand(
                       child: CircularProgressIndicator(
                         value: pct,
@@ -221,7 +223,6 @@ class _HeaderSection extends StatelessWidget {
                         strokeWidth: 10,
                       ),
                     ),
-                    // Metin
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -247,7 +248,6 @@ class _HeaderSection extends StatelessWidget {
   }
 }
 
-// --- NEON BADGE CARD WIDGET ---
 class _BadgeCard extends StatelessWidget {
   final AppBadge badge;
   final double progress;
@@ -264,10 +264,9 @@ class _BadgeCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
-        height: 100, // Sabit yükseklik
+        height: 100,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
-          // NEON GRADYAN
           gradient: LinearGradient(
             colors: [
               badge.color.withOpacity(0.15),
@@ -276,12 +275,10 @@ class _BadgeCard extends StatelessWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          // Parlak Çerçeve
           border: Border.all(
             color: isCompleted ? badge.color.withOpacity(0.6) : Colors.transparent,
             width: 1.5,
           ),
-          // NEON GLOW (Gölge)
           boxShadow: [
             BoxShadow(
               color: badge.color.withOpacity(isCompleted ? 0.25 : 0.05),
@@ -292,7 +289,6 @@ class _BadgeCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // SOL: İkon Alanı (Halo Efektli)
             Container(
               width: 80,
               decoration: BoxDecoration(
@@ -319,7 +315,6 @@ class _BadgeCard extends StatelessWidget {
               ),
             ),
             
-            // ORTA: Bilgiler
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -339,7 +334,6 @@ class _BadgeCard extends StatelessWidget {
                       style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     ),
                     const Spacer(),
-                    // Modern Progress Bar
                     Row(
                       children: [
                         Expanded(
@@ -382,7 +376,6 @@ class _BadgeCard extends StatelessWidget {
               ),
             ),
 
-            // SAĞ: Kilit Durumu
             Padding(
               padding: const EdgeInsets.only(right: 16),
               child: Icon(
@@ -398,7 +391,6 @@ class _BadgeCard extends StatelessWidget {
   }
 }
 
-// --- NEON DETAIL SHEET (PAYLAŞ BUTONU İLE) ---
 class _BadgeDetailSheet extends StatelessWidget {
   final AppBadge badge;
   final double progress;
@@ -420,14 +412,12 @@ class _BadgeDetailSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Tutamaç
           Container(
             width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(height: 32),
 
-          // Büyük İkon (Animasyonlu Geçiş ve Glow)
           Hero(
             tag: 'badge_${badge.id}',
             child: Container(
@@ -450,7 +440,6 @@ class _BadgeDetailSheet extends StatelessWidget {
           
           const SizedBox(height: 32),
           
-          // Durum Kutusu
           Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
             decoration: BoxDecoration(
@@ -476,7 +465,6 @@ class _BadgeDetailSheet extends StatelessWidget {
 
           const SizedBox(height: 32),
 
-          // Butonlar (PAYLAŞ BUTONU EKLENDİ)
           Row(
             children: [
               Expanded(
@@ -494,12 +482,10 @@ class _BadgeDetailSheet extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: () {
-                    // Paylaşım İşlemi
                     final text = "MovieMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨";
                     try {
                        Share.share(text); 
                     } catch (e) {
-                       // Paket yoksa veya web ise fallback
                        ScaffoldMessenger.of(context).showSnackBar(
                          const SnackBar(content: Text('Paylaşım özelliği şu an kullanılamıyor.')),
                        );
