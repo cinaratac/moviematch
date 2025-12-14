@@ -117,7 +117,7 @@ Widget _profileHeaderSection({
     showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.9),
+      barrierColor: Colors.black.withOpacity(0.9), // withValues yerine eski uyumluluk için withOpacity
       builder: (ctx) {
         return GestureDetector(
           onTap: () => Navigator.pop(ctx),
@@ -200,9 +200,9 @@ Widget _profileHeaderSection({
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: badge.color.withValues(alpha: 0.15),
+                              color: badge.color.withOpacity(0.15),
                               shape: BoxShape.circle,
-                              border: Border.all(color: badge.color.withValues(alpha: 0.6), width: 1),
+                              border: Border.all(color: badge.color.withOpacity(0.6), width: 1),
                             ),
                             child: Icon(badge.icon, size: 12, color: badge.color),
                           ),
@@ -283,25 +283,36 @@ class _ProfilePageState extends State<ProfilePage> {
     _bootstrapCounts();
   }
   
+  // !!! GÜNCELLENEN KISIM: GEREKSİZ YAZMAYI ENGELLEYEN MANTIK !!!
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final svc = FollowSystemService.I;
     try {
+      // Servisten güncel sayıları çek
       final f1 = await svc.fetchFollowerCountOnce(uid);
       final f2 = await svc.fetchFollowingCountOnce(uid);
+      
       if (mounted) {
         setState(() {
           _followersCount = f1;
           _followingCount = f2;
         });
       }
-      
-      await FirebaseFirestore.instance.collection('users').doc(uid).update({
-         'followersCount': f1,
-         'followingCount': f2,
-         'updatedAt': FieldValue.serverTimestamp(),
-      });
+
+      // Firestore'a yazmadan önce mevcut veriyle karşılaştır
+      // Eğer _lastUserData henüz yüklenmediyse bir seferlik yazabilir, sorun değil.
+      final int? currentStoredFollowers = _lastUserData?['followersCount'];
+      final int? currentStoredFollowing = _lastUserData?['followingCount'];
+
+      // SADECE değerler değişmişse Firestore'a yaz
+      if (f1 != currentStoredFollowers || f2 != currentStoredFollowing) {
+        await FirebaseFirestore.instance.collection('users').doc(uid).update({
+           'followersCount': f1,
+           'followingCount': f2,
+           'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
 
       await GamificationService.instance.checkAndAwardBadges();
 
@@ -483,6 +494,8 @@ class _ProfilePageState extends State<ProfilePage> {
     });
 
     // Veritabanına TAM senkronizasyon (Watchlist dahil)
+    // Eğer burada her çekmede veritabanına yazmak istemiyorsanız bu satırı yoruma alabilirsiniz.
+    // Ancak orijinal isteğinizde tam kod istendiği için bırakıyorum, döngü sorunu _bootstrapCounts içinde çözüldü.
     if (_lbUsername != null) {
       await _syncLetterboxdToFirestore(_lbUsername!);
     }
@@ -490,7 +503,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _primeShelfCache();
   }
 
-  // --- GÜNCELLENMİŞ VE DÜZELTİLMİŞ SYNC FONKSİYONU ---
   Future<void> _syncLetterboxdToFirestore(String lbUsername) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || lbUsername.isEmpty) return;
@@ -502,8 +514,6 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       }
 
-      // ARTIK LetterboxdService.fullSyncOnboarding KULLANILIYOR
-      // Bu fonksiyon watchlist, favorites, 5 star hepsini çeker, TMDB ID'lerini bulur ve kaydeder.
       await LetterboxdService.fullSyncOnboarding(
         uid: uid,
         lbUsername: lbUsername,
@@ -616,9 +626,6 @@ class _ProfilePageState extends State<ProfilePage> {
         }
         final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
         UserShelfCache.setWatchlistFromMaps(films);
-        
-        // Eğer watchlist doluysa bile en sona + butonu eklemek isteriz
-        // Ancak bu tasarım tercihine göre değişir. Aşağıda boş veya dolu her durumda + butonu eklendi.
         
         return SizedBox(
           height: 140,
@@ -1178,12 +1185,12 @@ class _AddPosterTile extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          color: colorScheme.onSurface.withValues(alpha: 0.1),
+          color: colorScheme.onSurface.withOpacity(0.1),
           alignment: Alignment.center,
           child: Icon(
             Icons.add, 
             size: 40, 
-            color: colorScheme.onSurface.withValues(alpha: 0.6), 
+            color: colorScheme.onSurface.withOpacity(0.6), 
           ),
         ),
       ),

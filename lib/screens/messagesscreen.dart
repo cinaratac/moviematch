@@ -232,7 +232,10 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
     super.build(context);
     
     return Scaffold(
-      floatingActionButton: _TrashFab(currentUid: widget.uid),
+    floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 65.0), // 60.0 değerini isteğine göre artırıp azaltabilirsin
+        child: _TrashFab(currentUid: widget.uid),
+      ),
       body: Column(
         children: [
           if (widget.filterText.isEmpty) 
