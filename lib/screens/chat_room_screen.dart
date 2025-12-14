@@ -7,7 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
-import 'package:fluttergirdi/services/club_service.dart'; // YENİ
+import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
@@ -39,7 +39,7 @@ class ChatRoomScreen extends StatefulWidget {
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
-  final _svc = ChatService();
+  final _svc = ChatService.instance; // Singleton instance kullanımı
   final _ctrl = TextEditingController();
   StreamSubscription? _latestSub;
 
@@ -47,9 +47,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void initState() {
     super.initState();
     final myUid = FirebaseAuth.instance.currentUser!.uid;
-    
-   
 
+    // Okundu bilgisini işaretle.
+    // Not: Bu işlem döküman yoksa oluşturabilir (merge: true sayesinde),
+    // ancak 'participants' alanı eklenmediği için sohbet listelerinde görünmez (Ghost Chat).
+    _svc.markAsRead(widget.chatId, myUid);
+
+    // Karşı taraf yeni mesaj atarsa anlık olarak okundu işaretlemek için dinleyici
     _latestSub = FirebaseFirestore.instance
         .collection('chats')
         .doc(widget.chatId)
@@ -66,7 +70,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           }
         });
 
-    _svc.markAsRead(widget.chatId, myUid);
     _checkAndShowGuide();
   }
 
@@ -90,9 +93,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid != null) {
       _svc.markAsRead(widget.chatId, myUid);
-      if (!widget.isGroup) {
-        _svc.deleteIfEmpty(widget.chatId);
-      }
+      // DİKKAT: deleteIfEmpty BURADAN KALDIRILDI.
+      // Lazy creation (tembel yükleme) sayesinde boş oda oluşmuyor.
     }
     _latestSub?.cancel();
     _ctrl.dispose();
@@ -103,6 +105,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _send() async {
     final txt = _ctrl.text.trim();
     if (txt.isEmpty) return;
+    
     if (TextFilterService.hasProfanity(txt)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -113,9 +116,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
       return;
     }
+
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
       _ctrl.clear();
+      // Mesaj gönderildiği an ChatService.send metodu dökümanı yoksa oluşturacak (Upsert).
       await _svc.send(widget.chatId, myUid, txt, otherUid: widget.otherUid);
     } catch (e) {
       if (!mounted) return;
@@ -142,97 +147,36 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 16),
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
+              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  'Filmlerim',
-                  style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ),
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 20), child: Text('Filmlerim', style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold))),
               const SizedBox(height: 8),
               const Divider(height: 1),
               Expanded(
                 child: Builder(
                   builder: (context) {
-                    final merged = <Map<String, String>>[
-                      ...UserShelfCache.fiveStar,
-                      ...UserShelfCache.favorites,
-                      ...UserShelfCache.watchlist,
-                      ...UserShelfCache.disliked,
-                    ];
+                    final merged = <Map<String, String>>[...UserShelfCache.fiveStar, ...UserShelfCache.favorites, ...UserShelfCache.watchlist, ...UserShelfCache.disliked];
                     final seen = <String>{};
                     final items = <Map<String, String>>[];
                     for (final m in merged) {
                       final t = (m['title'] ?? '').trim();
                       if (t.isEmpty) continue;
                       final key = t.toLowerCase();
-                      if (seen.add(key)) {
-                        items.add({
-                          'title': t,
-                          'poster': (m['poster'] ?? '').toString(),
-                        });
-                      }
+                      if (seen.add(key)) items.add({'title': t, 'poster': (m['poster'] ?? '').toString()});
                     }
-
-                    if (items.isEmpty) {
-                      return const Center(
-                        child: Text(
-                          'Listen boş. Profilinden senkronize et.',
-                          style: TextStyle(color: Colors.white54),
-                        ),
-                      );
-                    }
+                    if (items.isEmpty) return const Center(child: Text('Listen boş. Profilinden senkronize et.', style: TextStyle(color: Colors.white54)));
 
                     return ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: items.length,
-                      separatorBuilder: (_, i) => const Divider(
-                        height: 1,
-                        indent: 16,
-                        endIndent: 16,
-                        color: Colors.white10,
-                      ),
+                      separatorBuilder: (_, i) => const Divider(height: 1, indent: 16, endIndent: 16, color: Colors.white10),
                       itemBuilder: (_, i) {
                         final title = items[i]['title'] ?? '';
                         final poster = items[i]['poster'] ?? '';
                         return ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 4),
-                          leading: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: SizedBox(
-                              width: 45,
-                              height: 68,
-                              child: poster.isNotEmpty
-                                  ? PosterImage(
-                                      posterUrl: poster,
-                                      title: title,
-                                      fit: BoxFit.cover,
-                                    )
-                                  : Container(
-                                      color: Colors.grey.shade800,
-                                      child: const Icon(Icons.movie,
-                                          color: Colors.white54),
-                                    ),
-                            ),
-                          ),
-                          title: Text(
-                            title.isEmpty ? 'İsimsiz Film' : title,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                          leading: ClipRRect(borderRadius: BorderRadius.circular(8), child: SizedBox(width: 45, height: 68, child: poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800, child: const Icon(Icons.movie, color: Colors.white54)))),
+                          title: Text(title.isEmpty ? 'İsimsiz Film' : title, style: const TextStyle(fontWeight: FontWeight.w500)),
                           onTap: () => Navigator.of(context).pop(items[i]),
                         );
                       },
@@ -251,13 +195,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     final title = (result['title'] ?? '').trim();
     final poster = (result['poster'] ?? '').trim();
-    const txt ="";
        
     try {
       await _svc.send(
         widget.chatId,
         myUid,
-        txt,
+        "", // Boş metin (sadece film)
         otherUid: widget.otherUid,
         movie: {'title': title, 'poster': poster},
       );
@@ -1170,7 +1113,6 @@ class _EditClubSheetState extends State<_EditClubSheet> {
   }
 }
 
-// --- Watchlist Wheel Sheet (Aynı kaldı) ---
 class _WatchlistWheelSheet extends StatefulWidget {
   final String chatId;
   final String myUid;
@@ -1186,7 +1128,7 @@ class _WatchlistWheelSheet extends StatefulWidget {
 }
 
 class _WatchlistWheelSheetState extends State<_WatchlistWheelSheet> {
-  final _chatSvc = ChatService();
+  final _chatSvc = ChatService.instance;
   final _watchlistSvc = WatchlistService.instance;
 
   late Future<List<WatchlistMovie>> _loader;

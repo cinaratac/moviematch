@@ -836,13 +836,17 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                         FirebaseAuth.instance.currentUser?.uid != widget.uid) ...[
                                       Expanded(
                                         child: FilledButton.tonalIcon(
-                                          onPressed: () async {
+                                          // --- DÜZELTME BURADA ---
+                                          // getOrCreateChat (DB Yazma) yerine chatIdFor (Sadece ID) kullanıldı.
+                                          onPressed: () {
                                             final myUid =
                                                 FirebaseAuth.instance.currentUser?.uid;
                                             if (myUid == null) return;
-                                            final chatId = await ChatService.instance
-                                                .getOrCreateChat(myUid, widget.uid);
-                                            if (!context.mounted) return;
+                                            
+                                            // DİKKAT: Burada 'await' ve 'getOrCreateChat' kaldırıldı.
+                                            final chatId = ChatService.instance
+                                                .chatIdFor(myUid, widget.uid);
+                                                
                                             Navigator.push(
                                                 context,
                                                 MaterialPageRoute(

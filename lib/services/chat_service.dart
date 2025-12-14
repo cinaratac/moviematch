@@ -47,19 +47,10 @@ class ChatService {
     return id;
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> messages(
-    String chatId, {
-    bool newestFirst = true,
-  }) {
-    return _fs
-        .collection('chats')
-        .doc(chatId)
-        .collection('messages')
-        .orderBy('createdAt', descending: newestFirst)
-        .limit(100)
-        .snapshots();
+  String getChatId(String uidA, String uidB) {
+    return chatIdFor(uidA, uidB);
   }
-
+  
   // GÜNCELLENDİ: Mesaj atarken de güncel profil bilgilerini basıyoruz
   Future<void> send(
     String chatId,
@@ -75,6 +66,7 @@ class ChatService {
     final batch = _fs.batch();
     final trimmed = text.trim();
 
+    // 1. Mesaj Verisi
     final Map<String, dynamic> msgData = {
       'authorId': fromUid,
       'from': fromUid,
@@ -92,35 +84,34 @@ class ChatService {
 
     batch.set(msgRef, msgData);
 
+    // 2. Sohbet Verisi (Merge true olduğu için yoksa yaratır, varsa günceller)
     String lastMsgText = trimmed;
     if (lastMsgText.isEmpty) {
       if (movie != null) lastMsgText = '🎬 Film paylaştı';
       else if (imageUrl != null) lastMsgText = '📷 Fotoğraf';
     }
 
+    final me = _auth.currentUser;
+    
     final Map<String, dynamic> chatUpdate = {
       'lastMessage': lastMsgText,
       'lastMessageAt': FieldValue.serverTimestamp(),
       'lastMessageAuthorId': fromUid,
       'updatedAt': FieldValue.serverTimestamp(),
+      'participants': FieldValue.arrayUnion([fromUid, otherUid]), // Garanti olsun
     };
 
     if (otherUid.isNotEmpty) {
-      chatUpdate['participants'] = FieldValue.arrayUnion([fromUid, otherUid]);
       chatUpdate['unreadCounts'] = {otherUid: FieldValue.increment(1)};
       
-      // DENORMALİZASYON GÜNCELLEMESİ:
-      // Her mesajda kendi ismimi/fotomu karşı taraf için güncelle (Eğer profilimi değiştirdiysem görsün)
-      final me = _auth.currentUser;
+      // İlk mesajda karşı tarafın listesinde düzgün görünmek için:
       if (me != null) {
-        // Not: 'titles.otherUid' -> Diğer kişinin göreceği başlık (Benim ismim)
         chatUpdate['titles.$otherUid'] = me.displayName ?? 'Kullanıcı';
         chatUpdate['photos.$otherUid'] = me.photoURL ?? '';
       }
-    } else {
-      chatUpdate['participants'] = FieldValue.arrayUnion([fromUid]);
     }
 
+    // SetOptions(merge: true) sayesinde döküman yoksa oluşturulur!
     batch.set(chatRef, chatUpdate, SetOptions(merge: true));
     await batch.commit();
     

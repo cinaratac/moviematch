@@ -161,7 +161,7 @@ class _PostTileState extends State<PostTile> {
 
   Future<void> _startMessage() async {
     try {
-      final chatId = await ChatService.instance.getOrCreateChat(_currentUserId, widget.authorId);
+     final chatId = ChatService.instance.chatIdFor(_currentUserId, widget.authorId);
       if (mounted) {
         Navigator.push(
           context,

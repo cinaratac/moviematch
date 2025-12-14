@@ -54,10 +54,9 @@ class _TriviaResultScreenState extends State<TriviaResultScreen> with SingleTick
       'weekId': weekId,
     });
 
-    // 2. Haftalık Liderlik Tablosuna Kaydet
+    // 2. Haftalık Liderlik Tablosuna Kaydet (Haftalık birincileri seçmek için bu kalabilir)
     final leaderboardRef = db.collection('weekly_leaderboard').doc(weekId).collection('scores').doc(user.uid);
     
-    // Kullanıcının adını ve fotosunu da alalım ki liderlik tablosunda direkt gösterelim
     final userDoc = await db.collection('users').doc(user.uid).get();
     final userData = userDoc.data();
     
@@ -68,6 +67,14 @@ class _TriviaResultScreenState extends State<TriviaResultScreen> with SingleTick
       'photoURL': userData?['photoURL'] ?? '',
       'timestamp': FieldValue.serverTimestamp(),
     });
+
+    // --- YENİ EKLENEN KISIM: TOPLAM PUANI GÜNCELLE ---
+    // Kullanıcının ana dökümanındaki 'totalTriviaScore' alanını artırıyoruz.
+    final userRef = db.collection('users').doc(user.uid);
+    batch.set(userRef, {
+      'totalTriviaScore': FieldValue.increment(widget.score),
+    }, SetOptions(merge: true));
+    // ------------------------------------------------
 
     await batch.commit();
 

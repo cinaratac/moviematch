@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/models/gamification.dart';
 import 'package:fluttergirdi/services/gamification_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Trivia verisi için     // Trivia'da kendini görmek için
-import '../utils/date_helper.dart';                    // Trivia tarihi için
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LeaderboardScreen extends StatelessWidget {
   const LeaderboardScreen({super.key});
@@ -13,7 +12,7 @@ class LeaderboardScreen extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return DefaultTabController(
-      length: 3, // <--- 3 SEKME OLARAK GÜNCELLENDİ
+      length: 3, 
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: cs.surface,
@@ -58,7 +57,7 @@ class LeaderboardScreen extends StatelessWidget {
                 tabs: const [
                   Tab(text: 'En Popüler'),
                   Tab(text: 'Film Kurtları'),
-                  Tab(text: 'Yarışma'), // <--- 3. SEKME EKLENDİ
+                  Tab(text: 'Genel Puan'), // İsmi güncelledik
                 ],
               ),
             ),
@@ -66,17 +65,15 @@ class LeaderboardScreen extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            // 1. MEVCUT SEKME (KORUNDU)
             _LeaderboardList(
               fetcher: GamificationService.instance.getWeeklyTopUsers, 
               metricLabel: 'Takipçi'
             ),
-            // 2. MEVCUT SEKME (KORUNDU)
             _LeaderboardList(
               fetcher: GamificationService.instance.getTopFilmBuffs,
               metricLabel: 'Film',
             ),
-            // 3. YENİ EKLENEN SEKME (Trivia)
+            // 3. YENİ TAB (GENEL PUAN)
             const _TriviaRankingTab(),
           ],
         ),
@@ -85,7 +82,7 @@ class LeaderboardScreen extends StatelessWidget {
   }
 }
 
-// --- MEVCUT YAPINIZ (DOKUNULMADI) ---
+// --- DİĞER TABLAR İÇİN ORTAK WIDGET (AYNI KALDI) ---
 class _LeaderboardList extends StatelessWidget {
   final Future<List<LeaderboardUser>> Function() fetcher;
   final String metricLabel;
@@ -138,21 +135,18 @@ class _LeaderboardList extends StatelessWidget {
   }
 }
 
-// --- YENİ EKLENEN TRIVIA TABI (Senin tasarımına uyarlandı) ---
+// --- TRIVIA TABI (TOPLAM PUANA GÖRE GÜNCELLENDİ) ---
 class _TriviaRankingTab extends StatelessWidget {
   const _TriviaRankingTab();
 
   @override
   Widget build(BuildContext context) {
-    final weekId = DateHelper.getCurrentWeekId();
-
+    // ARTIK HAFTALIK ID YERİNE GENEL 'users' TABLOSUNA BAKIYORUZ
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('weekly_leaderboard')
-          .doc(weekId)
-          .collection('scores')
-          .orderBy('score', descending: true)
-          .orderBy('timestamp', descending: false)
+          .collection('users')
+          .orderBy('totalTriviaScore', descending: true) // Toplam puana göre sırala
+          .where('totalTriviaScore', isGreaterThan: 0)   // Sadece puanı olanları getir
           .limit(50)
           .snapshots(),
       builder: (context, snapshot) {
@@ -169,7 +163,7 @@ class _TriviaRankingTab extends StatelessWidget {
               children: [
                 Icon(Icons.quiz_outlined, size: 64, color: Colors.grey.shade300),
                 const SizedBox(height: 16),
-                const Text("Bu hafta henüz kimse yarışmadı.", style: TextStyle(color: Colors.grey)),
+                const Text("Henüz kimse puan kazanmamış.", style: TextStyle(color: Colors.grey)),
               ],
             ),
           );
@@ -181,12 +175,11 @@ class _TriviaRankingTab extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final data = docs[index].data() as Map<String, dynamic>;
-            final uid = data['uid'] ?? '';
-            final displayName = data['displayName'] ?? 'Gizli';
-            final score = data['score'] ?? 0;
+            final uid = docs[index].id;
+            final displayName = data['displayName'] ?? data['username'] ?? 'Gizli';
+            final score = data['totalTriviaScore'] ?? 0;
             final photoURL = data['photoURL'] as String?;
 
-            // Senin tasarım fonksiyonunu kullanarak çiziyoruz
             return _buildRankItem(
               context: context,
               index: index,
@@ -194,7 +187,7 @@ class _TriviaRankingTab extends StatelessWidget {
               uid: uid,
               displayName: displayName,
               photoURL: photoURL,
-              scoreText: '$score Puan',
+              scoreText: '$score Puan', // Toplam Puan
             );
           },
         );
@@ -203,7 +196,7 @@ class _TriviaRankingTab extends StatelessWidget {
   }
 }
 
-// --- ORTAK TASARIM WIDGETI (Senin kodundan çıkarıp ortak hale getirdim ki hepsi aynı görünsün) ---
+// --- ORTAK TASARIM WIDGETI ---
 Widget _buildRankItem({
   required BuildContext context,
   required int index,
@@ -258,7 +251,6 @@ Widget _buildRankItem({
       ),
       child: Row(
         children: [
-          // Sıralama Rozeti
           Container(
             width: 32, height: 32,
             alignment: Alignment.center,
@@ -275,8 +267,6 @@ Widget _buildRankItem({
             ),
           ),
           const SizedBox(width: 12),
-          
-          // Profil Resmi + Taç (Varsa)
           Stack(
             clipBehavior: Clip.none,
             children: [
@@ -309,8 +299,6 @@ Widget _buildRankItem({
             ],
           ),
           const SizedBox(width: 12),
-          
-          // İsim
           Expanded(
             child: Text(
               displayName,
@@ -318,8 +306,6 @@ Widget _buildRankItem({
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          
-          // Puan
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
