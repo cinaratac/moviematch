@@ -424,32 +424,36 @@ class ChatListTile extends StatelessWidget {
     final titles = (data['titles'] as Map?) ?? {};
     final photos = (data['photos'] as Map?) ?? {};
     
-    // 1. Sohbet belgesinde özel isim/foto varsa kullan
-    String displayName = (titles[currentUid] as String?) ?? ''; 
-    String? photoUrl = (photos[currentUid] as String?); 
-    
-    if (displayName.isNotEmpty || (photoUrl != null && photoUrl.isNotEmpty)) {
-        return _buildTile(context, otherUid, displayName.isNotEmpty ? displayName : 'Kullanıcı', photoUrl, lastMsg, lastMsgTime);
+    // 1. Veri Kaynaklarını Hazırla
+    // Kaynak A: Denormalize Veri (Chat dökümanı içindeki)
+    String? denormName = (titles[currentUid] as String?);
+    String? denormPhoto = (photos[currentUid] as String?);
+
+    // Kaynak B: Cache Verisi (Parent widget'tan gelen güncel kullanıcı verisi)
+    String? cachedName;
+    String? cachedPhoto;
+    if (cachedUserData != null && cachedUserData!.isNotEmpty) {
+        cachedName = cachedUserData!['displayName'] ?? cachedUserData!['username'];
+        cachedPhoto = cachedUserData!['photoURL'];
     }
 
-    // 2. Cache verisi kullan
-    if (cachedUserData != null) {
-      if (cachedUserData!.isEmpty) {
-        // Silinmişse (Parent genelde filtreler ama garanti olsun)
-        return const SizedBox.shrink(); 
-      }
-      final username = cachedUserData!['username'] as String?;
-      final name = cachedUserData!['displayName'] as String?;
-      final pUrl = cachedUserData!['photoURL'] as String?;
-      
-      String finalName = 'Kullanıcı';
-      if (username != null && username.isNotEmpty) finalName = username;
-      else if (name != null && name.isNotEmpty) finalName = name;
+    // 2. Verileri Birleştir (Önce Denormalize, Yoksa Cache)
+    String finalName = (denormName != null && denormName.isNotEmpty) ? denormName : (cachedName ?? 'Kullanıcı');
+    
+    // Fotoğraf mantığı: Denormalize foto varsa onu kullan, yoksa cache'e bak.
+    String? finalPhoto = (denormPhoto != null && denormPhoto.isNotEmpty) 
+        ? denormPhoto 
+        : cachedPhoto;
 
-      return _buildTile(context, otherUid, finalName, pUrl, lastMsg, lastMsgTime);
+    // 3. Karar Anı: Elimizde gösterecek bir veri var mı?
+    // İsim varsa (ki "Kullanıcı" fallback'i var) tile'ı çiz.
+    // Eğer denormalize isim de cache isim de yoksa mecburen FutureBuilder'a düş.
+    
+    if (finalName != 'Kullanıcı' || (cachedUserData != null && cachedUserData!.isNotEmpty)) {
+        return _buildTile(context, otherUid, finalName, finalPhoto, lastMsg, lastMsgTime);
     }
     
-    // 3. Son çare FutureBuilder (Eğer cache gecikirse)
+    // 4. Son çare FutureBuilder (Eğer cache gecikirse ve chat doc'ta veri yoksa)
     return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
         builder: (context, userSnap) {
@@ -469,7 +473,6 @@ class ChatListTile extends StatelessWidget {
                 if (username != null && username.isNotEmpty) fetchedDisplayName = username;
                 else if (name != null && name.isNotEmpty) fetchedDisplayName = name;
             } else if (userSnap.connectionState == ConnectionState.waiting) {
-                 // Yüklenirken de boş gösterelim ki titreme olmasın, ya da loading dönebilirsiniz.
                  return const Center(child: Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
             }
             return _buildTile(context, otherUid, fetchedDisplayName, fetchedPhotoUrl, lastMsg, lastMsgTime);
@@ -498,23 +501,10 @@ class ChatListTile extends StatelessWidget {
   }
 }
 
-// ... (NewMatchHeader, _UnreadCountBadge, _TrashFab, _HiddenMessagesSheet, _TrashItem, _formatTime, _ForestFace, _EmptyMessagesInteractive, _HiddenChatItem, JoinedClubsList ve diğer tüm yardımcı sınıflar AYNI KALACAK. Kod tekrarı olmaması için buraya eklemiyorum, önceki dosyanızdaki mevcut halleriyle kalabilirler.) ...
-
-// Aşağıdaki sınıfları kopyalamak için önceki kodunuzdan alabilirsiniz:
-// class NewMatchHeader ...
-// class _UnreadCountBadge ...
-// class _TrashFab ...
-// class _HiddenMessagesSheet ...
-// class _TrashItem ...
-// String _formatTime ...
-// class _ForestFace ...
-// class _EmptyMessagesInteractive ...
-// class _HiddenChatItem ...
-// class JoinedClubsList ...
-
-// Bu sınıflar yukarıda verdiğim StreamBuilder ve ChatListTile ile uyumlu çalışacaktır.
-
-// Eksik sınıfları (kod bütünlüğü için) aşağıya ekliyorum:
+// ... DİĞER YARDIMCI SINIFLAR (NewMatchHeader, _UnreadCountBadge, _TrashFab, vb.) AYNEN KALIYOR ...
+// Kodun geri kalanını (NewMatchHeader ve sonrası) önceki dosyanızdan olduğu gibi kullanabilirsiniz.
+// Buraya hepsini tekrar kopyalamıyorum çünkü değişmediler. 
+// Sadece ChatListTile sınıfını yukarıdaki ile değiştirmeniz yeterlidir.
 
 class NewMatchHeader extends StatefulWidget {
   final String currentUid;

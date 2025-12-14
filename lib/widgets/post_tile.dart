@@ -26,7 +26,7 @@ class PostTile extends StatefulWidget {
   final int likeCount;
   final int replyCount;
   final int? movieTmdbId;
-  final bool initialIsLiked;      // isLiked yerine başlangıç durumu
+  final bool initialIsLiked;
   final bool initialIsFollowing;
 
   // --- YENİ ALANLAR ---
@@ -35,17 +35,18 @@ class PostTile extends StatefulWidget {
   final List<String> tags;
   final String? reviewTitle;
   
+  // EKLENDİ: Detay sayfasında olup olmadığımızı kontrol eden değişken
+  final bool isDetail; 
+
   final Function(String postId, bool isLiked) onToggleLike;
   final Function(String userId) onStartChat;
   final Function(String userId) onFollow;
   final Function(String postId) onReport;
-  
-  // EKLENDİ: Silme işlemi tamamlanınca çalışacak fonksiyon
   final VoidCallback? onDelete;
 
   const PostTile({
     super.key,
-    required this.initialIsLiked,     // <-- Yeni zorunlu parametre
+    required this.initialIsLiked,
     required this.initialIsFollowing,
     this.postImage,
     required this.postId,
@@ -65,12 +66,15 @@ class PostTile extends StatefulWidget {
     this.isSpoiler = false,
     this.tags = const [],
     this.reviewTitle,
+    
+    // Varsayılan olarak false (Feed ekranında navigation çalışsın diye)
+    this.isDetail = false, 
 
     required this.onToggleLike,
     required this.onStartChat,
     required this.onFollow,
     required this.onReport,
-    this.onDelete, // Constructor'a eklendi
+    this.onDelete,
   });
 
   @override
@@ -78,27 +82,21 @@ class PostTile extends StatefulWidget {
 }
 
 class _PostTileState extends State<PostTile> {
-  
   late bool _isLiked;
   late bool _isFollowing;
   int _currentLikeCount = 0;
   
-  // EKSİK OLAN SATIR BU (Geri Ekliyoruz):
   final String _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  // Spoiler durumu
   bool _revealSpoiler = false;
 
   @override
   void initState() {
     super.initState();
     _currentLikeCount = widget.likeCount;
-    // Dışarıdan gelen veriyi alıyoruz
     _isLiked = widget.initialIsLiked;
     _isFollowing = widget.initialIsFollowing;
   }
-
-  // _checkStatus fonksiyonu ARTIK YOK.
 
   void _handleLike() {
     setState(() {
@@ -122,10 +120,29 @@ class _PostTileState extends State<PostTile> {
   }
 
   void _navigateToDetail() {
+    // DÜZELTME: Eğer zaten detay sayfasındaysak (isDetail=true), 
+    // tekrar navigasyon yapma.
+    if (widget.isDetail) return;
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => PostDetailScreen(postId: widget.postId),
+      ),
+    );
+  }
+  
+  // Opsiyonel: Detay sayfasındayken resme tıklandığında büyütme özelliği
+  void _openFullScreenImage() {
+    if (widget.postImage == null) return;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (ctx) => GestureDetector(
+        onTap: () => Navigator.pop(ctx),
+        child: InteractiveViewer(
+          child: CachedNetworkImage(imageUrl: widget.postImage!),
+        ),
       ),
     );
   }
@@ -144,7 +161,6 @@ class _PostTileState extends State<PostTile> {
 
   Future<void> _startMessage() async {
     try {
-      // BURADA _currentUserId KULLANILIYORDU
       final chatId = await ChatService.instance.getOrCreateChat(_currentUserId, widget.authorId);
       if (mounted) {
         Navigator.push(
@@ -173,7 +189,6 @@ class _PostTileState extends State<PostTile> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // BURADA _currentUserId KULLANILIYORDU
               if (widget.authorId != _currentUserId) ...[
                 ListTile(
                   leading: Icon(
@@ -374,7 +389,8 @@ class _PostTileState extends State<PostTile> {
           // 2. GÖRSEL ALAN
           if (widget.postImage != null && widget.postImage!.isNotEmpty)
             GestureDetector(
-              onTap: _navigateToDetail, 
+              // DÜZELTME: Eğer detay sayfasındaysak resmi büyüt, değilse detaya git.
+              onTap: widget.isDetail ? _openFullScreenImage : _navigateToDetail, 
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ClipRRect(

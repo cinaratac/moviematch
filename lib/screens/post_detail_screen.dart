@@ -121,7 +121,7 @@ class PostDetailScreen extends StatelessWidget {
                   // EKLENEN ZORUNLU PARAMETRELER:
                   initialIsLiked: isLiked,
                   initialIsFollowing: isFollowing,
-
+                  isDetail: true,
                   onToggleLike: (pid, val) => FeedService.instance.toggleLike(postId: pid, like: val),
                   onStartChat: (uid) async { 
                     // ChatService entegrasyonu

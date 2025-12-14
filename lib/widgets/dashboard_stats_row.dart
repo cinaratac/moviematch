@@ -3,8 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/utils/date_helper.dart';
 
-// --- SENİN DOSYA İSİMLERİN (IMPORTLAR) ---
-// Dosyaların var olduğunu teyit ettin, bunlar kalıyor.
+// --- EKLENEN IMPORT ---
+// Rozet sayısını dinamik çekmek için gerekli model dosyası
+import 'package:fluttergirdi/models/gamification.dart'; 
+
 import 'package:fluttergirdi/screens/badges_progress_screen.dart'; 
 import 'package:fluttergirdi/screens/clubs_tab.dart';           
 import 'package:fluttergirdi/screens/trivia_welcome_screen.dart';  
@@ -43,9 +45,8 @@ class _BadgeProgressCard extends StatelessWidget {
     final user = FirebaseAuth.instance.currentUser;
     
     // --- DÜZELTME BURADA YAPILDI ---
-    // Servis dosyasında 'badges' listesi olmadığı için hata veriyordu.
-    // Buraya manuel olarak toplam rozet sayısını giriyoruz.
-    const int totalBadges = 5; 
+    // Artık sabit '5' yerine, tanımlı rozet listesinin uzunluğunu alıyoruz.
+    final int totalBadges = AppBadge.allBadges.length;
     // -------------------------------
 
     return StreamBuilder<DocumentSnapshot>(
@@ -132,6 +133,7 @@ class _TriviaLeaderCard extends StatelessWidget {
           color: const Color(0xFF1A1A2E), 
           border: Border.all(color: Colors.amber.withOpacity(0.5)),
           onTap: () {
+            // Trivia ekranına yönlendirme
             Navigator.push(context, MaterialPageRoute(builder: (_) => const TriviaWelcomeScreen()));
           },
           child: Column(
@@ -144,12 +146,15 @@ class _TriviaLeaderCard extends StatelessWidget {
                 style: TextStyle(color: Colors.white54, fontSize: 9),
               ),
               const SizedBox(height: 2),
-              Text(
-                leaderName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                textAlign: TextAlign.center,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                child: Text(
+                  leaderName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                  textAlign: TextAlign.center,
+                ),
               ),
               Text(
                 scoreText,

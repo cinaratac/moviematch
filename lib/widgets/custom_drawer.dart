@@ -11,7 +11,6 @@ import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
-import '../screens/trivia_quiz_screen.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; // Admin ekranı importu
