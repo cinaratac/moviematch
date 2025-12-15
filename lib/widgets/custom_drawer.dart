@@ -224,13 +224,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
                         color: Colors.green,
                         onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
                       ),
-                      _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.paintbrush_fill,
-                        title: 'Görünüm',
-                        color: Colors.indigo,
-                        onTap: () => _showThemeSelector(context),
-                      ),
+                      
 
                       const SizedBox(height: 30),
                       
@@ -408,35 +402,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
     );
   }
 
-  void _showThemeSelector(BuildContext context) {
-    showCupertinoModalPopup(
-      context: context,
-      builder: (BuildContext context) => CupertinoActionSheet(
-        title: const Text('Görünüm Seçin'),
-        actions: <CupertinoActionSheetAction>[
-          CupertinoActionSheetAction(
-            child: const Text('Karanlık Mod'),
-            onPressed: () => _changeTheme(context, ThemeMode.dark, 'dark'),
-          ),
-          CupertinoActionSheetAction(
-            child: const Text('Aydınlık Mod'),
-            onPressed: () => _changeTheme(context, ThemeMode.light, 'light'),
-          ),
-          CupertinoActionSheetAction(
-            child: const Text('Sistem Teması'),
-            onPressed: () => _changeTheme(context, ThemeMode.system, 'system'),
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          isDefaultAction: true,
-          onPressed: () {
-            Navigator.pop(context);
-          },
-          child: const Text('Vazgeç'),
-        ),
-      ),
-    );
-  }
+  
 
   Future<void> _changeTheme(BuildContext context, ThemeMode mode, String modeStr) async {
     ThemeBridge.themeMode.value = mode;
