@@ -9,6 +9,7 @@ class CustomList {
   final int likeCount;
   final String? coverImageUrl; // Listenin kapağı (son eklenen filmden)
   final bool isPublic;
+  final String ownerName;
   final DateTime createdAt;
 
   CustomList({
@@ -19,6 +20,7 @@ class CustomList {
     this.movieCount = 0,
     this.likeCount = 0,
     this.coverImageUrl,
+    required this.ownerName,
     this.isPublic = true,
     required this.createdAt,
   });
@@ -27,6 +29,7 @@ class CustomList {
     final data = doc.data() as Map<String, dynamic>;
     return CustomList(
       id: doc.id,
+      ownerName: data['ownerName'] ?? 'Sinema Sever',
       ownerId: data['ownerId'] ?? '',
       title: data['title'] ?? 'İsimsiz Liste',
       description: data['description'] ?? '',

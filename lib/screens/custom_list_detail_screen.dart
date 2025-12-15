@@ -4,23 +4,61 @@ import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/search_movie.dart';
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 class CustomListDetailScreen extends StatelessWidget {
   final CustomList list;
-  final bool isMyList; 
+  final bool isMyList;
 
-  const CustomListDetailScreen({super.key, required this.list, this.isMyList = false});
+  const CustomListDetailScreen({
+    super.key, 
+    required this.list, 
+    this.isMyList = false
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: CustomScrollView(
         slivers: [
+          // --- 1. Kapak, Başlık ve Açıklama ---
           SliverAppBar(
             expandedHeight: 220,
             pinned: true,
             flexibleSpace: FlexibleSpaceBar(
-              title: Text(list.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white, shadows: [Shadow(color: Colors.black, blurRadius: 10)])),
+              titlePadding: const EdgeInsets.only(left: 16, bottom: 12, right: 16), // Hizalama ayarı
+              title: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    list.title, 
+                    style: const TextStyle(
+                      fontSize: 16, 
+                      fontWeight: FontWeight.bold, 
+                      color: Colors.white, 
+                      shadows: [Shadow(color: Colors.black, blurRadius: 10)]
+                    )
+                  ),
+                  if (list.description.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2.0), // Başlık ile açıklama arası boşluk
+                      child: Text(
+                        list.description,
+                        maxLines: 2, // Çok uzunsa 2 satırla sınırla
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 10, // Daha küçük font
+                          fontWeight: FontWeight.normal,
+                          color: Colors.white70, // Hafif silik beyaz
+                          shadows: [Shadow(color: Colors.black, blurRadius: 8)]
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               background: list.coverImageUrl != null
                   ? Stack(
                       fit: StackFit.expand,
@@ -36,7 +74,12 @@ class CustomListDetailScreen extends StatelessWidget {
                         ), 
                       ],
                     )
-                  : Container(color: Colors.grey.shade900, child: const Center(child: Icon(Icons.movie_filter, size: 64, color: Colors.white24))),
+                  : Container(
+                      color: Colors.grey.shade900, 
+                      child: const Center(
+                        child: Icon(Icons.movie_filter, size: 64, color: Colors.white24)
+                      )
+                    ),
             ),
             actions: [
               if (isMyList)
@@ -52,15 +95,58 @@ class CustomListDetailScreen extends StatelessWidget {
                 ),
             ],
           ),
+
+          // --- 2. Liste Bilgileri ve Hazırlayan ---
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (list.description.isNotEmpty)
-                    Text(list.description, style: Theme.of(context).textTheme.bodyLarge),
-                  const SizedBox(height: 8),
+                  // LİSTE SAHİBİ
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PublicProfileScreen(uid: list.ownerId),
+                        ),
+                      );
+                    },
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 10,
+                          backgroundColor: Colors.grey.shade300,
+                          child: const Icon(Icons.person, size: 14, color: Colors.black54),
+                        ),
+                        const SizedBox(width: 6),
+                        RichText(
+                          text: TextSpan(
+                          
+                            children: [
+                              const TextSpan(
+                                text: "Hazırlayan: ", 
+                                style: TextStyle(color: Colors.grey)
+                              ),
+                              TextSpan(
+                                text: list.ownerName,
+                                style: TextStyle(
+                                  color: Theme.of(context).primaryColor,
+                                  fontWeight: FontWeight.bold,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 12),
+                  
+                  // İstatistikler (Film Sayısı, Gizlilik vb.)
                   Row(
                     children: [
                       Icon(Icons.movie, size: 16, color: Colors.grey.shade400),
@@ -78,6 +164,8 @@ class CustomListDetailScreen extends StatelessWidget {
               ),
             ),
           ),
+
+          // --- 3. Filmler Grid ---
           StreamBuilder<QuerySnapshot>(
             stream: CustomListService.instance.getListItems(list.id),
             builder: (context, snapshot) {
@@ -94,7 +182,8 @@ class CustomListDetailScreen extends StatelessWidget {
                          Icon(Icons.format_list_bulleted, size: 64, color: Colors.grey.shade300),
                          const SizedBox(height: 16),
                          const Text("Bu listede henüz film yok.", style: TextStyle(color: Colors.grey)),
-                         if (isMyList) TextButton(onPressed: () => _navigateToAddMovie(context), child: const Text("Film Ekle"))
+                         if (isMyList) 
+                           TextButton(onPressed: () => _navigateToAddMovie(context), child: const Text("Film Ekle"))
                        ],
                      ),
                    ),
@@ -107,33 +196,64 @@ class CustomListDetailScreen extends StatelessWidget {
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
                       final data = docs[index].data() as Map<String, dynamic>;
-                      return Stack(
-                        children: [
-                          Positioned.fill(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: PosterImage(
-                                posterUrl: data['poster'] ?? '',
-                                title: data['title'] ?? '',
-                                fit: BoxFit.cover,
+                      
+                      int tmdbId = 0;
+                      if (data['id'] is int) {
+                        tmdbId = data['id'];
+                      } else if (data['id'] != null) {
+                        tmdbId = int.tryParse(data['id'].toString()) ?? 0;
+                      }
+
+                      return GestureDetector(
+                        onTap: () {
+                          if (tmdbId != 0) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => MovieDetailScreen(
+                                  tmdbId: tmdbId,
+                                  title: data['title'],
+                                  posterUrl: data['poster'],
+                                ),
                               ),
-                            ),
-                          ),
-                          // Silme Butonu (Sadece Sahibi İçin)
-                          if (isMyList)
-                            Positioned(
-                              top: 4,
-                              right: 4,
-                              child: InkWell(
-                                onTap: () => CustomListService.instance.removeMovieFromList(list.id, docs[index].id),
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                                  child: const Icon(Icons.close, color: Colors.white, size: 16),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Film detayları yüklenemedi."))
+                            );
+                          }
+                        },
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: PosterImage(
+                                  posterUrl: data['poster'] ?? '',
+                                  title: data['title'] ?? '',
+                                  fit: BoxFit.cover,
                                 ),
                               ),
                             ),
-                        ],
+                            
+                            if (data['poster'] == null)
+                               Center(child: Text(data['title'] ?? '', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10))),
+
+                            if (isMyList)
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: InkWell(
+                                  onTap: () => CustomListService.instance.removeMovieFromList(list.id, docs[index].id),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                                    child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       );
                     },
                     childCount: docs.length,
@@ -154,9 +274,7 @@ class CustomListDetailScreen extends StatelessWidget {
     );
   }
 
-  // Film Ekleme Navigasyonu
   Future<void> _navigateToAddMovie(BuildContext context) async {
-    // isSelectionMode: true parametresi ile gidiyoruz
     final selectedMovie = await Navigator.push(
       context, 
       MaterialPageRoute(builder: (_) => const SearchMoviePage(isSelectionMode: true))
@@ -170,7 +288,6 @@ class CustomListDetailScreen extends StatelessWidget {
     }
   }
 
-  // Silme Onayı
   void _confirmDelete(BuildContext context) {
     showDialog(
       context: context,
@@ -181,9 +298,9 @@ class CustomListDetailScreen extends StatelessWidget {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("İptal")),
           TextButton(
             onPressed: () async {
-               Navigator.pop(ctx); // Dialog kapat
+               Navigator.pop(ctx); 
                await CustomListService.instance.deleteList(list.id);
-               if (context.mounted) Navigator.pop(context); // Ekranı kapat
+               if (context.mounted) Navigator.pop(context); 
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),

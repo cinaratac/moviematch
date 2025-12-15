@@ -14,6 +14,7 @@ import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:fluttergirdi/widgets/custom_drawer.dart';
 // YENİ İMPORTLAR
 import 'package:fluttergirdi/widgets/dashboard_stats_row.dart';
+import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -299,6 +300,7 @@ if (i == 0) {
       // Araya biraz boşluk bırakmak istersen SizedBox ekleyebilirsin
       // SizedBox(height: 8), 
       DashboardStatsRow(),
+      DiscoveryListsWidget(),
     ],
   );
 }

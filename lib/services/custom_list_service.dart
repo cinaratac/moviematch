@@ -95,4 +95,30 @@ class CustomListService {
           .orderBy('addedAt', descending: true)
           .snapshots();
   }
+  Future<List<CustomList>> fetchDiscoveryLists() async {
+    try {
+      // Not: Firestore'da "random" sorgusu pahalıdır. 
+      // Bu yüzden son 50 listeyi çekip telefon tarafında karıştırmak daha performanslıdır.
+      
+      // Eğer listeler 'custom_lists' adında ana bir koleksiyonda tutuluyorsa:
+      QuerySnapshot snapshot = await _db
+          .collection('custom_lists') // Koleksiyon adın farklıysa burayı güncelle (örn: 'lists')
+          .where('isPublic', isEqualTo: true)
+          .orderBy('createdAt', descending: true) // En yeniler
+          .limit(20) // Havuzu geniş tutuyoruz
+          .get();
+
+      List<CustomList> allLists = snapshot.docs
+          .map((doc) => CustomList.fromFirestore(doc))
+          .toList();
+
+      // Listeyi karıştır (Shuffle)
+      allLists.shuffle();
+
+      // İlk 6 tanesini al (eğer 6'dan az ise hepsini al)
+      return allLists.take(6).toList();
+    } catch (e) {
+      return [];
+    }
+  }
 }
