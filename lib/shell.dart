@@ -127,7 +127,7 @@ class _HomeShellState extends State<HomeShell> {
               final selected = states.contains(WidgetState.selected);
               return IconThemeData(
                 size: 20,
-                color: selected ? cs.primary : Colors.white70,
+                color: selected ?const Color.fromARGB(253, 97, 202, 101)  : Colors.white70,
               );
             }),
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -135,7 +135,7 @@ class _HomeShellState extends State<HomeShell> {
               return TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: selected ? cs.primary : Colors.white70,
+                color: selected ? const Color.fromARGB(253, 97, 202, 101) : Colors.white70,
               );
             }),
           ),

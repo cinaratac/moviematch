@@ -10,7 +10,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:fluttergirdi/services/match_service.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
-
+import 'package:fluttergirdi/screens/full_shelf_screen.dart';
 // --- İMPORTLAR ---
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
@@ -223,6 +223,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   String _catalogTitle(Map<String, dynamic> m) {
     return (m['title'] ?? m['name'] ?? m['t'] ?? '') as String;
   }
+  
+  
 
   Widget _shelfSectionFromKeys(String title, List<String> keys, {int maxItems = 30}) {
     if (keys.isEmpty) {
@@ -235,7 +237,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        _buildSectionHeader(title, keys),
         const SizedBox(height: 8),
         FutureBuilder<List<Map<String, dynamic>?>>(
           future: (() {
@@ -244,18 +246,20 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           })(),
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
-              return const SizedBox(height: 180, child: Center(child: CircularProgressIndicator()));
+              // YÜKSEKLİK GÜNCELLENDİ: 180 -> 130
+              return const SizedBox(height: 130, child: Center(child: CircularProgressIndicator()));
             }
             final films = (snap.data ?? []).where((m) => m != null).map((m) => m!).toList();
             if (films.isEmpty) {
               return Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text('$title bulunamadı.'));
             }
             return SizedBox(
-              height: 180,
+              // YÜKSEKLİK GÜNCELLENDİ: 180 -> 130
+              height: 130, 
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: films.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                separatorBuilder: (_, __) => const SizedBox(width: 10), // Boşluk biraz azaltıldı
                 itemBuilder: (_, i) {
                   final m = films[i];
                   final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '') as String;
@@ -268,7 +272,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(8), // Radius biraz azaltıldı
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
@@ -278,13 +282,13 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               Align(
                                 alignment: Alignment.bottomCenter,
                                 child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                   color: Colors.black54,
                                   child: Text(
                                     t,
-                                    maxLines: 2,
+                                    maxLines: 1, // Satır sayısı düşürüldü
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12, color: Colors.white),
+                                    style: const TextStyle(fontSize: 10, color: Colors.white), // Font küçültüldü
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
@@ -304,7 +308,42 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
-
+  Widget _buildSectionHeader(String title, List<String> keys) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          if (keys.isNotEmpty) // Liste boşsa butonu gösterme
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FullShelfScreen(
+                      title: title,
+                      filmKeys: keys,
+                    ),
+                  ),
+                );
+              },
+              child: Text(
+                'Tümü',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
   Future<List<Map<String, dynamic>?>> _fetchCatalogForKeys(List<String> keys) async {
     final fs = FirebaseFirestore.instance;
     final ordered = <String>[];
@@ -987,6 +1026,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final favKeys = List<String>.from(data['favoritesKeys'] ?? const []);
     final fiveKeys = List<String>.from(data['fiveStarKeys'] ?? const []);
     final disKeys = List<String>.from(data['dislikedKeys'] ?? const []);
+    final watchlistKeys = List<String>.from(data['watchlistKeys'] ?? const []); 
     final bio = (data['bio'] ?? '').toString();
     final age = data['age'];
     final genres = List<String>.from(data['favGenres'] ?? const []);
@@ -1020,6 +1060,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             if (actors.isNotEmpty) _ChipsSection(title: 'Sevdiği oyuncular', items: actors),
             const SizedBox(height: 12),
           ]),
+        
+        // --- LİSTELER ---
         if (favKeys.isNotEmpty) ...[
           _shelfSectionFromKeys('Favori Filmler', favKeys, maxItems: 30),
           const SizedBox(height: 16)
@@ -1032,7 +1074,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           _shelfSectionFromKeys('Sevmediği Filmler', disKeys, maxItems: 30),
           const SizedBox(height: 16)
         ],
-        Text('Watchlist', style: Theme.of(context).textTheme.titleMedium),
+        
+        // Watchlist Başlığı (TÜMÜ butonlu)
+        _buildSectionHeader('Watchlist', watchlistKeys),
         const SizedBox(height: 8),
         _WatchlistSection(
             data: data,
@@ -1438,7 +1482,7 @@ class _WatchlistSection extends StatelessWidget {
             (fsnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
         if (films.isEmpty) return const Text('Watchlist boş.');
         return SizedBox(
-          height: 180,
+          height: 130,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: films.length,

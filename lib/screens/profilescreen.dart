@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
-
+import 'package:fluttergirdi/screens/full_shelf_screen.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:ui' as ui;
@@ -657,7 +657,51 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // --- 1. SEKME: FİLMLER ---
   // RefreshIndicator kaldırıldı, sadece ListView
-   Widget _buildProfileContentAfterHeader() {
+  Widget _buildSectionHeader(String title, List<String> keys) {
+    
+    return Padding(
+      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          if (keys.isNotEmpty) // Liste boşsa butonu gösterme
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FullShelfScreen(
+                      title: title,
+                      filmKeys: keys,
+                    ),
+                  ),
+                );
+              },
+              child: Text(
+                'Tümü',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+   // GÜNCELLENMİŞ VERSİYON
+  Widget _buildProfileContentAfterHeader() {
+    // Verileri hazırlayalım
+    final favKeys = List<String>.from((_lastUserData?['favoritesKeys'] ?? []).map((e) => e.toString()));
+    final fiveStarKeys = List<String>.from((_lastUserData?['fiveStarKeys'] ?? []).map((e) => e.toString()));
+    final dislikedKeys = List<String>.from((_lastUserData?['dislikedKeys'] ?? []).map((e) => e.toString()));
+    final watchlistKeys = List<String>.from((_lastUserData?['watchlistKeys'] ?? []).map((e) => e.toString()));
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
@@ -684,19 +728,24 @@ class _ProfilePageState extends State<ProfilePage> {
              cw('Sevdiğin türler', genres), cw('Sevdiğin yönetmenler', dirs), cw('Sevdiğin oyuncular', acts)
            ]);
         }),
+        
         const SizedBox(height: 16),
-        Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text('Favori Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-        const SizedBox(height: 8),
-        _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 30),
-        Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevdiği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-        const SizedBox(height: 8),
-        _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 30),
-        Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Sevmediği Filmler', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-        const SizedBox(height: 8),
-        _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 30),
-        Padding(padding: const EdgeInsets.only(top: 20.0, bottom: 8.0), child: Text('Watchlist', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-        const SizedBox(height: 8),
-        _watchlistSectionFromKeys(List<dynamic>.from((_lastUserData?['watchlistKeys'] ?? const [])).map((e) => e.toString()).toList(), maxItems: 30),
+
+        // --- FAVORİLER ---
+        _buildSectionHeader('Favori Filmler', favKeys),
+        _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 10), // maxItems'ı düşürebilirsiniz çünkü "Tümü" var
+
+        // --- SEVDİKLERİ ---
+        _buildSectionHeader('Sevdiği Filmler', fiveStarKeys),
+        _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 10),
+
+        // --- SEVMEDİKLERİ ---
+        _buildSectionHeader('Sevmediği Filmler', dislikedKeys),
+        _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 10),
+
+        // --- WATCHLIST ---
+        _buildSectionHeader('Watchlist', watchlistKeys),
+        _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
 
         const SizedBox(height: 52),
       ],
@@ -705,6 +754,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.userChanges(),
       builder: (context, snap) {
@@ -737,7 +787,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               children: [
                                 SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
                                 _profileHeaderSection(context: context, user: user, followers: _followersCount, following: _followingCount, lbUsername: _lbUsername, shownName: _shownName),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 28),
                                 Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 16),
                                   child: TabBar(
@@ -748,8 +798,9 @@ class _ProfilePageState extends State<ProfilePage> {
                                     labelPadding: const EdgeInsets.symmetric(vertical: 6),
                                     labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                                     unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
-                                    labelColor: Theme.of(context).colorScheme.onSurface,
-                                    unselectedLabelColor: Colors.white70,
+                                    labelColor: isDark ? Colors.white : Colors.black,
+                                    
+                                    unselectedLabelColor: isDark ? Colors.white.withOpacity(0.6) : Colors.black.withOpacity(0.6),
                                     tabs: const [
                                       Tab(text: 'Filmler'),
                                       Tab(text: 'Aktiviteler'),

@@ -2,7 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/text_filter_service.dart';
-import 'package:fluttergirdi/services/feed_service.dart'; // FeedService Importu Şart
+import 'package:fluttergirdi/services/feed_service.dart';
+// Film arama ve detay sayfaları
+import '../screens/search_movie.dart'; 
+import '../screens/movie_detail_screen.dart'; 
+import 'poster_image.dart';
 
 class CommentsSheet extends StatefulWidget {
   final String postId;
@@ -26,7 +30,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
   String? _replyingToDocId; 
   String? _replyingToUserName;
-  String? _replyingToUid; // YENİ: Yanıt verilen kişinin ID'sini tutuyoruz
+  String? _replyingToUid;
+
+  // Seçilen filmi tutmak için
+  Map<String, dynamic>? _selectedMovie;
 
   bool _isSending = false;
 
@@ -48,11 +55,34 @@ class _CommentsSheetState extends State<CommentsSheet> {
     super.dispose();
   }
 
+  // Film seçme fonksiyonu
+  Future<void> _pickMovie() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SearchMoviePage(isSelectionMode: true),
+      ),
+    );
+
+    if (result != null && result is Map<String, dynamic>) {
+      setState(() {
+        _selectedMovie = result;
+      });
+    }
+  }
+
+  void _removeSelectedMovie() {
+    setState(() {
+      _selectedMovie = null;
+    });
+  }
+
   Future<void> _send() async {
     final text = _commentCtrl.text.trim();
-    if (text.isEmpty) return;
+    // Metin boş olsa bile film seçiliyse gönderilebilir
+    if (text.isEmpty && _selectedMovie == null) return;
 
-    if (TextFilterService.hasProfanity(text)) {
+    if (text.isNotEmpty && TextFilterService.hasProfanity(text)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Uygunsuz içerik tespit edildi.'), backgroundColor: Colors.red),
       );
@@ -69,16 +99,22 @@ class _CommentsSheetState extends State<CommentsSheet> {
       final batch = db.batch();
       final now = FieldValue.serverTimestamp();
 
+      final Map<String, dynamic> data = {
+        'text': text,
+        'authorId': user.uid,
+        'createdAt': now,
+        'likeCount': 0,
+      };
+
+      if (_selectedMovie != null) {
+        data['movie'] = _selectedMovie;
+      }
+
       if (_replyingToDocId == null) {
         // --- ANA YORUM ---
+        data['replyCount'] = 0;
         final ref = db.collection('posts').doc(widget.postId).collection('replies').doc();
-        batch.set(ref, {
-          'text': text,
-          'authorId': user.uid,
-          'createdAt': now,
-          'likeCount': 0,
-          'replyCount': 0, 
-        });
+        batch.set(ref, data);
         
         final postRef = db.collection('posts').doc(widget.postId);
         batch.update(postRef, {'replyCount': FieldValue.increment(1)});
@@ -88,12 +124,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
         final parentRef = db.collection('posts').doc(widget.postId).collection('replies').doc(_replyingToDocId);
         final subRef = parentRef.collection('subReplies').doc();
         
-        batch.set(subRef, {
-          'text': text,
-          'authorId': user.uid,
-          'createdAt': now,
-          'likeCount': 0,
-        });
+        batch.set(subRef, data);
 
         batch.update(parentRef, {'replyCount': FieldValue.increment(1)});
         
@@ -103,25 +134,25 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
       await batch.commit();
 
-      // --- BİLDİRİM GÖNDERME KISMI (YENİ) ---
+      // Bildirim Gönderme
+      String previewText = text.isNotEmpty ? text : 'Bir film paylaştı 🎬';
       if (_replyingToDocId == null) {
-        // Post sahibine bildirim gönder
         FeedService.instance.notifyComment(
           postId: widget.postId,
           postAuthorUid: widget.postAuthorId,
-          preview: text,
+          preview: previewText,
         );
       } else if (_replyingToUid != null) {
-        // Yanıt verilen kişiye bildirim gönder
         FeedService.instance.notifyComment(
           postId: widget.postId,
-          postAuthorUid: _replyingToUid!, // Yanıt verilen kişinin ID'si
-          preview: text,
+          postAuthorUid: _replyingToUid!, 
+          preview: previewText,
         );
       }
-      // -------------------------------------
 
+      // --- TEMİZLİK ---
       _commentCtrl.clear();
+      _removeSelectedMovie(); 
       _cancelReply(); 
       FocusScope.of(context).unfocus();
 
@@ -132,12 +163,11 @@ class _CommentsSheetState extends State<CommentsSheet> {
     }
   }
 
-  // GÜNCELLENDİ: Artık UID de alıyor
   void _initiateReply(String docId, String userName, String uid) {
     setState(() {
       _replyingToDocId = docId;
       _replyingToUserName = userName;
-      _replyingToUid = uid; // ID'yi sakla
+      _replyingToUid = uid;
     });
     _focusNode.requestFocus(); 
   }
@@ -154,16 +184,17 @@ class _CommentsSheetState extends State<CommentsSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final theme = Theme.of(context);
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.85, 
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
+        color: theme.scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         children: [
-          // --- HEADER ---
+          // Header
           Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Column(
@@ -179,7 +210,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
           ),
           const Divider(height: 1),
 
-          // --- LİSTE ---
+          // Liste
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _mainRepliesStream,
@@ -196,7 +227,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   padding: const EdgeInsets.only(bottom: 20),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
+                    // DÜZELTME 1: Her yoruma benzersiz bir Key veriyoruz.
+                    // Böylece Flutter bunları birbirine karıştırmaz.
                     return _CommentTile(
+                      key: ValueKey(docs[index].id), 
                       postId: widget.postId,
                       doc: docs[index],
                       onReply: _initiateReply, 
@@ -207,12 +241,11 @@ class _CommentsSheetState extends State<CommentsSheet> {
             ),
           ),
 
-          // --- INPUT ALANI ---
+          // Input Alanı
           Container(
-            // DÜZELTME 1: bottomInset padding'i kaldırıldı, sadece sabit 8 birim kaldı.
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), 
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
+              color: theme.colorScheme.surface,
               border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
               boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 5, offset: Offset(0,-2))]
             ),
@@ -225,12 +258,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     padding: const EdgeInsets.only(bottom: 8.0, left: 4),
                     child: Row(
                       children: [
-                        Icon(Icons.reply, size: 16, color: Theme.of(context).colorScheme.primary),
+                        Icon(Icons.reply, size: 16, color: theme.colorScheme.primary),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '$_replyingToUserName adlı kişiye yanıt veriliyor',
-                            style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12),
+                            style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -242,8 +275,64 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     ),
                   ),
                 
+                // Seçilen Film Önizlemesi
+                if (_selectedMovie != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: theme.colorScheme.outlineVariant),
+                    ),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: PosterImage(
+                            posterUrl: _selectedMovie!['poster'] ?? '',
+                            title: _selectedMovie!['title'] ?? '',
+                            width: 30,
+                            height: 45,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _selectedMovie!['title'] ?? '',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                _selectedMovie!['releaseDate']?.toString().split('-').first ?? '',
+                                style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: _removeSelectedMovie,
+                        )
+                      ],
+                    ),
+                  ),
+
                 Row(
                   children: [
+                    // Film Ekleme Butonu
+                    IconButton(
+                      onPressed: _pickMovie,
+                      icon: Icon(
+                        Icons.movie_creation_outlined, 
+                        color: _selectedMovie != null ? theme.colorScheme.primary : Colors.grey.shade600
+                      ),
+                    ),
+                    const SizedBox(width: 4),
                     Expanded(
                       child: TextField(
                         controller: _commentCtrl,
@@ -253,7 +342,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                           filled: true,
-                          fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                          fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
                         ),
                         minLines: 1,
                         maxLines: 4,
@@ -264,16 +353,86 @@ class _CommentsSheetState extends State<CommentsSheet> {
                       onPressed: _isSending ? null : _send,
                       icon: _isSending
                           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(Icons.send_rounded, color: Theme.of(context).colorScheme.primary),
+                          : Icon(Icons.send_rounded, color: theme.colorScheme.primary),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          // DÜZELTME 2: bottomInset (sistem çubuğu boşluğu) ayrı bir SizedBox olarak eklendi.
           SizedBox(height: bottomInset), 
         ],
+      ),
+    );
+  }
+}
+
+// --- FİLM WIDGET'I (TIKLANINCA DETAY'A GİDER) ---
+class _AttachedMovieWidget extends StatelessWidget {
+  final Map<String, dynamic> movie;
+  const _AttachedMovieWidget({required this.movie});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        // Film ID'si varsa detay sayfasına yönlendir
+        final movieId = movie['id']; 
+        if (movieId != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MovieDetailScreen(tmdbId: movieId), 
+            ),
+          );
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: PosterImage(
+                posterUrl: movie['poster'] ?? '',
+                title: movie['title'] ?? '',
+                width: 24,
+                height: 36,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    movie['title'] ?? '',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Row(
+                    children: [
+                      Text(
+                        movie['releaseDate']?.toString().split('-').first ?? '',
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.arrow_forward_ios, size: 8, color: Colors.grey.shade600)
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -283,10 +442,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
 class _CommentTile extends StatelessWidget {
   final String postId;
   final QueryDocumentSnapshot doc;
-  // GÜNCELLENDİ: uid parametresi eklendi
   final Function(String docId, String userName, String uid) onReply;
 
   const _CommentTile({
+    super.key, // Key parametresini aldık
     required this.postId,
     required this.doc,
     required this.onReply,
@@ -299,6 +458,7 @@ class _CommentTile extends StatelessWidget {
     final text = data['text'] as String? ?? '';
     final likeCount = (data['likeCount'] ?? 0) as int;
     final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+    final movieData = data['movie'] as Map<String, dynamic>?;
 
     return FutureBuilder<DocumentSnapshot>(
       future: FirebaseFirestore.instance.collection('users').doc(authorId).get(),
@@ -338,8 +498,12 @@ class _CommentTile extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(text, style: const TextStyle(fontSize: 14)),
+                    if (text.isNotEmpty)
+                      Text(text, style: const TextStyle(fontSize: 14)),
                     
+                    if (movieData != null)
+                      _AttachedMovieWidget(movie: movieData),
+
                     const SizedBox(height: 6),
                     
                     Row(
@@ -352,14 +516,19 @@ class _CommentTile extends StatelessWidget {
                         ),
                         const SizedBox(width: 16),
                         GestureDetector(
-                          // GÜNCELLENDİ: authorId de gönderiliyor
                           onTap: () => onReply(doc.id, name, authorId),
                           child: Text('Yanıtla', style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
 
-                    _SubRepliesList(postId: postId, parentId: doc.id),
+                    // DÜZELTME 2: Alt yanıt listesine de benzersiz Key veriyoruz.
+                    // Böylece üstteki yorumun yanıtları buraya kopyalanmaz.
+                    _SubRepliesList(
+                      key: ValueKey(doc.id), 
+                      postId: postId, 
+                      parentId: doc.id
+                    ),
                   ],
                 ),
               ),
@@ -379,12 +548,15 @@ class _CommentTile extends StatelessWidget {
   }
 }
 
-// --- ALT YANITLAR LİSTESİ (STATEFUL) ---
 class _SubRepliesList extends StatefulWidget {
   final String postId;
   final String parentId;
 
-  const _SubRepliesList({required this.postId, required this.parentId});
+  const _SubRepliesList({
+    super.key, // Key eklendi
+    required this.postId, 
+    required this.parentId
+  });
 
   @override
   State<_SubRepliesList> createState() => _SubRepliesListState();
@@ -396,6 +568,7 @@ class _SubRepliesListState extends State<_SubRepliesList> {
   @override
   void initState() {
     super.initState();
+    // Key kullandığımız için artık initState her yeni parentId için çalışacak.
     _subStream = FirebaseFirestore.instance
           .collection('posts')
           .doc(widget.postId)
@@ -435,7 +608,6 @@ class _SubRepliesListState extends State<_SubRepliesList> {
   }
 }
 
-// --- TEKİL ALT YANIT SATIRI ---
 class _SubReplyTile extends StatelessWidget {
   final String postId;
   final String parentId;
@@ -454,6 +626,7 @@ class _SubReplyTile extends StatelessWidget {
     final authorId = data['authorId'] ?? '';
     final text = data['text'] ?? '';
     final likeCount = (data['likeCount'] ?? 0) as int;
+    final movieData = data['movie'] as Map<String, dynamic>?;
 
     return FutureBuilder<DocumentSnapshot>(
       future: FirebaseFirestore.instance.collection('users').doc(authorId).get(),
@@ -486,11 +659,15 @@ class _SubReplyTile extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      text, 
-                      style: const TextStyle(fontSize: 13)
-                    ),
+                    if (text.isNotEmpty)
+                      Text(
+                        text, 
+                        style: const TextStyle(fontSize: 13)
+                      ),
                     
+                    if (movieData != null)
+                      _AttachedMovieWidget(movie: movieData),
+
                     const SizedBox(height: 4),
                     
                     _CommentLikeButton(
@@ -511,7 +688,6 @@ class _SubReplyTile extends StatelessWidget {
   }
 }
 
-// --- BEĞENİ BUTONU ---
 class _CommentLikeButton extends StatefulWidget {
   final String postId;
   final String commentId;

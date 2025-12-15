@@ -194,23 +194,42 @@ class CatalogService {
     }
   }
 
+ 
+
   Future<List<Map<String, dynamic>>> getFilmsByKeys(List<String> keys) async {
     final List<Map<String, dynamic>> results = [];
     try {
       if (keys.isEmpty) return results;
-      // Firestore limits to 10 for 'whereIn'
+      
+      // Firestore 'whereIn' limiti 10'dur.
       final batchSize = 10;
+      
+      // Tüm sorguları (Future) bu listede toplayacağız
+      final List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
+
       for (var i = 0; i < keys.length; i += batchSize) {
         final chunk = keys.sublist(
           i,
           i + batchSize > keys.length ? keys.length : i + batchSize,
         );
-        final query = await _db
-            .collection('catalog_films')
-            .where(FieldPath.documentId, whereIn: chunk)
-            .get();
-        for (final doc in query.docs) {
-          results.add(doc.data());
+        
+        // Sorguyu başlatıyoruz ama 'await' ile beklemiyoruz, listeye atıyoruz.
+        futures.add(
+          _db.collection('catalog_films')
+             .where(FieldPath.documentId, whereIn: chunk)
+             .get()
+        );
+      }
+      
+      // BURASI ÖNEMLİ: Tüm sorguların aynı anda bitmesini bekliyoruz (Paralel İstek)
+      final snapshots = await Future.wait(futures);
+      
+      for (final snap in snapshots) {
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          // ID eşleştirmesi için döküman ID'sini veriye ekliyoruz
+          data['docId'] = doc.id; 
+          results.add(data);
         }
       }
     } catch (e, st) {
