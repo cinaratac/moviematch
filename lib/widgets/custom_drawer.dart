@@ -11,7 +11,6 @@ import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
 import '../screens/trivia_welcome_screen.dart';
-import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; 
 
 class CustomDrawer extends StatefulWidget {
@@ -404,12 +403,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
 
   
 
-  Future<void> _changeTheme(BuildContext context, ThemeMode mode, String modeStr) async {
-    ThemeBridge.themeMode.value = mode;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('themeMode', modeStr);
-    if (context.mounted) Navigator.pop(context);
-  }
+
 }
 
 class AnnouncementsScreen extends StatelessWidget {
