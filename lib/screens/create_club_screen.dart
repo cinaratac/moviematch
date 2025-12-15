@@ -308,7 +308,7 @@ class _CreateClubScreenState extends State<CreateClubScreen> with SingleTickerPr
                           ),
                         ),
                         
-                        const SizedBox(height: 100),
+                        const SizedBox(height: 70),
                       ],
                     ),
                   ),
@@ -327,12 +327,12 @@ class _CreateClubScreenState extends State<CreateClubScreen> with SingleTickerPr
                 CurvedAnimation(parent: _animController, curve: Curves.easeOutBack),
               ),
               child: SizedBox(
-                height: 54, // Yükseklik azaltıldı (64 -> 54)
+                height: 54, 
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _submit,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    foregroundColor: Colors.black,
+                    backgroundColor: primaryColor.withValues(alpha: 1.0),
+                    foregroundColor: const Color.fromARGB(255, 33, 94, 15),
                     elevation: 4, // Gölge azaltıldı
                     shadowColor: primaryColor.withValues(alpha: 0.3),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

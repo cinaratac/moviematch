@@ -162,6 +162,14 @@ class NotificationService {
                   : 'Yeni bir takipçin var'),
             );
             break;
+            case 'club_request':
+            await _showSocial(
+              title: 'Kulüp İsteği',
+              body: (actorName.isNotEmpty
+                  ? '$actorName kulübünüze katılmak istiyor'
+                  : 'Yeni bir kulüp katılım isteği var'),
+            );
+            break;
           default:
             // bilinmeyen tipleri sessiz geç
             break;

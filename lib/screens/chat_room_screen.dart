@@ -655,6 +655,9 @@ class _ChatAppBarTitle extends StatelessWidget {
                 final data = snap.data!.data() as Map<String, dynamic>;
                 final members = List<String>.from(data['members'] ?? []);
                 final admins = List<String>.from(data['admins'] ?? []);
+                // --- YENİ EKLENEN KISIM: Bekleyen istekleri çekiyoruz ---
+                final pending = List<String>.from(data['pendingRequests'] ?? []);
+
                 final imageUrl = data['imageUrl'] as String?;
                 final description = data['description'] as String?;
                 final ownerId = data['ownerId'];
@@ -662,15 +665,13 @@ class _ChatAppBarTitle extends StatelessWidget {
                 final myUid = FirebaseAuth.instance.currentUser?.uid;
                 
                 // --- YETKİ KONTROLÜ ---
-                // Sahibi veya herhangi bir yönetici mi?
                 final isOwner = (ownerId == myUid);
                 final isAdmin = admins.contains(myUid);
-                
-                // Menüyü görebilecek kişi: Sahip veya Yönetici
                 final canManage = isOwner || isAdmin;
 
                 return Column(
                   children: [
+                    // 1. ÜST KISIM (Görsel ve Başlık)
                     Stack(
                       children: [
                         Container(
@@ -747,6 +748,73 @@ class _ChatAppBarTitle extends StatelessWidget {
                       ],
                     ),
 
+                    // 2. BEKLEYEN İSTEKLER LİSTESİ (Sadece Yönetici ve İstek Varsa)
+                    if (canManage && pending.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Row(
+                            children: [
+                              const Icon(Icons.notifications_active_outlined, color: Colors.orange, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                "Bekleyen İstekler (${pending.length})", 
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.orange)
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.zero,
+                          itemCount: pending.length,
+                          itemBuilder: (ctx, i) {
+                            final pUid = pending[i];
+                            return FutureBuilder<DocumentSnapshot>(
+                              future: FirebaseFirestore.instance.collection('users').doc(pUid).get(),
+                              builder: (context, userSnap) {
+                                if (!userSnap.hasData) return const SizedBox.shrink();
+                                final uData = userSnap.data!.data() as Map<String, dynamic>?;
+                                final uName = uData?['displayName'] ?? 'Kullanıcı';
+                                final uPhoto = uData?['photoURL'];
+
+                                return ListTile(
+                                  dense: true,
+                                  leading: CircleAvatar(
+                                    radius: 16,
+                                    backgroundImage: uPhoto != null ? NetworkImage(uPhoto) : null,
+                                    child: uPhoto == null ? const Icon(Icons.person, size: 16) : null,
+                                  ),
+                                  title: Text(uName),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.check_circle, color: Colors.green),
+                                        onPressed: () => ClubService.instance.approveMember(chatId, pUid),
+                                        tooltip: 'Onayla',
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.cancel, color: Colors.red),
+                                        onPressed: () => ClubService.instance.rejectMember(chatId, pUid),
+                                        tooltip: 'Reddet',
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                            );
+                          },
+                        ),
+                      ),
+                      const Divider(thickness: 1),
+                    ],
+
+                    // 3. MEVCUT ÜYELER LİSTESİ
                     const Padding(
                       padding: EdgeInsets.all(16.0),
                       child: Align(
@@ -783,7 +851,6 @@ class _ChatAppBarTitle extends StatelessWidget {
                                     ? const Text('Kurucu', style: TextStyle(color: Colors.amber, fontSize: 12))
                                     : (isThisMemberAdmin ? const Text('Yönetici', style: TextStyle(color: Colors.green, fontSize: 12)) : null),
                                  
-                                 // YÖNETİM MENÜSÜ (Eğer ben yetkiliysem ve o kişi ben değilsem ve o kişi kurucu değilse)
                                  trailing: (canManage && uid != myUid && !isThisMemberOwner) 
                                     ? PopupMenuButton<String>(
                                         onSelected: (value) {

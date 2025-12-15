@@ -61,29 +61,60 @@ class ClubService {
   }
 
   // --- KULÜBE KATILMA İSTEĞİ ---
-  Future<void> joinClub(String clubId, bool isPrivate) async {
-    final uid = _auth.currentUser?.uid;
-    if (uid == null) return;
+Future<void> joinClub(String clubId, bool isPrivate) async {
+  final user = _auth.currentUser;
+  final uid = user?.uid;
+  if (uid == null || user == null) return;
 
-    final clubRef = _db.collection('clubs').doc(clubId);
-    final chatRef = _db.collection('chats').doc(clubId);
+  final clubRef = _db.collection('clubs').doc(clubId);
+  final chatRef = _db.collection('chats').doc(clubId);
 
-    if (isPrivate) {
-      await clubRef.update({
-        'pendingRequests': FieldValue.arrayUnion([uid])
-      });
-    } else {
-      final batch = _db.batch();
-      batch.update(clubRef, {
-        'members': FieldValue.arrayUnion([uid]),
-        'memberCount': FieldValue.increment(1), // <--- EKLENDİ: Sayaç artırma
-      });
-      batch.update(chatRef, {
-        'participants': FieldValue.arrayUnion([uid])
-      });
-      await batch.commit();
+  if (isPrivate) {
+    // 1. İsteği listeye ekle
+    await clubRef.update({
+      'pendingRequests': FieldValue.arrayUnion([uid])
+    });
+
+    // 2. Yöneticilere BİLDİRİM Gönder (YENİ EKLENEN KISIM)
+    try {
+      final clubDoc = await clubRef.get();
+      if (clubDoc.exists) {
+        final data = clubDoc.data() as Map<String, dynamic>;
+        final admins = List<dynamic>.from(data['admins'] ?? []);
+        final clubName = data['name'] ?? 'Kulüp';
+
+        for (final adminId in admins) {
+          if (adminId == uid) continue; // Kendine bildirim atma
+
+          await _db.collection('users').doc(adminId).collection('notifications').add({
+            'type': 'club_request',
+            'actorId': uid,
+            'actorName': user.displayName ?? 'Bir Kullanıcı',
+            'clubId': clubId,
+            'clubName': clubName,
+            'preview': 'Kulübünüze katılmak istiyor.',
+            'createdAt': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
+        }
+      }
+    } catch (e) {
+      print("Bildirim gönderme hatası: $e");
     }
+
+  } else {
+    // Herkese açık kulübe direkt katılma mantığı (Aynı kalıyor)
+    final batch = _db.batch();
+    batch.update(clubRef, {
+      'members': FieldValue.arrayUnion([uid]),
+      'memberCount': FieldValue.increment(1),
+    });
+    batch.update(chatRef, {
+      'participants': FieldValue.arrayUnion([uid])
+    });
+    await batch.commit();
   }
+}
 
   // --- ÜYE ONAYLAMA ---
   Future<void> approveMember(String clubId, String memberUid) async {

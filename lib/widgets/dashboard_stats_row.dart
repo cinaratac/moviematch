@@ -63,7 +63,7 @@ class _BadgeProgressCard extends StatelessWidget {
         }
 
         return _SquareCard(
-          color: Colors.deepPurple.shade400,
+          color: const Color.fromARGB(255, 51, 100, 206),
           onTap: () {
             Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen()));
           },
@@ -191,7 +191,7 @@ class _TopClubCard extends StatelessWidget {
         }
 
         return _SquareCard(
-          color: Colors.teal.shade700,
+          color: Color.fromARGB(139, 26, 138, 28),
           onTap: () {
              Navigator.push(context, MaterialPageRoute(builder: (_) => const ClubsScreen()));
           },

@@ -2,20 +2,19 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart'; 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; 
 import 'package:fluttergirdi/widgets/poster_image.dart';
 
+// SearchMoviePage importu (Film arama ekranı için)
+import '../screens/search_movie.dart'; 
 import '../services/text_filter_service.dart';
-import 'dart:math' as math; 
 
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
-  // DİKKAT: Map<String, String> yerine Map<String, dynamic> yapıldı
   final Map<String, dynamic>? initialMovie;
   
   final Future<void> Function({
     required String text, 
-    Map<String, dynamic>? movie, // DİKKAT: dynamic yapıldı
+    Map<String, dynamic>? movie, 
     File? image,
     double? rating,
     required bool isSpoiler,
@@ -41,20 +40,17 @@ class _ComposePostPageState extends State<ComposePostPage> {
   final FocusNode _focusNode = FocusNode();
   final ImagePicker _picker = ImagePicker(); 
   
-  // DİKKAT: String yerine dynamic
   Map<String, dynamic>? _selectedMovie;
   File? _selectedImage;
   
   double _rating = 0.0;
   bool _isSpoiler = false;
 
-
   @override
   void initState() {
     super.initState();
     if (widget.initialMovie != null) {
       _selectedMovie = widget.initialMovie;
-  
     }
   }
   
@@ -84,151 +80,24 @@ class _ComposePostPageState extends State<ComposePostPage> {
     super.dispose();
   }
 
-  // --- GÜNCELLENMİŞ VERİ ÇEKME FONKSİYONU ---
-  // DİKKAT: Dönüş tipi Map<String, dynamic> oldu
-  Future<List<Map<String, dynamic>>> _fetchUserMovies() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return [];
-
-    try {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      if (!userDoc.exists) return [];
-      
-      final data = userDoc.data()!;
-      final Set<String> allKeys = {};
-
-      void addKeys(String field) {
-        if (data[field] is List) {
-          allKeys.addAll(List<String>.from(data[field]));
-        }
-      }
-
-      addKeys('fiveStarKeys');
-      addKeys('favoritesKeys');
-      addKeys('watchlistKeys');
-      addKeys('dislikedKeys');
-
-      if (allKeys.isEmpty) return [];
-
-      final List<Map<String, dynamic>> movies = [];
-      final List<String> keysList = allKeys.toList();
-
-      for (var i = 0; i < keysList.length; i += 10) {
-        final chunk = keysList.sublist(i, math.min(i + 10, keysList.length));
-        
-        var qs = await FirebaseFirestore.instance
-            .collection('catalog_films')
-            .where(FieldPath.documentId, whereIn: chunk)
-            .get();
-
-        if (qs.docs.isEmpty) {
-           qs = await FirebaseFirestore.instance
-            .collection('catalog_films')
-            .where('key', whereIn: chunk)
-            .get();
-        }
-
-        for (var doc in qs.docs) {
-          final fd = doc.data();
-          final title = (fd['title'] ?? '').toString();
-          
-          // DİKKAT: ID parse işlemi burada yapılıyor
-          int? tmdbId;
-          if (fd['tmdbId'] is int) {
-            tmdbId = fd['tmdbId'];
-          } else if (fd['tmdbId'] is String) {
-            tmdbId = int.tryParse(fd['tmdbId']);
-          } else if (fd['id'] is int) {
-            tmdbId = fd['id'];
-          }
-
-          if (title.isNotEmpty) {
-            movies.add({
-              'title': title,
-              'poster': (fd['posterUrl'] ?? fd['poster'] ?? '').toString(),
-              'tmdbId': tmdbId, // Artık int (veya null) gönderiyoruz
-            });
-          }
-        }
-      }
-      
-      movies.sort((a, b) => (a['title'] ?? '').compareTo(b['title'] ?? ''));
-      return movies;
-
-    } catch (e) {
-      debugPrint("Film listesi çekme hatası: $e");
-      return [];
-    }
-  }
-
+  // Film seçme fonksiyonu (SearchMoviePage'i açar)
   Future<void> _pickMovie() async {
-    // DİKKAT: Tür dynamic oldu
-    final result = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (ctx) {
-        return FutureBuilder<List<Map<String, dynamic>>>(
-          future: _fetchUserMovies(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.5,
-                child: const Center(child: CircularProgressIndicator()),
-              );
-            }
-
-            final items = snapshot.data ?? [];
-            
-            return SizedBox(
-              height: MediaQuery.of(ctx).size.height * 0.8,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text('Filmlerim', style: Theme.of(ctx).textTheme.titleLarge),
-                  ),
-                  const Divider(),
-                  Expanded(
-                    child: items.isEmpty
-                        ? const Center(child: Text('Listen boş veya yüklenemedi.'))
-                        : ListView.separated(
-                            itemCount: items.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (_, i) {
-                              final title = items[i]['title'] ?? '';
-                              final poster = items[i]['poster'] ?? '';
-                              return ListTile(
-                                leading: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: SizedBox(
-                                    width: 40,
-                                    height: 60,
-                                    child: poster.isNotEmpty
-                                        ? PosterImage(posterUrl: poster, title: title)
-                                        : const ColoredBox(color: Colors.black12, child: Icon(Icons.movie)),
-                                  ),
-                                ),
-                                title: Text(title),
-                                onTap: () => Navigator.of(ctx).pop(items[i]),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SearchMoviePage(isSelectionMode: true),
+      ),
     );
 
-    if (result != null && mounted) {
+    if (result != null && result is Map && mounted) {
       setState(() {
-        _selectedMovie = result;
-        
+        _selectedMovie = {
+          'title': result['title'],
+          'poster': result['poster'],
+          'tmdbId': result['id'], 
+          'releaseDate': result['releaseDate'],
+        };
+        _rating = 0; // Film değişince puanı sıfırla
       });
     }
   }
@@ -269,6 +138,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // 1. İnceleme Başlığı (Sadece film varsa)
                           if (_selectedMovie != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 8.0),
@@ -283,6 +153,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               ),
                             ),
 
+                          // 2. Ana Metin Alanı
                           TextField(
                             controller: _controller,
                             focusNode: _focusNode,
@@ -294,6 +165,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                             ),
                           ),
                           
+                          // 3. Resim Önizleme
                           if (_selectedImage != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12.0),
@@ -324,6 +196,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               ),
                             ),
 
+                          // 4. Seçili Film Kartı (Varsa)
                           if (_selectedMovie != null) ...[
                             Container(
                               decoration: BoxDecoration(
@@ -356,7 +229,6 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                   IconButton(
                                     onPressed: () => setState(() {
                                       _selectedMovie = null;
-                                      
                                       _rating = 0;
                                     }),
                                     icon: const Icon(Icons.close),
@@ -366,16 +238,21 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: cs.surfaceContainerHighest.withOpacity(0.3),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
+                          ],
+                          
+                          // 5. Ayarlar Kutusu (Puan, Etiket, Spoiler)
+                          // Bu kutu HER ZAMAN görünür, ama Puan sadece film varsa görünür.
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: cs.surfaceContainerHighest.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Puanlama (Sadece film varsa göster)
+                                if (_selectedMovie != null) ...[
                                   Row(
                                     children: [
                                       const Text("Puan:", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -402,33 +279,36 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                     ],
                                   ),
                                   const SizedBox(height: 12),
-                                  
-                                  TextField(
-                                    controller: _tagsCtrl,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Etiketler (Virgülle ayır)',
-                                      hintText: 'Örn: korku, klasik, 90lar',
-                                      isDense: true,
-                                      border: OutlineInputBorder(),
-                                      prefixIcon: Icon(Icons.tag, size: 18),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-
-                                  SwitchListTile(
-                                    title: const Text("Spoiler İçerir", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                                    value: _isSpoiler,
-                                    onChanged: (val) => setState(() => _isSpoiler = val),
-                                    activeColor: Colors.redAccent,
-                                    contentPadding: EdgeInsets.zero,
-                                    dense: true,
-                                  ),
                                 ],
-                              ),
+
+                                // Etiketler (Her zaman açık)
+                                TextField(
+                                  controller: _tagsCtrl,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Etiketler (Virgülle ayır)',
+                                    hintText: 'Örn: korku, klasik, 90lar',
+                                    isDense: true,
+                                    border: OutlineInputBorder(),
+                                    prefixIcon: Icon(Icons.tag, size: 18),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+
+                                // Spoiler Switch (Her zaman açık)
+                                SwitchListTile(
+                                  title: const Text("Spoiler İçerir", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                                  value: _isSpoiler,
+                                  onChanged: (val) => setState(() => _isSpoiler = val),
+                                  activeColor: Colors.redAccent,
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                          ],
+                          ),
+                          const SizedBox(height: 8),
                           
+                          // 6. Alt Butonlar
                           Row(
                             children: [
                               IconButton(
@@ -439,8 +319,8 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               ),
                               IconButton(
                                 onPressed: _pickMovie,
-                                icon: const Icon(Icons.movie),
-                                tooltip: 'Film seç',
+                                icon: const Icon(Icons.movie_creation_outlined),
+                                tooltip: 'Film ara ve ekle',
                                 color: cs.onSurfaceVariant,
                               ),
                               const Spacer(),

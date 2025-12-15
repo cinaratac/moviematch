@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
-
+import 'package:fluttergirdi/screens/chat_room_screen.dart';
 /// AppBar içinde kullan: NotificationsButton()
 class NotificationsButton extends StatelessWidget {
   const NotificationsButton({super.key});
@@ -230,6 +230,26 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                   ),
                                 );
                               }
+                              else if (type == 'club_request') {
+                                // KULÜP İSTEĞİNE TIKLANINCA
+                                final clubId = (m['clubId'] ?? '').toString();
+                                final clubName = (m['clubName'] ?? '').toString();
+                                
+                                if (clubId.isNotEmpty) {
+                                  navigator.pop(); // Bildirim sayfasını kapat
+                                  navigator.push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ChatRoomScreen(
+                                        chatId: clubId,
+                                        otherUid: '', // Grup olduğu için boş
+                                        otherTitle: clubName,
+                                        isGroup: true,
+                                        groupName: clubName,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
                             },
                             leading: _Avatar(url: actor?.photoURL),
                             title: Text(
@@ -286,6 +306,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return 'Yeni yorum';
       case 'follow':
         return 'Yeni takipçi';
+      case 'club_request': return 'Kulüp İsteği';
       default:
         return 'Bildirim';
     }
@@ -299,6 +320,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return 'gönderinize yorum yaptı';
       case 'follow':
         return 'sizi takip etmeye başladı';
+        case 'club_request': return 'kulübünüze katılmak istiyor';
       default:
         return 'bir etkinlikte bulundu';
     }
