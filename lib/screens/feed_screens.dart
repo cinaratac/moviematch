@@ -4,24 +4,22 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:fluttergirdi/screens/search_page.dart';
 
-// --- YENİ IMPORTLAR (Controller ve Servisler) ---
 import '../controllers/feed_controller.dart';
 import '../services/user_cache_service.dart';
 import '../widgets/post_skeleton.dart';
 import '../services/feed_service.dart';
 
-// MEVCUT IMPORTLAR (Projenizdeki widget'lar)
 import 'package:fluttergirdi/screens/search_profiles_screen.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
-import 'package:fluttergirdi/widgets/notifications.dart'; // NotificationsButton için
+import 'package:fluttergirdi/widgets/notifications.dart'; 
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:fluttergirdi/widgets/custom_drawer.dart';
 import 'package:fluttergirdi/widgets/dashboard_stats_row.dart';
 import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
-import 'package:fluttergirdi/widgets/green_characters.dart'; // Takip akışı boşsa gösterilen karakter
+import 'package:fluttergirdi/widgets/green_characters.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -31,14 +29,12 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
-  // Logic'i Controller'a taşıdık (Sadece Popüler akış için)
   final FeedController _controller = FeedController();
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    // Controller'daki değişiklikleri dinleyip ekranı yeniliyoruz
     _controller.addListener(() {
       if (mounted) setState(() {});
     });
@@ -60,13 +56,11 @@ class _FeedPageState extends State<FeedPage> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
     
-    // Listenin sonuna yaklaşıldığında yeni veri çek
     if (maxScroll - currentScroll <= 200) {
       _controller.loadMore();
     }
   }
 
-  // Helper: Timestamp formatlama
   static String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
     if (diff.inSeconds < 60) return '${diff.inSeconds}s';
@@ -171,13 +165,10 @@ class _FeedPageState extends State<FeedPage> {
             Expanded(
               child: TabBarView(
                 children: [
-                  // 1) POPÜLER AKIŞ (Controller ile yönetiliyor - Optimize Edilmiş)
                   RefreshIndicator(
                     onRefresh: _controller.refresh,
                     child: _buildPopularFeed(),
                   ),
-            
-                  // 2) TAKİP EDİLENLER (Eski Yapı Geri Getirildi)
                   const _FollowingFeed(),
                 ],
               ),
@@ -195,24 +186,31 @@ class _FeedPageState extends State<FeedPage> {
                 useSafeArea: true,
                 builder: (_) => ComposePostPage(
                   maxChars: 280,
-                  onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
+                  // --- GÜNCELLENEN KISIM: images (List<File>) ALINIYOR ---
+                  onSend: ({required text, movie, images, rating, required isSpoiler, tags, reviewTitle}) async {
                     Navigator.pop(context);
                     final user = FirebaseAuth.instance.currentUser;
                     if (user == null) return;
                     
                     try {
-                      String? imageUrl;
-                      if (image != null) {
-                        final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                        final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
-                        await ref.putFile(image);
-                        imageUrl = await ref.getDownloadURL();
+                      // Çoklu resim yükleme
+                      List<String> imageUrls = [];
+                      if (images != null && images.isNotEmpty) {
+                        for (var i = 0; i < images.length; i++) {
+                           final image = images[i];
+                           final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+                           final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
+                           await ref.putFile(image);
+                           final url = await ref.getDownloadURL();
+                           imageUrls.add(url);
+                        }
                       }
 
                       await FeedService.instance.createPost(
                           text: text,
                           movie: movie,
-                          photoURL: imageUrl,
+                          photoURL: imageUrls.isNotEmpty ? imageUrls.first : null, // Geriye dönük uyumluluk
+                          photoURLs: imageUrls, // Yeni liste
                           displayName: user.displayName,
                           handle: user.email?.split('@')[0] ?? 'user',
                           rating: rating,
@@ -223,7 +221,7 @@ class _FeedPageState extends State<FeedPage> {
                       
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gönderildi!')));
-                        _controller.refresh(); // Listeyi yenile
+                        _controller.refresh(); 
                       }
                     } catch (e) {
                       debugPrint('Post gönderme hatası: $e');
@@ -241,7 +239,6 @@ class _FeedPageState extends State<FeedPage> {
   }
 
   Widget _buildPopularFeed() {
-    // 1. YÜKLENİYORSA: SKELETON GÖSTER
     if (_controller.isLoading) {
       return ListView.builder(
         padding: const EdgeInsets.all(8),
@@ -250,14 +247,12 @@ class _FeedPageState extends State<FeedPage> {
       );
     }
 
-    // 2. LİSTE DOLUYSA
     return ListView.separated(
       controller: _scrollController,
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: _controller.posts.length + 1 + (_controller.isLoadingMore ? 1 : 0),
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, i) {
-        // En üstte Dashboard ve Öneriler
         if (i == 0) {
           return const Column(
             children: [
@@ -270,7 +265,6 @@ class _FeedPageState extends State<FeedPage> {
 
         final postIndex = i - 1;
 
-        // En altta yükleniyor ikonu
         if (postIndex >= _controller.posts.length) {
           return const Padding(
             padding: EdgeInsets.all(16.0),
@@ -283,7 +277,6 @@ class _FeedPageState extends State<FeedPage> {
         final pid = doc.id;
         final authorId = (m['authorId'] ?? '') as String;
 
-        // --- CACHE'DEN KULLANICI BİLGİSİ ALMA ---
         final cachedUser = UserCacheService.instance.getFromCache(authorId);
         final displayName = cachedUser?.displayName ?? (m['displayName'] ?? 'Kullanıcı');
         final handle = cachedUser?.handle ?? (m['handle'] ?? '');
@@ -307,6 +300,9 @@ class _FeedPageState extends State<FeedPage> {
           moviePoster: moviePoster.isEmpty ? null : moviePoster,
           movieTmdbId: _parseTmdbId(m),
           postImage: (m['postImage'] ?? '') as String,
+          // --- EKLENDİ: Çoklu Fotoğraf Desteği ---
+          postImages: List<String>.from(m['photoURLs'] ?? []),
+          // ----------------------------------------
           text: m['text'] ?? '',
           likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
           replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
@@ -325,7 +321,6 @@ class _FeedPageState extends State<FeedPage> {
           onDelete: () => _controller.removePost(pid),
         );
 
-        // Araya önerilen kullanıcıları eklemek istersen (Eski koddaki gibi 3. posttan sonra)
         if (postIndex == 3) {
            return Column(
              crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -342,10 +337,6 @@ class _FeedPageState extends State<FeedPage> {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// AŞAĞISI ESKİ KODDAN KURTARILAN "TAKİP EDİLENLER" (FOLLOWING) KISMI
-// ---------------------------------------------------------------------------
 
 class _FollowingFeed extends StatefulWidget {
   const _FollowingFeed({Key? key}) : super(key: key);
@@ -371,7 +362,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
     _load();
   }
 
-  // Bu fonksiyonu UserCacheService'e taşıyabiliriz ama eski kodun çalışması için bıraktım
   Future<void> _fetchAuthors(List<DocumentSnapshot> posts) async {
     final uids = <String>{};
     for(var d in posts) {
@@ -380,8 +370,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       if(id != null && !_localAuthorCache.containsKey(id)) uids.add(id);
     }
     if(uids.isEmpty) return;
-    
-    // UserCacheService kullanarak optimize edelim
     await UserCacheService.instance.fetchUsers(uids.toList());
   }
 
@@ -479,7 +467,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   Widget build(BuildContext context) {
     super.build(context);
     
-    // Skeleton Loading Ekledik (Optimize edildi)
     if (_loading) {
       return ListView.builder(
         itemCount: 5,
@@ -523,7 +510,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final m = d.data() ?? {};
           final authorId = (m['authorId'] ?? '') as String;
           
-          // UserCacheService kullanarak veriyi çekiyoruz (daha hızlı)
           final cachedUser = UserCacheService.instance.getFromCache(authorId);
           final displayName = cachedUser?.displayName ?? (m['displayName'] ?? '') as String;
           final handle = cachedUser?.handle ?? (m['handle'] ?? '') as String;
@@ -554,6 +540,9 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
             movieTmdbId: movieTmdbId,
             postImage: postImage.isEmpty ? null : postImage,
+            // --- EKLENDİ: Çoklu Fotoğraf Desteği (Takip Akışı İçin) ---
+            postImages: List<String>.from(m['photoURLs'] ?? []),
+            // ----------------------------------------------------------
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
             replyCount: ((m['replyCount'] ?? 0) as num).toInt(),

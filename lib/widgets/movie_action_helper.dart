@@ -1,4 +1,4 @@
-
+import 'dart:io'; // EKLENDİ (File kullanımı için)
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,7 +9,6 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/models/shelf_target.dart'; 
 import 'package:fluttergirdi/services/feed_service.dart';
 
-// --- YENİ İMPORTLAR ---
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:fluttergirdi/secrets.dart';
@@ -64,9 +63,7 @@ class _MovieActionSheet extends StatelessWidget {
     }
   }
 
-  // --- YENİ FONKSİYON: ID BUL VE GİT ---
   Future<void> _fetchAndNavigateToDetails(BuildContext context) async {
-    // Önce katalogdan tmdbId'yi kontrol et
     int? tmdbId;
     if (docId != null) {
       final doc = await FirebaseFirestore.instance.collection('catalog_films').doc(docId).get();
@@ -76,9 +73,6 @@ class _MovieActionSheet extends StatelessWidget {
     }
 
     if (tmdbId == null) {
-      // Bulunamadıysa API'den ara
-      // Loading dialog açmayalım çünkü sheet kapanınca context değişebilir, 
-      // direkt arayıp varsa gidelim, yoksa hata verelim.
       try {
         final searchUrl = Uri.parse(
           'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(title)}&language=tr-TR&include_adult=false'
@@ -90,8 +84,6 @@ class _MovieActionSheet extends StatelessWidget {
           final results = data['results'] as List?;
           if (results != null && results.isNotEmpty) {
             tmdbId = results[0]['id'];
-            
-            // Bulduysak kataloğa kaydedelim
             if (docId != null && tmdbId != null) {
               FirebaseFirestore.instance
                   .collection('catalog_films')
@@ -105,7 +97,6 @@ class _MovieActionSheet extends StatelessWidget {
 
     if (!context.mounted) return;
     
-    // Sheet'i kapat
     Navigator.pop(context);
 
     if (tmdbId != null) {
@@ -220,7 +211,6 @@ class _MovieActionSheet extends StatelessWidget {
             ),
           ),
           const Divider(),
-          // --- YENİ SEÇENEK: FİLM DETAYLARI ---
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: const Text('Film Detayları'),
@@ -264,22 +254,30 @@ class _MovieActionSheet extends StatelessWidget {
         builder: (_) => ComposePostPage(
           maxChars: 280,
           initialMovie: {'title': title, 'poster': posterUrl}, 
-          onSend: ({required text, movie, image, rating, required isSpoiler, tags, reviewTitle}) async {
+          // --- GÜNCELLENEN KISIM ---
+          onSend: ({required text, movie, images, rating, required isSpoiler, tags, reviewTitle}) async {
              final user = FirebaseAuth.instance.currentUser;
              if (user == null) return;
 
-             String? postImageUrl;
-             if (image != null) {
-                final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
-                await ref.putFile(image);
-                postImageUrl = await ref.getDownloadURL();
+             List<String> postImageUrls = [];
+             
+             // Çoklu resim yükleme
+             if (images != null && images.isNotEmpty) {
+                for (var i = 0; i < images.length; i++) {
+                   final image = images[i];
+                   final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+                   final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
+                   await ref.putFile(image);
+                   final url = await ref.getDownloadURL();
+                   postImageUrls.add(url);
+                }
              }
 
              await FeedService.instance.createPost(
                text: text,
                movie: movie,
-               photoURL: postImageUrl,
+               photoURL: postImageUrls.isNotEmpty ? postImageUrls.first : null, // Geriye uyumluluk
+               photoURLs: postImageUrls, // Yeni liste desteği
                displayName: user.displayName,
                handle: user.email?.split('@')[0],
                rating: rating,
@@ -312,7 +310,6 @@ class _MovieActionSheet extends StatelessWidget {
   }
 }
 
-// ... (_InboxPickerSheet ve _sendMovieMessage vb. aynı kalıyor) ...
 class _InboxPickerSheet extends StatelessWidget {
   final String movieTitle;
   final String moviePoster;

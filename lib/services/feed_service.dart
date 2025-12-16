@@ -20,7 +20,6 @@ class FeedService {
     return _fs.collection('posts').doc(postId);
   }
 
-  /// İlk yükleme: Önce sunucuyu dener, hata alırsa (offline) cache'ten getirir.
   Future<QuerySnapshot<Map<String, dynamic>>> fetchInitial({int limit = 20}) async {
     final q = _baseQuery().limit(limit);
     try {
@@ -30,7 +29,6 @@ class FeedService {
     }
   }
 
-  /// Sayfalama: İnternet durumuna göre otomatik karar verir (Server veya Cache).
   Future<QuerySnapshot<Map<String, dynamic>>> fetchMore({
     required DocumentSnapshot<Map<String, dynamic>> lastDoc,
     int limit = 20,
@@ -39,7 +37,6 @@ class FeedService {
     return q.get(); 
   }
 
-  // --- DÜZELTİLEN FONKSİYON BURASI ---
  Future<Set<String>> fetchUserLikedPostIds(String userId) async {
     try {
       final querySnapshot = await _fs
@@ -56,7 +53,6 @@ class FeedService {
       }
       return likedIds;
     } catch (e) {
-      // ÖNEMLİ: Hatayı konsola yazdırıyoruz ki Linki görebilelim.
       print("LIKE SORGU HATASI: $e");
       return {};
     }
@@ -76,12 +72,14 @@ class FeedService {
     }
   }
 
+  // --- GÜNCELLENMİŞ FONKSİYON ---
   Future<void> createPost({
     required String text,
     Map<String, dynamic>? movie,
     String? handle,
     String? displayName,
-    String? photoURL,
+    String? photoURL, 
+    List<String>? photoURLs, // YENİ: Çoklu foto desteği
     double? rating,       
     bool isSpoiler = false,
     List<String>? tags,   
@@ -98,7 +96,8 @@ class FeedService {
       'authorId': user.uid,
       'displayName': displayName ?? '',
       'handle': (handle ?? '').trim(),
-      'photoURL': photoURL ?? '',
+      'photoURL': photoURL ?? '', // Geriye dönük uyumluluk
+      'photoURLs': photoURLs ?? [], // Yeni liste
       'movie': movie,
       'text': text.trim(),
       'rating': rating,

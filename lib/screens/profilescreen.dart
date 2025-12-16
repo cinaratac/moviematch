@@ -119,6 +119,7 @@ class _CountPill extends StatelessWidget {
 }
 
 Widget _profileHeaderSection({
+  
   required BuildContext context,
   required User user,
   required int? followers,
@@ -144,7 +145,7 @@ Widget _profileHeaderSection({
       },
     );
   }
-
+final isDark = Theme.of(context).brightness == Brightness.dark;
   void showUserList(String title, String collection) {
     showModalBottomSheet(
       context: context,
@@ -190,7 +191,7 @@ Widget _profileHeaderSection({
               Text(
                 shownName(user),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.white, // Blur üstünde olduğu için beyaz
+                  color: isDark ?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),
                   fontWeight: FontWeight.w600,
                   shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 4)],
                 ),
@@ -771,12 +772,12 @@ class _ProfilePageState extends State<ProfilePage> {
                             Container(
                               margin: const EdgeInsets.symmetric(horizontal: 4),
                               
-                              child: IconButton(tooltip: 'Düzenle', icon: const Icon(Icons.edit_outlined, color: Colors.white), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
+                              child: IconButton(tooltip: 'Düzenle', icon: Icon(Icons.edit_outlined, color: isDark ?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
                             ),
                             Container(
                               margin: const EdgeInsets.only(right: 12, left: 4),
                              
-                              child: IconButton(tooltip: 'Ayarlar', icon: const Icon(Icons.settings_outlined, color: Colors.white), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
+                              child: IconButton(tooltip: 'Ayarlar', icon: Icon(Icons.settings_outlined, color: isDark?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
                             ),
                           ],
                         ),

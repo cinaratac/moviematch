@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // FirebaseAuth eklendi
+import 'package:firebase_auth/firebase_auth.dart'; 
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:fluttergirdi/services/feed_service.dart';
@@ -8,6 +8,17 @@ class PostDetailScreen extends StatelessWidget {
   final String postId;
 
   const PostDetailScreen({super.key, required this.postId});
+
+  // Film ID'sini güvenli şekilde çekmek için yardımcı fonksiyon
+  int? _parseTmdbId(Map<String, dynamic> m) {
+    dynamic rawId = (m['movie'] is Map) 
+        ? (m['movie']['tmdbId'] ?? m['movie']['id']) 
+        : m['tmdbId'];
+    if (rawId is int) return rawId;
+    if (rawId is String) return int.tryParse(rawId);
+    if (rawId is double) return rawId.toInt();
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,8 +60,6 @@ class PostDetailScreen extends StatelessWidget {
             ]),
             builder: (context, combinedSnap) {
               
-              // Veriler yüklenirken de post içeriğini (eski verilerle) gösterebiliriz
-              // ama temiz olması için loading gösteriyoruz.
               if (combinedSnap.connectionState == ConnectionState.waiting) {
                  return const Center(child: CircularProgressIndicator());
               }
@@ -85,14 +94,14 @@ class PostDetailScreen extends StatelessWidget {
                 }
               }
 
-              // Beğeni Durumunu Çıkar
+              // Beğeni Durumu
               bool isLiked = false;
               if (results.length > 1 && results[1] != null) {
                  final likeDoc = results[1] as DocumentSnapshot;
                  isLiked = likeDoc.exists;
               }
 
-              // Takip Durumunu Çıkar
+              // Takip Durumu
               bool isFollowing = false;
               if (results.length > 2 && results[2] != null) {
                 final followDoc = results[2] as DocumentSnapshot;
@@ -101,6 +110,14 @@ class PostDetailScreen extends StatelessWidget {
 
               final createdAt = (m['createdAt'] as Timestamp?);
               final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
+
+              // --- YENİ ALANLARIN PARSE EDİLMESİ ---
+              final double? rating = (m['rating'] as num?)?.toDouble();
+              final bool isSpoiler = m['isSpoiler'] == true;
+              final List<String> tags = List<String>.from(m['tags'] ?? []);
+              final String? reviewTitle = m['reviewTitle'] as String?;
+              final List<String> postImages = List<String>.from(m['photoURLs'] ?? []);
+              final int? movieTmdbId = _parseTmdbId(m);
 
               return SingleChildScrollView(
                 child: PostTile(
@@ -111,27 +128,39 @@ class PostDetailScreen extends StatelessWidget {
                   handle: handle,
                   photoURL: photoURL,
                   timeLabel: timeLabel,
+                  
+                  // İçerik
                   text: (m['text'] ?? '').toString(),
+                  reviewTitle: reviewTitle,
+                  rating: rating,
+                  isSpoiler: isSpoiler,
+                  tags: tags,
+                  
+                  // Film Bilgileri
                   movieTitle: m['movieTitle'] ?? m['movie']?['title'],
                   moviePoster: m['moviePoster'] ?? m['movie']?['poster'],
-                  postImage: m['postImage'],
+                  movieTmdbId: movieTmdbId,
+                  
+                  // Görseller (Hem eski hem yeni yapı desteği)
+                  postImage: m['postImage'], 
+                  postImages: postImages,
+
                   likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
                   replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
                   
-                  // EKLENEN ZORUNLU PARAMETRELER:
                   initialIsLiked: isLiked,
                   initialIsFollowing: isFollowing,
-                  isDetail: true,
+                  isDetail: true, // Detay sayfasında olduğumuzu belirtiyoruz (Navigasyon döngüsünü önler)
+                  
                   onToggleLike: (pid, val) => FeedService.instance.toggleLike(postId: pid, like: val),
                   onStartChat: (uid) async { 
-                    // ChatService entegrasyonu
+                    // Chat entegrasyonu buraya
                   }, 
                   onFollow: (uid) async {
                      await FeedService.instance.followUser(uid);
                      await FeedService.instance.notifyFollow(toUid: uid);
                   },
                   onReport: (pid) => FeedService.instance.reportPost(pid),
-                  // Detay sayfasından silerse sayfayı kapat
                   onDelete: () => Navigator.pop(context), 
                 ),
               );

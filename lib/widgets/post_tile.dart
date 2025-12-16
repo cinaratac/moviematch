@@ -1,43 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:fluttergirdi/widgets/comments_sheet.dart';
-import '../widgets/poster_image.dart';
-import '../screens/public_profile_screen.dart';
-import '../screens/post_detail_screen.dart';
-import '../screens/chat_room_screen.dart';
-import '../services/chat_service.dart';
-import '../services/follow_system_service.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
+
+// --- PROJE İÇİ IMPORTLAR ---
+import 'package:fluttergirdi/widgets/comments_sheet.dart';
+import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:fluttergirdi/screens/post_detail_screen.dart';
+import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/services/follow_system_service.dart'; 
 
 class PostTile extends StatefulWidget {
   final String postId;
   final String authorId;
-  final String? postImage;
+  
+  // Görsel Alanları
+  final String? postImage;       // Eski tekli yapı (Geriye dönük uyumluluk)
+  final List<String>? postImages; // Yeni çoklu yapı
+  
+  // Kullanıcı Bilgileri
   final String displayName;
   final String handle;
   final String photoURL;
+  
+  // İçerik
   final String timeLabel;
-  final String? movieTitle;
-  final String? moviePoster;
   final String text;
-  final int likeCount;
-  final int replyCount;
-  final int? movieTmdbId;
-  final bool initialIsLiked;
-  final bool initialIsFollowing;
-
-  // --- YENİ ALANLAR ---
+  final String? reviewTitle;
   final double? rating;
   final bool isSpoiler;
   final List<String> tags;
-  final String? reviewTitle;
+
+  // Film Bilgileri
+  final String? movieTitle;
+  final String? moviePoster;
+  final int? movieTmdbId;
+
+  // Sayaçlar ve Durumlar
+  final int likeCount;
+  final int replyCount;
+  final bool initialIsLiked;
+  final bool initialIsFollowing;
   
-  // EKLENDİ: Detay sayfasında olup olmadığımızı kontrol eden değişken
+  // Navigasyon Kontrolü
   final bool isDetail; 
 
+  // Aksiyonlar
   final Function(String postId, bool isLiked) onToggleLike;
   final Function(String userId) onStartChat;
   final Function(String userId) onFollow;
@@ -46,30 +58,27 @@ class PostTile extends StatefulWidget {
 
   const PostTile({
     super.key,
-    required this.initialIsLiked,
-    required this.initialIsFollowing,
-    this.postImage,
     required this.postId,
     required this.authorId,
+    this.postImage,
+    this.postImages,
     required this.displayName,
     required this.handle,
     required this.photoURL,
     required this.timeLabel,
-    this.movieTitle,
-    this.moviePoster,
     required this.text,
-    required this.likeCount,
-    required this.replyCount,
-    this.movieTmdbId,
-    
+    this.reviewTitle,
     this.rating,
     this.isSpoiler = false,
     this.tags = const [],
-    this.reviewTitle,
-    
-    // Varsayılan olarak false (Feed ekranında navigation çalışsın diye)
-    this.isDetail = false, 
-
+    this.movieTitle,
+    this.moviePoster,
+    this.movieTmdbId,
+    required this.likeCount,
+    required this.replyCount,
+    required this.initialIsLiked,
+    required this.initialIsFollowing,
+    this.isDetail = false,
     required this.onToggleLike,
     required this.onStartChat,
     required this.onFollow,
@@ -85,10 +94,13 @@ class _PostTileState extends State<PostTile> {
   late bool _isLiked;
   late bool _isFollowing;
   int _currentLikeCount = 0;
-  
-  final String _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
-
   bool _revealSpoiler = false;
+  
+  // Galeri Kontrolcüsü
+  int _currentImageIndex = 0;
+  final PageController _pageController = PageController();
+
+  final String _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
 
   @override
   void initState() {
@@ -97,6 +109,8 @@ class _PostTileState extends State<PostTile> {
     _isLiked = widget.initialIsLiked;
     _isFollowing = widget.initialIsFollowing;
   }
+
+  // --- AKSİYON FONKSİYONLARI ---
 
   void _handleLike() {
     setState(() {
@@ -120,10 +134,8 @@ class _PostTileState extends State<PostTile> {
   }
 
   void _navigateToDetail() {
-    // DÜZELTME: Eğer zaten detay sayfasındaysak (isDetail=true), 
-    // tekrar navigasyon yapma.
+    // Eğer zaten detay sayfasındaysak tekrar açma
     if (widget.isDetail) return;
-
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -132,16 +144,18 @@ class _PostTileState extends State<PostTile> {
     );
   }
   
-  // Opsiyonel: Detay sayfasındayken resme tıklandığında büyütme özelliği
-  void _openFullScreenImage() {
-    if (widget.postImage == null) return;
+  void _openFullScreenImage(String url) {
     showDialog(
       context: context,
       barrierColor: Colors.black,
       builder: (ctx) => GestureDetector(
         onTap: () => Navigator.pop(ctx),
         child: InteractiveViewer(
-          child: CachedNetworkImage(imageUrl: widget.postImage!),
+          child: CachedNetworkImage(
+            imageUrl: url,
+            placeholder: (context, url) => const Center(child: CircularProgressIndicator()),
+            errorWidget: (context, url, error) => const Icon(Icons.error, color: Colors.white),
+          ),
         ),
       ),
     );
@@ -175,6 +189,100 @@ class _PostTileState extends State<PostTile> {
     }
   }
 
+  // --- UI OLUŞTURUCULAR ---
+
+  Widget _buildImageCarousel(List<String> images) {
+    if (images.isEmpty) return const SizedBox.shrink();
+    
+    // Tek resim varsa direkt göster (PageView overhead'i olmasın)
+    if (images.length == 1) {
+      return GestureDetector(
+        onTap: widget.isDetail ? () => _openFullScreenImage(images.first) : _navigateToDetail,
+        child: Container(
+          constraints: const BoxConstraints(maxHeight: 500),
+          width: double.infinity,
+          color: Colors.black12,
+          child: CachedNetworkImage(
+            imageUrl: images.first,
+            fit: BoxFit.cover,
+            placeholder: (context, url) => Container(color: Colors.grey[200]),
+            errorWidget: (context, url, error) => const SizedBox(
+              height: 200,
+              child: Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Çoklu resim (Carousel)
+    return Column(
+      children: [
+        SizedBox(
+          height: 400, // Instagram standardı kare/dikey oran
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: images.length,
+            onPageChanged: (index) {
+              setState(() => _currentImageIndex = index);
+            },
+            itemBuilder: (context, index) {
+              return GestureDetector(
+                onTap: widget.isDetail ? () => _openFullScreenImage(images[index]) : _navigateToDetail,
+                child: CachedNetworkImage(
+                  imageUrl: images[index],
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  placeholder: (context, url) => Container(color: Colors.grey[200]),
+                  errorWidget: (context, url, error) => const Icon(Icons.error),
+                ),
+              );
+            },
+          ),
+        ),
+        // Nokta Göstergesi (Dots Indicator)
+        if (images.length > 1)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(images.length, (index) {
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: _currentImageIndex == index ? 8 : 6,
+                  height: _currentImageIndex == index ? 8 : 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    // RENK DEĞİŞİKLİĞİ: MAVİ -> YEŞİL
+                    color: _currentImageIndex == index 
+                        ? const Color(0xFF2E7D32) // Temanın yeşili
+                        : Colors.grey.withOpacity(0.5),
+                  ),
+                );
+              }),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildRatingStars(double rating) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(5, (index) {
+          IconData icon = Icons.star_border_rounded;
+          if (index < rating) {
+            icon = Icons.star_rounded;
+          }
+          return Icon(icon, color: Colors.amber, size: 20);
+        }),
+      ),
+    );
+  }
+
   void _showMoreOptions() {
     final theme = Theme.of(context);
     showModalBottomSheet(
@@ -199,9 +307,7 @@ class _PostTileState extends State<PostTile> {
                     _isFollowing 
                       ? '@${widget.handle.replaceAll('@', '')} takipten çık'
                       : '@${widget.handle.replaceAll('@', '')} takip et',
-                    style: TextStyle(
-                      color: _isFollowing ? Colors.red : null,
-                    ),
+                    style: TextStyle(color: _isFollowing ? Colors.red : null),
                   ),
                   onTap: () async {
                     Navigator.pop(context);
@@ -256,9 +362,7 @@ class _PostTileState extends State<PostTile> {
                     if (confirm == true) {
                       try {
                         await FirebaseFirestore.instance.collection('posts').doc(widget.postId).delete();
-                        if (widget.onDelete != null) {
-                          widget.onDelete!();
-                        }
+                        if (widget.onDelete != null) widget.onDelete!();
                       } catch (e) {
                         debugPrint('Silme hatası: $e');
                       }
@@ -272,40 +376,32 @@ class _PostTileState extends State<PostTile> {
     );
   }
 
-  Widget _buildRatingStars(double rating) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (index) {
-        IconData icon = Icons.star_border_rounded;
-        if (index < rating) {
-          icon = Icons.star_rounded;
-        }
-        return Icon(icon, color: Colors.amber, size: 18);
-      }),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    
+    // Görselleri Birleştir (Geriye dönük uyumluluk + Yeni Liste)
+    final List<String> displayImages = [];
+    if (widget.postImages != null && widget.postImages!.isNotEmpty) {
+      displayImages.addAll(widget.postImages!);
+    } else if (widget.postImage != null && widget.postImage!.isNotEmpty) {
+      displayImages.add(widget.postImage!);
+    }
 
     return Container(
       decoration: BoxDecoration(
         color: cs.surface,
-        border: Border(
-          bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.2), width: 1),
-        ),
+        border: Border(bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.2), width: 1)),
       ),
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. HEADER (Avatar, İsim, Zaman)
+          // 1. HEADER (Profil, İsim, Tarih)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 GestureDetector(
                   onTap: _navigateToProfile,
@@ -313,7 +409,7 @@ class _PostTileState extends State<PostTile> {
                     radius: 20,
                     backgroundColor: cs.surfaceContainerHighest,
                     backgroundImage: widget.photoURL.isNotEmpty
-                        ? CachedNetworkImageProvider(widget.photoURL, maxWidth: 150)
+                        ? CachedNetworkImageProvider(widget.photoURL)
                         : null,
                     child: widget.photoURL.isEmpty
                         ? Icon(Icons.person, color: cs.onSurfaceVariant)
@@ -327,31 +423,15 @@ class _PostTileState extends State<PostTile> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                widget.displayName,
-                                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
+                        Text(
+                          widget.displayName,
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                widget.handle,
-                                style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Text(
-                              ' • ${widget.timeLabel}',
-                              style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                            ),
-                          ],
+                        Text(
+                          '${widget.handle} • ${widget.timeLabel}',
+                          style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
@@ -360,64 +440,29 @@ class _PostTileState extends State<PostTile> {
                 IconButton(
                   icon: Icon(Icons.more_horiz, color: cs.onSurfaceVariant),
                   onPressed: _showMoreOptions,
-                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
           ),
 
-          // İNCELEME BAŞLIĞI VE PUAN
-          if (widget.reviewTitle != null || widget.rating != null)
+          // 2. FOTOĞRAF ALANI (EN YUKARIDA)
+          if (displayImages.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: _buildImageCarousel(displayImages),
+            ),
+
+          // 3. İNCELEME BAŞLIĞI (Varsa)
+          if (widget.reviewTitle != null && widget.reviewTitle!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (widget.reviewTitle != null && widget.reviewTitle!.isNotEmpty)
-                    Text(
-                      widget.reviewTitle!,
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                  if (widget.rating != null) ...[
-                    const SizedBox(height: 4),
-                    _buildRatingStars(widget.rating!),
-                  ]
-                ],
+              child: Text(
+                widget.reviewTitle!,
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
 
-          // 2. GÖRSEL ALAN
-          if (widget.postImage != null && widget.postImage!.isNotEmpty)
-            GestureDetector(
-              // DÜZELTME: Eğer detay sayfasındaysak resmi büyüt, değilse detaya git.
-              onTap: widget.isDetail ? _openFullScreenImage : _navigateToDetail, 
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    constraints: const BoxConstraints(maxHeight: 500),
-                    width: double.infinity,
-                    color: Colors.black12,
-                    child: CachedNetworkImage(
-                      imageUrl: widget.postImage!,
-                      memCacheWidth: 700, 
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) => const SizedBox(
-                        height: 250,
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                      errorWidget: (context, url, error) => const SizedBox(
-                        height: 150,
-                        child: Center(child: Icon(Icons.broken_image, size: 50, color: Colors.grey)),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // 3. TEXT CONTENT
+          // 4. METİN İÇERİĞİ (Spoiler Korumalı)
           if (widget.text.isNotEmpty)
             GestureDetector(
               onTap: () {
@@ -428,7 +473,7 @@ class _PostTileState extends State<PostTile> {
                 }
               },
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: widget.isSpoiler && !_revealSpoiler
                     ? Container(
                         width: double.infinity,
@@ -458,7 +503,11 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-           // 4. MOVIE CARD
+          // 5. YILDIZLAR (Filmin Hemen Üstünde)
+          if (widget.rating != null)
+            _buildRatingStars(widget.rating!),
+
+          // 6. FİLM KARTI (Varsa)
           if (widget.movieTitle != null && widget.moviePoster != null)
             GestureDetector(
               onTap: () {
@@ -476,11 +525,11 @@ class _PostTileState extends State<PostTile> {
                 }
               },
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Container(
-                  height: 100,
+                  height: 80,
                   decoration: BoxDecoration(
-                    color: cs.surfaceContainerHighest.withOpacity(0.5),
+                    color: cs.surfaceContainerHighest.withOpacity(0.4),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: cs.outlineVariant.withOpacity(0.2)),
                   ),
@@ -488,15 +537,11 @@ class _PostTileState extends State<PostTile> {
                     children: [
                       ClipRRect(
                         borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)),
-                        child: SizedBox(
-                          width: 70,
-                          height: double.infinity,
-                          child: PosterImage(
-                            posterUrl: widget.moviePoster,
-                            title: widget.movieTitle,
-                            fit: BoxFit.cover,
-                            cacheWidth: 200,
-                          ),
+                        child: PosterImage(
+                          posterUrl: widget.moviePoster,
+                          title: widget.movieTitle,
+                          fit: BoxFit.cover,
+                          width: 54,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -508,33 +553,31 @@ class _PostTileState extends State<PostTile> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: cs.primary.withOpacity(0.1),
+                                color: const Color(0xFF2E7D32).withOpacity(0.1), // Yeşil tema
                                 borderRadius: BorderRadius.circular(4),
                               ),
-                              child: Text(
+                              child: const Text(
                                 'İZLİYOR',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                    color: cs.primary, 
-                                    fontWeight: FontWeight.bold, 
-                                    fontSize: 10
+                                style: TextStyle(
+                                  color: Color(0xFF2E7D32), 
+                                  fontWeight: FontWeight.bold, 
+                                  fontSize: 10
                                 ),
                               ),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               widget.movieTitle!,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold
-                              ),
-                              maxLines: 2,
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
                       ),
                       const Padding(
-                        padding: EdgeInsets.only(right: 16), 
-                        child: Icon(Icons.chevron_right, color: Colors.grey)
+                        padding: EdgeInsets.only(right: 16),
+                        child: Icon(Icons.chevron_right, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -542,28 +585,24 @@ class _PostTileState extends State<PostTile> {
               ),
             ),
 
-            // ETİKETLER
-            if (widget.tags.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Wrap(
-                  spacing: 8,
-                  children: widget.tags.map((tag) {
-                    return Chip(
-                      label: Text('#$tag'),
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: cs.surfaceContainerHighest.withOpacity(0.5),
-                      labelStyle: TextStyle(color: cs.primary, fontSize: 11),
-                      padding: EdgeInsets.zero,
-                      side: BorderSide.none,
-                    );
-                  }).toList(),
-                ),
+          // 7. ETİKETLER
+          if (widget.tags.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Wrap(
+                spacing: 8,
+                children: widget.tags.map((tag) {
+                  return Text(
+                    '#$tag',
+                    style: const TextStyle(color: Color(0xFF2E7D32), fontSize: 13, fontWeight: FontWeight.w500),
+                  );
+                }).toList(),
               ),
+            ),
 
-            // 5. ACTION BAR
-           Padding(
-            padding: const EdgeInsets.only(top: 4, left: 16, right: 16),
+          // 8. ALT AKSİYONLAR (Like, Comment, Share)
+          Padding(
+            padding: const EdgeInsets.only(top: 8, left: 16, right: 16),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -585,20 +624,18 @@ class _PostTileState extends State<PostTile> {
                   ],
                 ),
                 IconButton(
-                  icon: Icon(Icons.share_outlined, size: 20, color: cs.onSurfaceVariant),
+                  icon: Icon(Icons.share_outlined, size: 22, color: cs.onSurfaceVariant),
                   onPressed: () {
                     final String appLink = 'cinematch://app/post?id=${widget.postId}';
                     final String content = widget.text.isNotEmpty 
                         ? widget.text 
                         : (widget.movieTitle ?? 'Bir gönderi');
-                    final String shareText = 
-                        '${widget.displayName} (@${widget.handle.replaceAll('@', '')}) CineMatch\'te paylaştı:\n\n'
-                        '$content\n\n'
-                        '${widget.movieTitle != null ? "🎬 İzliyor: ${widget.movieTitle}\n" : ""}'
-                        'Uygulamada aç: $appLink';
-                    Share.share(shareText);
+                    Share.share(
+                      '${widget.displayName} (@${widget.handle.replaceAll('@', '')}) paylaştı:\n\n'
+                      '$content\n\n'
+                      'Uygulamada gör: $appLink'
+                    );
                   },
-                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
@@ -609,13 +646,19 @@ class _PostTileState extends State<PostTile> {
   }
 }
 
+// Yardımcı Buton Widget'ı
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final Color color;
   final int count;
   final VoidCallback onTap;
 
-  const _ActionButton({required this.icon, required this.color, required this.count, required this.onTap});
+  const _ActionButton({
+    required this.icon,
+    required this.color,
+    required this.count,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -626,10 +669,13 @@ class _ActionButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Row(
           children: [
-            Icon(icon, size: 22, color: color), 
+            Icon(icon, size: 24, color: color),
             if (count > 0) ...[
               const SizedBox(width: 6),
-              Text('$count', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w600)),
+              Text(
+                '$count',
+                style: TextStyle(color: color, fontWeight: FontWeight.bold),
+              ),
             ],
           ],
         ),

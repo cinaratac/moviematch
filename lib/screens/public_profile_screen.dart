@@ -628,7 +628,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                         icon: Container(
                           padding: const EdgeInsets.all(8),
                          
-                          child: const Icon(Icons.arrow_back, color: Colors.white),
+                          child: Icon(Icons.arrow_back, color: isDark?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),),
                         ),
                         onPressed: () => Navigator.pop(context),
                       ),
@@ -637,7 +637,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                           icon: Container(
                             padding: const EdgeInsets.all(8),
                            
-                            child: const Icon(Icons.more_vert, color: Colors.white),
+                            child: Icon(Icons.more_vert, color:isDark?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),),
                           ),
                           onSelected: (value) async {
                             final myUid = FirebaseAuth.instance.currentUser?.uid;
@@ -718,7 +718,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                                 style: Theme.of(context)
                                                     .textTheme
                                                     .bodySmall
-                                                    ?.copyWith(color: Colors.white70),
+                                                    ?.copyWith(color: Colors.white70), 
                                                 overflow: TextOverflow.ellipsis),
                                           
                                           // LB Kullanıcı Adı
