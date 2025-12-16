@@ -1,11 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:fluttergirdi/shell.dart';
-
-import 'package:fluttergirdi/services/letterboxd_service.dart'; // Eklendi
+import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/services/match_service.dart';
-import 'package:flutter/services.dart'; 
 
 class OnboardingLetterboxd extends StatefulWidget {
   const OnboardingLetterboxd({super.key});
@@ -16,7 +15,8 @@ class OnboardingLetterboxd extends StatefulWidget {
 
 class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
   final _formKey = GlobalKey<FormState>();
-  final _controller = TextEditingController();
+  final _controller = TextEditingController(); // Letterboxd Username
+  
   bool _loading = true;
   bool _saving = false;
 
@@ -24,67 +24,22 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
   final _directorController = TextEditingController();
   final _actorController = TextEditingController();
 
-  // ... (Geri kalan değişkenler ve _genreOptions listesi aynı kalacak) ...
+  // Tema Renkleri
+  final primaryGreen = const Color(0xFF2E7D32);
+  final bgGradientStart = const Color(0xFFE8F5E9);
+  final bgGradientEnd = Colors.white;
+
   final List<String> _genreOptions = const [
-    'Aksiyon',
-    'Aksiyon-Gerilim',
-    'Casus',
-    'Dövüş',
-    'Felaket',
-    'Macera',
-    "Klasikler",
-    'Bilimkurgu',
-    'Kıyamet Sonrası',
-    'Steampunk',
-    'Dram',
-    'Melodram',
-    'Politik Dram',
-    'Tarihi Dram',
-    'Trajedi',
-    'Gerilim',
-    'Psikolojik Gerilim',
-    'Politik Gerilim',
-    'Erotik Gerilim',
-    'Komedi',
-    'Aksiyon Komedisi',
-    'Kara Mizah',
-    'Komedi-Drama',
-    'Romantik Komedi',
-    'Parodi',
-    'Korku',
-    'Gotik',
-    'Doğaüstü',
-    'Vampir',
-    'Zombi',
-    'Slasher',
-    'Fantastik',
-    'Mitolojik',
-    'K-drama',
-    'Süper Kahraman',
-    'Romantik',
-    'Romantik Dram',
-    'Romantik Gerilim',
-    'Savaş',
-    'Tarih',
-    'Biyografi',
-    'Müzikal',
-    'Belgesel',
-    'Doğa',
-    'Gezi',
-    'Spor',
-    'Suç',
-    'Polisiye',
-    'Mafya',
-    'Gizem',
-    'Kara Film (Noir)',
-    'Western',
-    'Fantastik Komedi',
-    'Aile',
-    'Çocuk',
-    'Gençlik',
-    'LGBTQ+',
-    'Animasyon',
-    'Anime',
+    'Aksiyon', 'Aksiyon-Gerilim', 'Casus', 'Dövüş', 'Felaket', 'Macera', "Klasikler",
+    'Bilimkurgu', 'Kıyamet Sonrası', 'Steampunk', 'Dram', 'Melodram', 'Politik Dram',
+    'Tarihi Dram', 'Trajedi', 'Gerilim', 'Psikolojik Gerilim', 'Politik Gerilim',
+    'Erotik Gerilim', 'Komedi', 'Aksiyon Komedisi', 'Kara Mizah', 'Komedi-Drama',
+    'Romantik Komedi', 'Parodi', 'Korku', 'Gotik', 'Doğaüstü', 'Vampir', 'Zombi',
+    'Slasher', 'Fantastik', 'Mitolojik', 'K-drama', 'Süper Kahraman', 'Romantik',
+    'Romantik Dram', 'Romantik Gerilim', 'Savaş', 'Tarih', 'Biyografi', 'Müzikal',
+    'Belgesel', 'Doğa', 'Gezi', 'Spor', 'Suç', 'Polisiye', 'Mafya', 'Gizem',
+    'Kara Film (Noir)', 'Western', 'Fantastik Komedi', 'Aile', 'Çocuk', 'Gençlik',
+    'LGBTQ+', 'Animasyon', 'Anime',
   ];
   final Set<String> _selectedGenres = {};
   final List<String> _favDirectors = [];
@@ -114,7 +69,7 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     if (!doc.exists) {
       doc = await ref.get(const GetOptions(source: Source.server));
     }
-    // Eğer letterboxdUsername varsa, kullanıcı zaten onboarding'i tamamlamış demektir.
+    
     final exists =
         doc.exists &&
         (doc.data()?['letterboxdUsername'] ?? '').toString().isNotEmpty;
@@ -146,58 +101,70 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     return v;
   }
 
-  // ... (_buildStepBar, _buildStepContent vs. aynı kalacak) ...
+  // --- İLERLEME ÇUBUĞU ---
   Widget _buildStepBar(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Row(
-      children: List.generate(_totalSteps, (i) {
-        final bool done = i < _step;
-        final bool current = i == _step;
-        final Color color = done
-            ? cs.primary
-            : current
-            ? cs.secondary
-            : cs.outlineVariant;
-        return Expanded(
-          child: GestureDetector(
-            onTap: () {
-              if (i <= _maxStepReached || i <= _step) {
-                setState(() => _step = i);
-              }
-            },
-            child: Container(
-              height: 6,
-              margin: EdgeInsets.only(right: i == _totalSteps - 1 ? 0 : 6),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(999),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: List.generate(_totalSteps, (i) {
+          final bool done = i < _step;
+          final bool current = i == _step;
+          // Renk mantığı
+          final Color color = done
+              ? primaryGreen // Tamamlananlar yeşil
+              : current
+                  ? const Color(0xFF81C784) // Şu anki adım açık yeşil
+                  : Colors.grey.withOpacity(0.3); // Kalanlar gri
+          
+          return Expanded(
+            child: GestureDetector(
+              onTap: () {
+                if (i <= _maxStepReached || i <= _step) {
+                  setState(() => _step = i);
+                }
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                height: 8,
+                margin: EdgeInsets.symmetric(horizontal: i == _totalSteps - 1 ? 0 : 4),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: current ? [
+                    BoxShadow(color: primaryGreen.withOpacity(0.4), blurRadius: 4, offset: const Offset(0,2))
+                  ] : null,
+                ),
               ),
             ),
-          ),
-        );
-      }),
+          );
+        }),
+      ),
     );
   }
 
+  // --- ADIM İÇERİKLERİ ---
   Widget _buildStepContent(BuildContext context) {
     switch (_step) {
       case 0:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Letterboxd kullanıcı adını gir. Kaydettikten sonra film beğenilerin çekilecek ve eşleşme sistemi için profilin oluşturulacak.',
+             _buildHeaderTitle('Letterboxd Bağlantısı'),
+            const SizedBox(height: 8),
+            Text(
+              'Letterboxd kullanıcı adını girersen, izlediğin ve beğendiğin filmleri otomatik çekip senin için harika eşleşmeler bulabiliriz.',
+              style: TextStyle(color: Colors.grey[700], fontSize: 15),
             ),
-            const SizedBox(height: 16),
-            TextFormField(
+            const SizedBox(height: 24),
+            _buildStyledTextField(
               controller: _controller,
-              decoration: const InputDecoration(
-                labelText: 'Letterboxd adı (İsteğe bağlı)',
-                border: OutlineInputBorder(),
-              ),
-              textInputAction: TextInputAction.done,
+              hintText: 'Letterboxd Kullanıcı Adı (İsteğe bağlı)',
+              icon: Icons.alternate_email,
               validator: _validator,
-              onFieldSubmitted: (_) {},
             ),
           ],
         );
@@ -205,22 +172,18 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Yaşın',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
+            _buildHeaderTitle('Yaşın Kaç?'),
             const SizedBox(height: 8),
-            TextFormField(
+            Text(
+              'Sana uygun yaş grubundaki kişilerle eşleşmen için gerekli.',
+              style: TextStyle(color: Colors.grey[700], fontSize: 15),
+            ),
+            const SizedBox(height: 24),
+            _buildStyledTextField(
               controller: _ageController,
-              decoration: const InputDecoration(
-                labelText: 'Yaş',
-                border: OutlineInputBorder(),
-              ),
+              hintText: 'Yaş',
+              icon: Icons.cake_outlined,
               keyboardType: TextInputType.number,
-              textInputAction: TextInputAction.done,
               inputFormatters: [
                 FilteringTextInputFormatter.digitsOnly,
                 LengthLimitingTextInputFormatter(3),
@@ -240,33 +203,53 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Sevdiğin türler',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
+            _buildHeaderTitle('Sevdiğin Türler'),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _genreOptions.map((g) {
-                final sel = _selectedGenres.contains(g);
-                return FilterChip(
-                  label: Text(g),
-                  selected: sel,
-                  onSelected: (v) {
-                    setState(() {
-                      if (v) {
-                        _selectedGenres.add(g);
-                      } else {
-                        _selectedGenres.remove(g);
-                      }
-                    });
-                  },
-                );
-              }).toList(),
+            Text(
+              'Hangi tür filmleri izlemekten keyif alırsın? (Birden fazla seçebilirsin)',
+              style: TextStyle(color: Colors.grey[700], fontSize: 15),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _genreOptions.map((g) {
+                  final sel = _selectedGenres.contains(g);
+                  return FilterChip(
+                    label: Text(g),
+                    labelStyle: TextStyle(
+                      color: sel ? Colors.white : Colors.black87,
+                      fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    selected: sel,
+                    selectedColor: primaryGreen,
+                    backgroundColor: Colors.grey[100],
+                    checkmarkColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(color: sel ? primaryGreen : Colors.transparent),
+                    ),
+                    onSelected: (v) {
+                      setState(() {
+                        if (v) {
+                          _selectedGenres.add(g);
+                        } else {
+                          _selectedGenres.remove(g);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
             ),
           ],
         );
@@ -274,40 +257,24 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Sevdiğin yönetmenler',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
+             _buildHeaderTitle('Favori Yönetmenler'),
             const SizedBox(height: 8),
-            TextField(
+            Text(
+              'Takip ettiğin yönetmenleri ekle.',
+              style: TextStyle(color: Colors.grey[700], fontSize: 15),
+            ),
+            const SizedBox(height: 24),
+            _buildStyledTextField(
               controller: _directorController,
-              decoration: const InputDecoration(
-                hintText: 'Bir yönetmen yaz ve Enter’a bas',
-                border: OutlineInputBorder(),
-              ),
-              textInputAction: TextInputAction.done,
+              hintText: 'Bir yönetmen yaz ve Enter’a bas',
+              icon: Icons.movie_creation_outlined,
               onSubmitted: _addDirector,
+              textInputAction: TextInputAction.send,
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _favDirectors
-                  .map(
-                    (d) => InputChip(
-                      label: Text(d),
-                      onDeleted: () {
-                        setState(() {
-                          _favDirectors.remove(d);
-                        });
-                      },
-                    ),
-                  )
-                  .toList(),
-            ),
+            const SizedBox(height: 16),
+            _buildChipList(_favDirectors, (item) {
+              setState(() => _favDirectors.remove(item));
+            }),
           ],
         );
       case 4:
@@ -315,43 +282,120 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Sevdiğin oyuncular',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
+             _buildHeaderTitle('Favori Oyuncular'),
             const SizedBox(height: 8),
-            TextField(
+            Text(
+              'Hayranı olduğun oyuncuları ekle.',
+              style: TextStyle(color: Colors.grey[700], fontSize: 15),
+            ),
+            const SizedBox(height: 24),
+             _buildStyledTextField(
               controller: _actorController,
-              decoration: const InputDecoration(
-                hintText: 'Bir oyuncu yaz ve Enter’a bas',
-                border: OutlineInputBorder(),
-              ),
-              textInputAction: TextInputAction.done,
+              hintText: 'Bir oyuncu yaz ve Enter’a bas',
+              icon: Icons.person_outline,
               onSubmitted: _addActor,
+              textInputAction: TextInputAction.send,
             ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _favActors
-                  .map(
-                    (a) => InputChip(
-                      label: Text(a),
-                      onDeleted: () {
-                        setState(() {
-                          _favActors.remove(a);
-                        });
-                      },
-                    ),
-                  )
-                  .toList(),
-            ),
+            const SizedBox(height: 16),
+             _buildChipList(_favActors, (item) {
+              setState(() => _favActors.remove(item));
+            }),
           ],
         );
     }
+  }
+
+  // Helper Widget: Chip Listesi
+  Widget _buildChipList(List<String> items, Function(String) onDelete) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.withOpacity(0.2)),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: items.map((item) => Chip(
+          label: Text(item, style: const TextStyle(color: Colors.white)),
+          backgroundColor: primaryGreen.withOpacity(0.8),
+          deleteIcon: const Icon(Icons.close, size: 18, color: Colors.white),
+          onDeleted: () => onDelete(item),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide.none),
+        )).toList(),
+      ),
+    );
+  }
+
+  // Helper Widget: Başlık
+  Widget _buildHeaderTitle(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 24,
+        fontWeight: FontWeight.bold,
+        color: primaryGreen,
+        letterSpacing: -0.5,
+      ),
+    );
+  }
+
+  // Helper Widget: Stil Verilmiş Text Field
+  Widget _buildStyledTextField({
+    required TextEditingController controller,
+    required String hintText,
+    required IconData icon,
+    TextInputType keyboardType = TextInputType.text,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+    void Function(String)? onSubmitted,
+    TextInputAction textInputAction = TextInputAction.done,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
+        textInputAction: textInputAction,
+        onFieldSubmitted: onSubmitted,
+        validator: validator,
+        style: const TextStyle(fontSize: 16),
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: Colors.grey[400]),
+          hintText: hintText,
+          hintStyle: TextStyle(color: Colors.grey[400]),
+          contentPadding: const EdgeInsets.symmetric(vertical: 20),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: BorderSide(color: primaryGreen, width: 1.5),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Colors.redAccent, width: 1),
+          ),
+          filled: true,
+          fillColor: Colors.white,
+        ),
+      ),
+    );
   }
 
   void _addDirector(String v) {
@@ -370,29 +414,36 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     setState(() {});
   }
 
-  // !!! DÜZELTİLDİ: Artık kayıt işlemi bloklayıcı ve garantici !!!
   Future<void> _saveAndBuild() async {
     if (!_formKey.currentState!.validate()) return;
     
     setState(() => _saving = true);
     
-    // Yükleme ekranını manuel göster (Dialog olarak, kullanıcı etkileşimini engellemek için)
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const PopScope(
+      builder: (ctx) => PopScope(
         canPop: false,
         child: Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
-            padding: EdgeInsets.all(20.0),
+            padding: const EdgeInsets.all(24.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 20),
-                Text("Profilin oluşturuluyor...", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(height: 8),
-                Text("Letterboxd verilerin çekiliyor ve eşleşmeler ayarlanıyor. Bu işlem 1-2 dakika sürebilir, lütfen kapatmayın.", textAlign: TextAlign.center, style: TextStyle(fontSize: 12)),
+                CircularProgressIndicator(color: primaryGreen),
+                const SizedBox(height: 20),
+                Text(
+                  "Profilin oluşturuluyor...",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.bold, color: primaryGreen, fontSize: 18),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Letterboxd verilerin çekiliyor ve eşleşmeler ayarlanıyor. Bu işlem 1-2 dakika sürebilir, lütfen kapatmayın.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
               ],
             ),
           ),
@@ -408,13 +459,10 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
 
       final ageVal = _parseAge(_ageController.text);
 
-      // 1. ÖNCE Letterboxd Senkronizasyonunu Dene (Eğer kullanıcı adı girilmişse)
       if (lbUsernameRaw.isNotEmpty) {
         await LetterboxdService.fullSyncOnboarding(uid: uid, lbUsername: lbUsernameRaw);
       }
 
-      // 2. Senkronizasyon başarılıysa (veya kullanıcı adı yoksa) veritabanına kullanıcı verilerini yaz
-      // Bu adım başarısız olursa yukarıdaki veriler Firestore'da olsa bile kullanıcı uygulamaya giremez (ki bu kabul edilebilir).
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'letterboxdUsername': lbUsernameRaw,
         'letterboxdUsername_lc': lbUsernameRaw.toLowerCase(),
@@ -427,7 +475,6 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         'syncReason': 'onboarding',
       }, SetOptions(merge: true));
 
-      // 3. Eşleşme algoritmasını tetikle (Eğer 5 yıldız yoksa bile diğer kriterler için)
       try {
         await MatchService.instance.autoCreateMatches(
             uid,
@@ -438,10 +485,8 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
       } catch (_) {}
 
       if (!mounted) return;
-      // Dialog'u kapat
       Navigator.of(context).pop();
       
-      // Ana sayfaya git
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeShell()),
         (_) => false,
@@ -449,24 +494,22 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
 
     } catch (e) {
       if (!mounted) return;
-      // Dialog'u kapat
       Navigator.of(context).pop();
 
       String msg = 'Bir hata oluştu: $e';
       if (e.toString().contains('Letterboxd kullanıcısı bulunamadı')) {
-        msg = 'Girdiğin Letterboxd kullanıcı adı bulunamadı veya profili gizli. Lütfen kontrol et.';
+        msg = 'Girdiğin Letterboxd kullanıcı adı bulunamadı. Lütfen kontrol et.';
       } else if (e.toString().contains('unavailable')) {
-        msg = 'Sunucuya erişilemiyor. Lütfen internet bağlantını kontrol et.';
+        msg = 'Sunucuya erişilemiyor. İnternet bağlantını kontrol et.';
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(msg),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
         ),
       );
-      // Hata durumunda _saving false olur ve kullanıcı ekranda kalır, düzeltme yapabilir.
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -484,81 +527,143 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [bgGradientStart, bgGradientEnd],
+            ),
+          ),
+          child: Center(child: CircularProgressIndicator(color: primaryGreen)),
+        ),
+      );
     }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Profilini Oluştur!')),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-            return SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 24 + bottomInset),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildStepBar(context),
-                      const SizedBox(height: 20),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
-                        child: _buildStepContent(context),
-                      ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: (_step == 0 || _saving)
-                                  ? null
-                                  : () => setState(() => _step = _step - 1),
-                              icon: const Icon(Icons.chevron_left),
-                              label: const Text('Geri'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: _saving
-                                  ? null
-                                  : () async {
-                                      if (!_formKey.currentState!.validate()) {
-                                        return; 
-                                      }
 
-                                      if (_step < _totalSteps - 1) {
-                                        setState(() {
-                                          _step += 1;
-                                          if (_maxStepReached < _step) {
-                                            _maxStepReached = _step;
-                                          }
-                                        });
-                                      } else {
-                                        await _saveAndBuild();
-                                      }
-                                    },
-                              icon: _saving 
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                : Icon(_step == _totalSteps - 1 ? Icons.check : Icons.chevron_right),
-                              label: Text(
-                                _step == _totalSteps - 1
-                                    ? 'Kaydet ve Başla'
-                                    : 'İleri',
+    return Scaffold(
+      // AppBar yerine Container gradient
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [bgGradientStart, bgGradientEnd],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset),
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight - 50),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Üst İlerleme Çubuğu
+                        _buildStepBar(context),
+                        
+                        const SizedBox(height: 32),
+                        
+                        // İçerik (Animasyonlu geçiş)
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          transitionBuilder: (Widget child, Animation<double> animation) {
+                            return FadeTransition(opacity: animation, child: SlideTransition(
+                              position: Tween<Offset>(begin: const Offset(0.05, 0), end: Offset.zero).animate(animation),
+                              child: child,
+                            ));
+                          },
+                          child: KeyedSubtree(
+                            key: ValueKey<int>(_step),
+                            child: _buildStepContent(context),
+                          ),
+                        ),
+                        
+                        const SizedBox(height: 40),
+                        
+                        // Alt Butonlar
+                        Row(
+                          children: [
+                            // GERİ BUTONU
+                            Expanded(
+                              child: SizedBox(
+                                height: 50,
+                                child: OutlinedButton(
+                                  onPressed: (_step == 0 || _saving)
+                                      ? null
+                                      : () => setState(() => _step = _step - 1),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: primaryGreen,
+                                    side: BorderSide(color: primaryGreen.withOpacity(0.5)),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  child: const Text('Geri', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
+                            const SizedBox(width: 16),
+                            // İLERİ / KAYDET BUTONU
+                            Expanded(
+                              flex: 2,
+                              child: SizedBox(
+                                height: 50,
+                                child: ElevatedButton(
+                                  onPressed: _saving
+                                      ? null
+                                      : () async {
+                                          if (!_formKey.currentState!.validate()) {
+                                            return; 
+                                          }
+
+                                          if (_step < _totalSteps - 1) {
+                                            setState(() {
+                                              _step += 1;
+                                              if (_maxStepReached < _step) {
+                                                _maxStepReached = _step;
+                                              }
+                                            });
+                                          } else {
+                                            await _saveAndBuild();
+                                          }
+                                        },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: primaryGreen,
+                                    foregroundColor: Colors.white,
+                                    elevation: 4,
+                                    shadowColor: primaryGreen.withOpacity(0.4),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                  child: _saving 
+                                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                    : Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            _step == _totalSteps - 1 ? 'Tamamla' : 'Devam Et',
+                                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Icon(_step == _totalSteps - 1 ? Icons.check_circle : Icons.arrow_forward),
+                                        ],
+                                      ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
