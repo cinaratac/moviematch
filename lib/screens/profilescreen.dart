@@ -6,7 +6,6 @@ import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/screens/full_shelf_screen.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:ui' as ui;
 
 import 'package:fluttergirdi/screens/edit_profile_page.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
@@ -27,8 +26,6 @@ import 'package:fluttergirdi/services/gamification_service.dart';
 
 // --- MODEL SINIFLARI ---
 
-/// Diğer sayfaların (Chat, Search vb.) erişebilmesi için gerekli önbellek sınıfı.
-/// Veri sızıntısını önlemek için sayfa kapandığında temizlenir.
 class UserShelfCache {
   static List<Map<String, String>> favorites = [];
   static List<Map<String, String>> fiveStar = [];
@@ -51,7 +48,6 @@ class UserShelfCache {
     }).toList();
   }
   
-  /// Verileri temizler
   static void clear() {
     favorites = [];
     fiveStar = [];
@@ -60,7 +56,6 @@ class UserShelfCache {
   }
 }
 
-// Aktivite verisi için model
 class _ActivityItemData {
   final String id; 
   final String text;
@@ -94,19 +89,28 @@ class _CountPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Açık temada siyah, koyu temada beyaz yazı
+    final textColor = isDark ? Colors.white : Colors.black87;
+    // Açık temada gri çerçeve, koyu temada beyazımsı çerçeve
+    final borderColor = isDark ? Colors.white24 : Colors.black12;
+    // Açık temada çok hafif siyah dolgu, koyu temada çok hafif beyaz dolgu
+    final bgColor = isDark ? Colors.white10 : Colors.black.withOpacity(0.05);
+
     final textStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
       fontWeight: FontWeight.w600,
-      color: Colors.white,
+      color: textColor,
     );
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white10,
+          color: bgColor,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white24, width: 1),
+          border: Border.all(color: borderColor, width: 1),
         ),
         child: Text('$label: $value', style: textStyle),
       ),
@@ -158,17 +162,24 @@ Widget _profileHeaderSection({
       children: [
         GestureDetector(
           onTap: () => showEnlargedImage(user.photoURL),
-          child: CircleAvatar(
-            radius: 36,
-            backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
-                ? NetworkImage(user.photoURL!)
-                : null,
-            child: (user.photoURL == null || user.photoURL!.isEmpty)
-                ? Text(
-                    shownName(user).isNotEmpty ? shownName(user)[0].toUpperCase() : '?',
-                    style: const TextStyle(fontSize: 24),
-                  )
-                : null,
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF2E7D32), width: 2), // Yeşil çerçeve
+            ),
+            child: CircleAvatar(
+              radius: 36,
+              backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
+                  ? NetworkImage(user.photoURL!)
+                  : null,
+              child: (user.photoURL == null || user.photoURL!.isEmpty)
+                  ? Text(
+                      shownName(user).isNotEmpty ? shownName(user)[0].toUpperCase() : '?',
+                      style: const TextStyle(fontSize: 24),
+                    )
+                  : null,
+            ),
           ),
         ),
         const SizedBox(width: 16),
@@ -179,8 +190,9 @@ Widget _profileHeaderSection({
               Text(
                 shownName(user),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.white,
+                  color: Colors.white, // Blur üstünde olduğu için beyaz
                   fontWeight: FontWeight.w600,
+                  shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 4)],
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -225,7 +237,7 @@ Widget _profileHeaderSection({
               
               const SizedBox(height: 6),
               (followers == null || following == null)
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -248,7 +260,10 @@ Widget _profileHeaderSection({
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     'Letterboxd: @$lbUsername',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.white70,
+                      shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 2)]
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -276,7 +291,6 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<List<LetterboxdFilm>>? _futureFiveStar;
   Future<List<LetterboxdFilm>>? _futureDisliked;
   
-  // Set to avoid duplicate requests during same session
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
 
   int? _followersCount;
@@ -287,7 +301,6 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
-    // Cache'i temizleyerek başla (Güvenlik)
     UserShelfCache.clear();
     _loadPrefs();
     _bindLbFromFirestore();
@@ -312,7 +325,6 @@ class _ProfilePageState extends State<ProfilePage> {
       final int? currentStoredFollowers = _lastUserData?['followersCount'];
       final int? currentStoredFollowing = _lastUserData?['followingCount'];
 
-      // Sadece değerler değişmişse Firestore'a yaz (Optimization)
       if (f1 != currentStoredFollowers || f2 != currentStoredFollowing) {
         await FirebaseFirestore.instance.collection('users').doc(uid).update({
            'followersCount': f1,
@@ -341,7 +353,6 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       if (_futureFavs != null) {
         final favs = await _futureFavs!;
-        // Hem local cache'i hem de statik cache'i güncelle
         UserShelfCache.setFavorites(favs);
       }
       if (_futureFiveStar != null) {
@@ -385,7 +396,6 @@ class _ProfilePageState extends State<ProfilePage> {
     final fiveStarKeys = _lastUserData?['fiveStarKeys'];
     final hasFirestoreFiveStar = (fiveStarKeys is List && fiveStarKeys.isNotEmpty);
     
-    // Cache dolu mu?
     final hasCacheFavs = UserShelfCache.favorites.isNotEmpty;
     final hasCacheFiveStar = UserShelfCache.fiveStar.isNotEmpty;
 
@@ -438,7 +448,6 @@ class _ProfilePageState extends State<ProfilePage> {
         });
   }
 
-  // Sadece ekranda görünenleri yeniler, veritabanına sync yapmaz.
   Future<void> _refreshFavorites() async {
     if (_lbUsername == null || _lbUsername!.isEmpty) {
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -454,7 +463,6 @@ class _ProfilePageState extends State<ProfilePage> {
       if (_lbUsername == null || _lbUsername!.isEmpty) return;
     }
 
-    // Cache temizliği ve yeniden çekme (Sadece Read)
     final sp = await SharedPreferences.getInstance();
     final key = 'lb_cache_${_lbUsername?.toLowerCase()}';
     await sp.remove(key);
@@ -479,7 +487,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _userSub?.cancel();
     _followSub?.cancel();
     _showGuideNotifier.dispose();
-    // Cache'i temizle ki diğer kullanıcılar görmesin (Güvenlik)
     UserShelfCache.clear();
     super.dispose();
   }
@@ -493,43 +500,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
   }
 
- Widget _blurBackdrop() {
-    const Widget baseBlack = SizedBox.expand(child: ColoredBox(color: Colors.black));
-    if (_futureFavs == null) return baseBlack;
 
-    return FutureBuilder<List<LetterboxdFilm>>(
-      future: _futureFavs,
-      builder: (context, snap) {
-        final list = snap.data ?? const <LetterboxdFilm>[];
-        final hasPoster = list.isNotEmpty && (list.first.posterUrl).isNotEmpty;
-        if (!hasPoster) return baseBlack;
-        final url = list.first.posterUrl;
-        return SizedBox.expand(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              const ColoredBox(color: Colors.black),
-              ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: PosterImage(posterUrl: url, title: list.first.title, fit: BoxFit.cover),
-              ),
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xE6000000), Color(0xCC000000), Color(0x99000000)],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // --- Watchlist Section ---
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     void onReturnFromSearch() {
       setState(() => _watchlistFutureCache.clear());
@@ -565,8 +536,6 @@ class _ProfilePageState extends State<ProfilePage> {
           return const SizedBox(height: 140, child: Center(child: CircularProgressIndicator()));
         }
         final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
-        
-        // Cache'i doldur (Diğer ekranlar için)
         UserShelfCache.setWatchlistFromMaps(films);
         
         return SizedBox(
@@ -656,9 +625,8 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // --- 1. SEKME: FİLMLER ---
-  // RefreshIndicator kaldırıldı, sadece ListView
   Widget _buildSectionHeader(String title, List<String> keys) {
-    
+    final textColor = Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87;
     return Padding(
       padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
       child: Row(
@@ -666,9 +634,9 @@ class _ProfilePageState extends State<ProfilePage> {
         children: [
           Text(
             title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor),
           ),
-          if (keys.isNotEmpty) // Liste boşsa butonu gösterme
+          if (keys.isNotEmpty) 
             GestureDetector(
               onTap: () {
                 Navigator.push(
@@ -681,10 +649,10 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 );
               },
-              child: Text(
+              child: const Text(
                 'Tümü',
                 style: TextStyle(
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Color(0xFF2E7D32), // Temanın yeşili
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),
@@ -694,22 +662,23 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
     );
   }
-   // GÜNCELLENMİŞ VERSİYON
+  
   Widget _buildProfileContentAfterHeader() {
-    // Verileri hazırlayalım
     final favKeys = List<String>.from((_lastUserData?['favoritesKeys'] ?? []).map((e) => e.toString()));
     final fiveStarKeys = List<String>.from((_lastUserData?['fiveStarKeys'] ?? []).map((e) => e.toString()));
     final dislikedKeys = List<String>.from((_lastUserData?['dislikedKeys'] ?? []).map((e) => e.toString()));
     final watchlistKeys = List<String>.from((_lastUserData?['watchlistKeys'] ?? []).map((e) => e.toString()));
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        if (_lbUsername == null) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: const [Icon(Icons.alternate_email), SizedBox(width: 8), Text('Letterboxd bağlı değil')])),
+        if (_lbUsername == null) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: [Icon(Icons.alternate_email, color: textColor), const SizedBox(width: 8), Text('Letterboxd bağlı değil', style: TextStyle(color: textColor))])),
         const SizedBox(height: 12),
         Builder(builder: (context) {
            final bio = (_lastUserData?['bio'] ?? '').toString();
-           if(bio.isNotEmpty) return Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4)));
+           if(bio.isNotEmpty) return Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4, color: textColor)));
            return const SizedBox.shrink();
         }),
         Builder(builder: (context) {
@@ -721,29 +690,26 @@ class _ProfilePageState extends State<ProfilePage> {
 
            Widget cw(String t, List<String> i) {
              if(i.isEmpty) return const SizedBox.shrink();
-             return Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: Theme.of(context).textTheme.titleSmall), const SizedBox(height: 8), Wrap(spacing: 8, runSpacing: 8, children: i.map((e)=>Chip(label: Text(e))).toList())]));
+             return Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor)), const SizedBox(height: 8), Wrap(spacing: 8, runSpacing: 8, children: i.map((e)=>Chip(label: Text(e, style: const TextStyle(fontSize: 12)), backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200], side: BorderSide.none, padding: EdgeInsets.zero)).toList())]));
            }
            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-             if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [const Icon(Icons.cake, size: 18), const SizedBox(width: 6), Text('Yaş: $age')])),
+             if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [Icon(Icons.cake, size: 18, color: textColor), const SizedBox(width: 6), Text('Yaş: $age', style: TextStyle(color: textColor))])),
              cw('Sevdiğin türler', genres), cw('Sevdiğin yönetmenler', dirs), cw('Sevdiğin oyuncular', acts)
            ]);
         }),
         
         const SizedBox(height: 16),
 
-        // --- FAVORİLER ---
+        // --- BÖLÜMLER ---
         _buildSectionHeader('Favori Filmler', favKeys),
-        _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 10), // maxItems'ı düşürebilirsiniz çünkü "Tümü" var
+        _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 10),
 
-        // --- SEVDİKLERİ ---
         _buildSectionHeader('Sevdiği Filmler', fiveStarKeys),
         _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 10),
 
-        // --- SEVMEDİKLERİ ---
         _buildSectionHeader('Sevmediği Filmler', dislikedKeys),
         _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 10),
 
-        // --- WATCHLIST ---
         _buildSectionHeader('Watchlist', watchlistKeys),
         _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
 
@@ -754,11 +720,23 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    // --- TEMA VE RENKLER ---
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryGreen = const Color(0xFF2E7D32);
+    final bgGradientStart = isDark ? const Color(0xFF0D2410) : const Color(0xFFE8F5E9);
+    final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
+
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.userChanges(),
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            body: Container(
+              decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [bgGradientStart, bgGradientEnd])),
+              child: const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
+            ),
+          );
+        }
         final user = snap.data;
         if (user == null) return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
 
@@ -766,72 +744,116 @@ class _ProfilePageState extends State<ProfilePage> {
           length: 3, 
           child: Scaffold(
             extendBodyBehindAppBar: true,
-            body: Stack(
-              children: [
-                NestedScrollView(
-                  headerSliverBuilder: (context, innerBoxIsScrolled) {
-                    return [
-                      SliverAppBar(
-                        floating: true, snap: true, backgroundColor: Colors.black, elevation: 0, scrolledUnderElevation: 0, surfaceTintColor: Colors.transparent, automaticallyImplyLeading: false,
-                        actions: [
-                          IconButton(tooltip: 'Düzenle', icon: const Icon(Icons.edit_outlined), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
-                          // Yenile butonu kaldırıldı.
-                          IconButton(tooltip: 'Ayarlar', icon: const Icon(Icons.settings_outlined), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
-                        ],
-                      ),
-                      SliverToBoxAdapter(
-                        child: Stack(
-                          children: [
-                            SizedBox(height: MediaQuery.of(context).size.height * 0.28, child: _blurBackdrop()),
-                            Column(
-                              children: [
-                                SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
-                                _profileHeaderSection(context: context, user: user, followers: _followersCount, following: _followingCount, lbUsername: _lbUsername, shownName: _shownName),
-                                const SizedBox(height: 28),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                                  child: TabBar(
-                                    isScrollable: false,
-                                    indicator: UnderlineTabIndicator(borderSide: BorderSide(width: 2, color: Theme.of(context).colorScheme.primary)),
-                                    indicatorSize: TabBarIndicatorSize.tab,
-                                    overlayColor: WidgetStateProperty.all(Colors.transparent),
-                                    labelPadding: const EdgeInsets.symmetric(vertical: 6),
-                                    labelStyle: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                                    unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
-                                    labelColor: isDark ? Colors.white : Colors.black,
-                                    
-                                    unselectedLabelColor: isDark ? Colors.white.withOpacity(0.6) : Colors.black.withOpacity(0.6),
-                                    tabs: const [
-                                      Tab(text: 'Filmler'),
-                                      Tab(text: 'Aktiviteler'),
-                                      Tab(text: 'Listeler'), 
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
+            // Gradient Arka Planı
+            body: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [bgGradientStart, bgGradientEnd],
+                  stops: const [0.0, 0.4], 
+                ),
+              ),
+              child: Stack(
+                children: [
+                  NestedScrollView(
+                    headerSliverBuilder: (context, innerBoxIsScrolled) {
+                      return [
+                        SliverAppBar(
+                          floating: true, 
+                          snap: true, 
+                          backgroundColor: Colors.transparent, // Gradient görünsün
+                          elevation: 0, 
+                          scrolledUnderElevation: 0, 
+                          surfaceTintColor: Colors.transparent, 
+                          automaticallyImplyLeading: false,
+                          actions: [
+                            Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              
+                              child: IconButton(tooltip: 'Düzenle', icon: const Icon(Icons.edit_outlined, color: Colors.white), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
+                            ),
+                            Container(
+                              margin: const EdgeInsets.only(right: 12, left: 4),
+                             
+                              child: IconButton(tooltip: 'Ayarlar', icon: const Icon(Icons.settings_outlined, color: Colors.white), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
                             ),
                           ],
                         ),
-                      ),
-                    ];
-                  },
-                  body: TabBarView(
-                    children: [
-                      _buildProfileContentAfterHeader(),
-                      _ActivitiesTab(uid: user.uid),
-                      _ListsTab(uid: user.uid),
-                    ],
+                        SliverToBoxAdapter(
+                          child: Stack(
+                            children: [
+                              // Blur Arka Plan (Yine de tutuyoruz, üst kısım için güzel)
+                              
+                              // İçerik
+                              Column(
+                                children: [
+                                  SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
+                                  _profileHeaderSection(context: context, user: user, followers: _followersCount, following: _followingCount, lbUsername: _lbUsername, shownName: _shownName),
+                                  const SizedBox(height: 35),
+                                  // Tab Bar
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    child: Container(
+                                      height: 40, // Yükseklik sınırlandırıldı
+                                      decoration: BoxDecoration(
+                                        color: isDark ? Colors.black45 : Colors.white.withOpacity(0.5),
+                                        borderRadius: BorderRadius.circular(20), // Daha oval köşeler
+                                      ),
+                                      child: TabBar(
+                                        isScrollable: false,
+                                        indicator: BoxDecoration(
+                                          color: primaryGreen,
+                                          borderRadius: BorderRadius.circular(20),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: primaryGreen.withOpacity(0.4), 
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2)
+                                            )
+                                          ],
+                                        ),
+                                        indicatorSize: TabBarIndicatorSize.tab,
+                                        dividerColor: Colors.transparent,
+                                        labelPadding: EdgeInsets.zero, // İç boşluk sıfırlandı
+                                        labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13), // Yazı boyutu dengelendi
+                                        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                                        labelColor: Colors.white,
+                                        unselectedLabelColor: isDark ? Colors.white60 : Colors.black54,
+                                        overlayColor: WidgetStateProperty.all(Colors.transparent),
+                                        tabs: const [
+                                          Tab(text: 'Filmler', height: 40),
+                                          Tab(text: 'Aktiviteler', height: 40),
+                                          Tab(text: 'Listeler', height: 40), 
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ];
+                    },
+                    body: TabBarView(
+                      children: [
+                        _buildProfileContentAfterHeader(),
+                        _ActivitiesTab(uid: user.uid),
+                        _ListsTab(uid: user.uid),
+                      ],
+                    ),
                   ),
-                ),
-                ValueListenableBuilder<bool>(
-                  valueListenable: _showGuideNotifier,
-                  builder: (context, isVisible, child) {
-                    if (!isVisible) return const SizedBox.shrink();
-                    return GuideCharacterOverlay(message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.", isVisible: isVisible, onClose: () { _showGuideNotifier.value = false; });
-                  },
-                ),
-              ],
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _showGuideNotifier,
+                    builder: (context, isVisible, child) {
+                      if (!isVisible) return const SizedBox.shrink();
+                      return GuideCharacterOverlay(message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.", isVisible: isVisible, onClose: () { _showGuideNotifier.value = false; });
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -876,7 +898,6 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
         final ts = m['createdAt'];
         final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
         final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
-        
         final tmdbId = (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
 
         items.add(_ActivityItemData(
@@ -891,9 +912,7 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
         ));
       }
     } catch (_) {}
-    
     items.sort((a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(a.createdAt?.millisecondsSinceEpoch ?? 0));
-
     if (mounted) {
       setState(() {
         _activities = items;
@@ -909,33 +928,33 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
     return '${diff.inDays}g';
   }
 
-  // RefreshIndicator kaldırıldı.
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)]),
+        Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor, fontWeight: FontWeight.bold))]),
         const SizedBox(height: 10),
         if (_loadingActivities)
           const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
         else if (_activities.isEmpty)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.'))
+          Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)))
         else
           ListView.separated(
             itemCount: _activities.length,
             physics: const NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             padding: EdgeInsets.zero,
-            separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
+            separatorBuilder: (_, __) => const SizedBox(height: 12), // Kartlar arası boşluk
             itemBuilder: (context, i) {
               final a = _activities[i];
               final when = a.createdAt;
               String timeLabel = '';
-              if (when != null) {
-                timeLabel = _timeAgo(when);
-              }
+              if (when != null) timeLabel = _timeAgo(when);
               return _ActivityWidget(item: a, timeLabel: timeLabel);
             },
           ),
@@ -951,22 +970,23 @@ class _ActivityWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-   
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PostDetailScreen(postId: item.id),
-          ),
-        );
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: item.id)));
       },
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color.fromARGB(3, 255, 255, 255), width: 1)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -990,18 +1010,18 @@ class _ActivityWidget extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Expanded(child: Text(FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700))),
+                      Expanded(child: Text(FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: textColor))),
                       const SizedBox(width: 8),
-                      Text(' Paylaştı', style: Theme.of(context).textTheme.labelSmall),
-                      if (timeLabel.isNotEmpty) ...[const SizedBox(width: 6), Text(timeLabel, style: Theme.of(context).textTheme.labelSmall)],
+                      Text('Paylaştı', style: TextStyle(fontSize: 12, color: subTextColor)),
+                      if (timeLabel.isNotEmpty) ...[const SizedBox(width: 6), Text('• $timeLabel', style: TextStyle(fontSize: 12, color: subTextColor))],
                     ],
                   ),
-                  if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 4, overflow: TextOverflow.ellipsis)),
+                  if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: textColor))),
                   if (item.title.isNotEmpty && item.posterUrl.isEmpty && item.tmdbId == null)
-                    Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [const Icon(Icons.local_movies, size: 16), const SizedBox(width: 6), Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall))])),
+                    Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [Icon(Icons.local_movies, size: 16, color: subTextColor), const SizedBox(width: 6), Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: subTextColor, fontStyle: FontStyle.italic)))])),
                   Padding(
-                    padding: const EdgeInsets.only(top: 6.0),
-                    child: Row(children: [const Icon(Icons.favorite_border, size: 16), const SizedBox(width: 4), Text('${item.likeCount}'), const SizedBox(width: 12), const Icon(Icons.mode_comment_outlined, size: 16), const SizedBox(width: 4), Text('${item.replyCount}'), const SizedBox(width: 12), const Icon(Icons.repeat, size: 16)]),
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Row(children: [Icon(Icons.favorite_border, size: 16, color: subTextColor), const SizedBox(width: 4), Text('${item.likeCount}', style: TextStyle(fontSize: 12, color: subTextColor)), const SizedBox(width: 16), Icon(Icons.mode_comment_outlined, size: 16, color: subTextColor), const SizedBox(width: 4), Text('${item.replyCount}', style: TextStyle(fontSize: 12, color: subTextColor)), const SizedBox(width: 16), Icon(Icons.repeat, size: 16, color: subTextColor)]),
                   ),
                 ],
               ),
@@ -1031,8 +1051,8 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
     super.build(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if(uid == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // RefreshIndicator kaldırıldı
     return StreamBuilder<List<CustomList>>(
       stream: CustomListService.instance.getUserLists(uid),
       builder: (context, snapshot) {
@@ -1045,7 +1065,7 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
              children: [
                _CreateListTile(onTap: () => _showCreateListDialog(context)),
                const SizedBox(height: 20),
-               const Center(child: Text("Henüz liste oluşturmadın.")),
+               Center(child: Text("Henüz liste oluşturmadın.", style: TextStyle(color: isDark ? Colors.white70 : Colors.black54))),
              ],
            );
          }
@@ -1099,7 +1119,7 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
                   await CustomListService.instance.createList(title, descCtrl.text.trim(), isPublic: isPublic);
                   if (ctx.mounted) Navigator.pop(ctx);
                 } catch (e) {} finally { if (ctx.mounted) setSheetState(() => isLoading = false); }
-              }, style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: isLoading ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text("Oluştur", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)))),
+              }, style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), backgroundColor: const Color(0xFF2E7D32)), child: isLoading ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text("Oluştur", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)))),
             ],
           ),
         ),
@@ -1113,14 +1133,22 @@ class _CreateListTile extends StatelessWidget {
   const _CreateListTile({required this.onTap});
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryGreen = const Color(0xFF2E7D32);
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.5)), borderRadius: BorderRadius.circular(12), color: Colors.white.withOpacity(0.05)),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: const [Icon(Icons.add_circle_outline), SizedBox(width: 8), Text("Yeni Liste Oluştur", style: TextStyle(fontWeight: FontWeight.bold))]),
+        decoration: BoxDecoration(
+          border: Border.all(color: primaryGreen.withOpacity(0.5), width: 1.5), 
+          borderRadius: BorderRadius.circular(12), 
+          color: isDark ? primaryGreen.withOpacity(0.1) : Colors.white.withOpacity(0.8),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, 2))],
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_circle_outline, color: primaryGreen), const SizedBox(width: 8), Text("Yeni Liste Oluştur", style: TextStyle(fontWeight: FontWeight.bold, color: primaryGreen))]),
       ),
     );
   }
@@ -1132,16 +1160,23 @@ class _CustomListCard extends StatelessWidget {
   const _CustomListCard({required this.list, this.isMine = false});
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return GestureDetector(
       onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => CustomListDetailScreen(list: list, isMyList: isMine))); },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         height: 100,
-        decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainer, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
         child: Row(children: [
           ClipRRect(borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)), child: SizedBox(width: 70, height: double.infinity, child: list.coverImageUrl != null ? PosterImage(posterUrl: list.coverImageUrl!, title: list.title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800, child: const Icon(Icons.list, color: Colors.white24)))),
           const SizedBox(width: 16),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text('${list.movieCount} film', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)), if (!list.isPublic) const Padding(padding: EdgeInsets.only(top: 4), child: Icon(Icons.lock, size: 12, color: Colors.grey))])),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Text(list.title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text('${list.movieCount} film', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)), if (!list.isPublic) const Padding(padding: EdgeInsets.only(top: 4), child: Icon(Icons.lock, size: 12, color: Colors.grey))])),
           const Icon(Icons.chevron_right, color: Colors.grey), const SizedBox(width: 12),
         ]),
       ),
@@ -1156,7 +1191,8 @@ class _AddPosterTile extends StatelessWidget {
   
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryGreen = const Color(0xFF2E7D32);
 
     return GestureDetector(
       onTap: () async {
@@ -1166,12 +1202,16 @@ class _AddPosterTile extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          color: colorScheme.onSurface.withOpacity(0.1),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+            border: Border.all(color: primaryGreen.withOpacity(0.3)),
+            borderRadius: BorderRadius.circular(12),
+          ),
           alignment: Alignment.center,
           child: Icon(
             Icons.add, 
             size: 40, 
-            color: colorScheme.onSurface.withOpacity(0.6), 
+            color: primaryGreen.withOpacity(0.7), 
           ),
         ),
       ),
@@ -1221,22 +1261,24 @@ class _AddFilmDialogState extends State<_AddFilmDialog> {
   }
 }
 
-// --- KULLANICI LİSTESİ PENCERESİ (Takipçi/Takip edilenler için) ---
 class _UserListSheet extends StatelessWidget {
   final String title;
   final String uid;
-  final String collection; // 'followers' or 'following'
+  final String collection; 
 
   const _UserListSheet({required this.title, required this.uid, required this.collection});
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return SafeArea(
       child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor)),
           ),
           const Divider(height: 1),
           Expanded(
@@ -1272,7 +1314,7 @@ class _UserListSheet extends StatelessWidget {
                             backgroundImage: (photo != null) ? NetworkImage(photo) : null,
                             child: photo == null ? const Icon(Icons.person) : null,
                           ),
-                          title: Text(name),
+                          title: Text(name, style: TextStyle(color: textColor)),
                           onTap: () {
                             Navigator.push(
                               context, 

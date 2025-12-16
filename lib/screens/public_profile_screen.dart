@@ -7,17 +7,13 @@ import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'dart:async';
-import 'dart:ui' as ui;
 import 'package:fluttergirdi/services/match_service.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/screens/full_shelf_screen.dart';
-// --- İMPORTLAR ---
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
-import 'package:fluttergirdi/models/gamification.dart'; // Rozetler için
-
-// --- YENİ EKLENEN İMPORTLAR (Detay Sayfası ve API için) ---
+import 'package:fluttergirdi/models/gamification.dart'; 
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -77,17 +73,15 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return null;
   }
 
-  // --- YENİ EKLENEN FONKSİYON: TMDB ID BULMA VE YÖNLENDİRME ---
   Future<void> _handleFilmTap(String title, String posterUrl, String? docId, int? existingTmdbId) async {
     int? id = existingTmdbId;
 
     if (id == null) {
-      // ID yoksa ara
       if (!mounted) return;
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (c) => const Center(child: CircularProgressIndicator()),
+        builder: (c) => const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
       );
 
       try {
@@ -96,15 +90,13 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
 
         if (!mounted) return;
-        Navigator.pop(context); // Loading kapa
+        Navigator.pop(context); 
 
         if (res.statusCode == 200) {
           final data = json.decode(res.body);
           final results = data['results'] as List?;
           if (results != null && results.isNotEmpty) {
             id = results[0]['id'];
-
-            // Bulunan ID'yi kataloğa kaydet
             if (docId != null && docId.isNotEmpty && id != null) {
               FirebaseFirestore.instance
                   .collection('catalog_films')
@@ -140,13 +132,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     }
   }
 
-  // --- PROFİL RESMİ BÜYÜTME ---
   void _showEnlargedImage(String imageUrl) {
     if (imageUrl.isEmpty) return;
     showDialog(
       context: context,
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.9),
+      barrierColor: Colors.black.withOpacity(0.9),
       builder: (ctx) {
         return GestureDetector(
           onTap: () => Navigator.pop(ctx),
@@ -163,7 +154,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  // --- TAKİP LİSTESİ GÖSTERME ---
   void _showUserList(String title, String collection) {
     showModalBottomSheet(
       context: context,
@@ -174,63 +164,18 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     );
   }
 
-  Widget _blurBackdropFromKeys(List<String> favKeys) {
-    if (favKeys.isEmpty) return const SizedBox.shrink();
-    final firstKey = favKeys.first.trim();
-    if (firstKey.isEmpty) return const SizedBox.shrink();
-    final cacheKey = 'backdrop:$firstKey';
-    return FutureBuilder<List<Map<String, dynamic>?>>(
-      future: (_catalogFutureCache[cacheKey] ??= _fetchCatalogForKeys([firstKey])),
-      builder: (context, snap) {
-        final m = (snap.data != null && snap.data!.isNotEmpty) ? snap.data!.first : null;
-        if (m == null) return const SizedBox.shrink();
-
-        final url = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '') as String;
-        final tmdbId = _extractTmdbId(m);
-        final title = _catalogTitle(m);
-
-        if (url.isEmpty && tmdbId == null) return const SizedBox.shrink();
-
-        return Positioned.fill(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: PosterImage(
-                  posterUrl: url,
-                  tmdbId: tmdbId,
-                  title: title,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xCC000000), Color(0x99000000), Color(0x66000000)],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  
 
   String _catalogTitle(Map<String, dynamic> m) {
     return (m['title'] ?? m['name'] ?? m['t'] ?? '') as String;
   }
-  
-  
 
   Widget _shelfSectionFromKeys(String title, List<String> keys, {int maxItems = 30}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (keys.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text('$title bulunamadı.'),
+        child: Text('$title bulunamadı.', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)),
       );
     }
     final limited = keys.take(maxItems).toList();
@@ -246,20 +191,18 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           })(),
           builder: (context, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
-              // YÜKSEKLİK GÜNCELLENDİ: 180 -> 130
               return const SizedBox(height: 130, child: Center(child: CircularProgressIndicator()));
             }
             final films = (snap.data ?? []).where((m) => m != null).map((m) => m!).toList();
             if (films.isEmpty) {
-              return Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text('$title bulunamadı.'));
+              return Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text('$title bulunamadı.', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)));
             }
             return SizedBox(
-              // YÜKSEKLİK GÜNCELLENDİ: 180 -> 130
               height: 130, 
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: films.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10), // Boşluk biraz azaltıldı
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
                 itemBuilder: (_, i) {
                   final m = films[i];
                   final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '') as String;
@@ -272,7 +215,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8), // Radius biraz azaltıldı
+                        borderRadius: BorderRadius.circular(8),
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
@@ -286,9 +229,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                   color: Colors.black54,
                                   child: Text(
                                     t,
-                                    maxLines: 1, // Satır sayısı düşürüldü
+                                    maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 10, color: Colors.white), // Font küçültüldü
+                                    style: const TextStyle(fontSize: 10, color: Colors.white),
                                     textAlign: TextAlign.center,
                                   ),
                                 ),
@@ -308,7 +251,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
+  
   Widget _buildSectionHeader(String title, List<String> keys) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    
     return Padding(
       padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
       child: Row(
@@ -316,9 +263,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         children: [
           Text(
             title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor),
           ),
-          if (keys.isNotEmpty) // Liste boşsa butonu gösterme
+          if (keys.isNotEmpty) 
             GestureDetector(
               onTap: () {
                 Navigator.push(
@@ -331,10 +278,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   ),
                 );
               },
-              child: Text(
+              child: const Text(
                 'Tümü',
                 style: TextStyle(
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Color(0xFF2E7D32),
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),
@@ -344,6 +291,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       ),
     );
   }
+
   Future<List<Map<String, dynamic>?>> _fetchCatalogForKeys(List<String> keys) async {
     final fs = FirebaseFirestore.instance;
     final ordered = <String>[];
@@ -616,7 +564,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           Text(
             label,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.6),
+                  color: Colors.white.withOpacity(0.6),
                   fontSize: 15,
                 ),
           ),
@@ -627,238 +575,247 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // TEMA RENKLERİ
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryGreen = const Color(0xFF2E7D32);
+    final bgGradientStart = isDark ? const Color(0xFF0D2410) : const Color(0xFFE8F5E9);
+    final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
+
     return DefaultTabController(
       length: 3,
       child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          surfaceTintColor: Colors.transparent,
-          actions: [
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) async {
-                final myUid = FirebaseAuth.instance.currentUser?.uid;
-                if (myUid == null) return;
-                if (value == 'report') _showReportDialog(myUid, widget.uid);
-              },
-              itemBuilder: (ctx) => const [
-                PopupMenuItem(
-                    value: 'report',
-                    child: ListTile(
-                        leading: Icon(Icons.flag_outlined),
-                        title: Text('Kişiyi bildir'),
-                        contentPadding: EdgeInsets.zero)),
-              ],
-            ),
-          ],
-        ),
         extendBodyBehindAppBar: true,
-        body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: _userStream,
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting)
-              return const Center(child: CircularProgressIndicator());
-            if (!snap.hasData || !snap.data!.exists)
-              return const Center(child: Text('Kullanıcı bulunamadı'));
+        // GRADIENT ARKA PLAN
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [bgGradientStart, bgGradientEnd],
+              stops: const [0.0, 0.4],
+            ),
+          ),
+          child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: _userStream,
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting)
+                return const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32)));
+              if (!snap.hasData || !snap.data!.exists)
+                return const Center(child: Text('Kullanıcı bulunamadı'));
 
-            final data = snap.data!.data()!;
-            final displayName = (data['displayName'] ?? '') as String;
-            final lb = (data['letterboxdUsername'] ?? '') as String;
-            final photoURL = (data['photoURL'] ?? '') as String;
-            final appUsername = (data['username'] ?? '') as String;
+              final data = snap.data!.data()!;
+              final displayName = (data['displayName'] ?? '') as String;
+              final lb = (data['letterboxdUsername'] ?? '') as String;
+              final photoURL = (data['photoURL'] ?? '') as String;
+              final appUsername = (data['username'] ?? '') as String;
 
-            final titleText = appUsername.isNotEmpty
-                ? appUsername
-                : (displayName.isNotEmpty
-                    ? displayName
-                    : (lb.isNotEmpty ? '@$lb' : '(İsimsiz)'));
+              final titleText = appUsername.isNotEmpty
+                  ? appUsername
+                  : (displayName.isNotEmpty
+                      ? displayName
+                      : (lb.isNotEmpty ? '@$lb' : '(İsimsiz)'));
 
-            return NestedScrollView(
-              headerSliverBuilder: (context, inner) {
-                return [
-                  SliverToBoxAdapter(
-                    child: Stack(
-                      children: [
-                        SizedBox(
-                          height: MediaQuery.of(context).padding.top + kToolbarHeight + 165,
-                          child: Stack(
-                            children: [
-                              _blurBackdropFromKeys(
-                                  List<String>.from((data['favoritesKeys'] ?? const [])))
-                            ],
-                          ),
+              return NestedScrollView(
+                headerSliverBuilder: (context, inner) {
+                  return [
+                    SliverAppBar(
+                      backgroundColor: Colors.transparent,
+                      elevation: 0,
+                      scrolledUnderElevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      automaticallyImplyLeading: true,
+                      leading: IconButton(
+                        icon: Container(
+                          padding: const EdgeInsets.all(8),
+                         
+                          child: const Icon(Icons.arrow_back, color: Colors.white),
                         ),
-                        Padding(
-                          padding: EdgeInsets.fromLTRB(16,
-                              MediaQuery.of(context).padding.top + kToolbarHeight + 12, 16, 0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                      actions: [
+                        PopupMenuButton<String>(
+                          icon: Container(
+                            padding: const EdgeInsets.all(8),
+                           
+                            child: const Icon(Icons.more_vert, color: Colors.white),
+                          ),
+                          onSelected: (value) async {
+                            final myUid = FirebaseAuth.instance.currentUser?.uid;
+                            if (myUid == null) return;
+                            if (value == 'report') _showReportDialog(myUid, widget.uid);
+                          },
+                          itemBuilder: (ctx) => const [
+                            PopupMenuItem(
+                                value: 'report',
+                                child: ListTile(
+                                    leading: Icon(Icons.flag_outlined),
+                                    title: Text('Kişiyi bildir'),
+                                    contentPadding: EdgeInsets.zero)),
+                          ],
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                    ),
+                    SliverToBoxAdapter(
+                      child: Stack(
+                        children: [
+                    
+                          Column(
                             children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  GestureDetector(
-                                    onTap: () => _showEnlargedImage(photoURL),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                            color: Colors.white.withValues(alpha: 0.1), width: 1),
-                                      ),
-                                      child: CircleAvatar(
-                                        radius: 40,
-                                        backgroundColor: Colors.grey.shade800,
-                                        backgroundImage:
-                                            photoURL.isNotEmpty ? NetworkImage(photoURL) : null,
-                                        child: photoURL.isEmpty
-                                            ? Text(
-                                                displayName.isNotEmpty
-                                                    ? displayName[0].toUpperCase()
-                                                    : '?',
-                                                style: const TextStyle(
-                                                    fontSize: 28,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.white),
-                                              )
-                                            : null,
+                              SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
+                              
+                              // HEADER İÇERİĞİ (ProfilePage ile uyumlu)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _showEnlargedImage(photoURL),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: primaryGreen, width: 2),
+                                        ),
+                                        child: CircleAvatar(
+                                          radius: 36,
+                                          backgroundColor: Colors.grey.shade800,
+                                          backgroundImage:
+                                              photoURL.isNotEmpty ? NetworkImage(photoURL) : null,
+                                          child: photoURL.isEmpty
+                                              ? Text(
+                                                  displayName.isNotEmpty
+                                                      ? displayName[0].toUpperCase()
+                                                      : '?',
+                                                  style: const TextStyle(
+                                                      fontSize: 24,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: Colors.white),
+                                                )
+                                              : null,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 20),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text(titleText,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .headlineSmall
-                                                ?.copyWith(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w800,
-                                                  letterSpacing: -0.5,
-                                                ),
-                                            overflow: TextOverflow.ellipsis),
-                                        if (displayName.isNotEmpty && titleText != displayName)
-                                          Text(displayName,
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(titleText,
                                               style: Theme.of(context)
                                                   .textTheme
-                                                  .bodySmall
-                                                  ?.copyWith(color: Colors.white70),
+                                                  .titleLarge
+                                                  ?.copyWith(
+                                                    color:isDark?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),
+                                                    fontWeight: FontWeight.w600,
+                                                    shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 4)],
+                                                  ),
                                               overflow: TextOverflow.ellipsis),
-                                        if (lb.isNotEmpty)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 6, bottom: 6),
-                                            child: ClipRRect(
-                                              borderRadius: BorderRadius.circular(12),
-                                              child: BackdropFilter(
-                                                filter:
-                                                    ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                                                child: Container(
-                                                  padding: const EdgeInsets.symmetric(
-                                                      horizontal: 10, vertical: 5),
-                                                  decoration: BoxDecoration(
-                                                    color: Theme.of(context).brightness ==
-                                                            Brightness.dark
-                                                        ? Colors.white.withValues(alpha: 0.15)
-                                                        : Colors.black.withValues(alpha: 0.08),
-                                                    borderRadius: BorderRadius.circular(12),
-                                                    border: Border.all(
-                                                        color: Colors.white
-                                                            .withValues(alpha: 0.1),
-                                                        width: 0.5),
-                                                  ),
-                                                  child: Text(
-                                                    'Letterboxd: @$lb',
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodyMedium
-                                                        ?.copyWith(
-                                                          color: Colors.white
-                                                              .withValues(alpha: 0.9),
-                                                          fontWeight: FontWeight.w500,
-                                                          fontSize: 13,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        StreamBuilder<DocumentSnapshot>(
-                                          stream: FirebaseFirestore.instance
-                                              .collection('users')
-                                              .doc(widget.uid)
-                                              .snapshots(),
-                                          builder: (context, snap) {
-                                            if (!snap.hasData || !snap.data!.exists)
-                                              return const SizedBox.shrink();
-                                            final uData =
-                                                snap.data!.data() as Map<String, dynamic>?;
-                                            final badges =
-                                                List<String>.from(uData?['badges'] ?? []);
-                                            if (badges.isEmpty) return const SizedBox.shrink();
-
-                                            return Padding(
-                                              padding: const EdgeInsets.only(bottom: 8.0),
-                                              child: Wrap(
-                                                spacing: 6,
-                                                runSpacing: 4,
-                                                children: badges.map((badgeId) {
-                                                  final badge = AppBadge.allBadges.firstWhere(
-                                                      (b) => b.id == badgeId,
-                                                      orElse: () => AppBadge.allBadges.first);
-                                                  return Container(
-                                                    padding: const EdgeInsets.all(4),
-                                                    decoration: BoxDecoration(
-                                                      color: badge.color.withValues(alpha: 0.15),
-                                                      shape: BoxShape.circle,
+                                          if (displayName.isNotEmpty && titleText != displayName)
+                                            Text(displayName,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.copyWith(color: Colors.white70),
+                                                overflow: TextOverflow.ellipsis),
+                                          
+                                          // LB Kullanıcı Adı
+                                          if (lb.isNotEmpty)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 4, bottom: 4),
+                                              child: Text(
+                                                'Letterboxd: @$lb',
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodyMedium
+                                                    ?.copyWith(
+                                                      color: Colors.white70,
+                                                      fontSize: 13,
+                                                      shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 2)],
                                                     ),
-                                                    child: Icon(badge.icon,
-                                                        size: 12, color: badge.color),
-                                                  );
-                                                }).toList(),
                                               ),
-                                            );
-                                          },
-                                        ),
-                                        Row(
-                                          children: [
-                                            _buildStatItem(
-                                              context,
-                                              'Takipçi',
-                                              _followersCount ?? 0,
-                                              () => _showUserList('Takipçiler', 'followers'),
                                             ),
-                                            const SizedBox(width: 24),
-                                            _buildStatItem(
-                                              context,
-                                              'Takip',
-                                              _followingCount ?? 0,
-                                              () => _showUserList('Takip Edilenler', 'following'),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
+                                          
+                                          // Rozetler
+                                          StreamBuilder<DocumentSnapshot>(
+                                            stream: FirebaseFirestore.instance
+                                                .collection('users')
+                                                .doc(widget.uid)
+                                                .snapshots(),
+                                            builder: (context, snap) {
+                                              if (!snap.hasData || !snap.data!.exists)
+                                                return const SizedBox.shrink();
+                                              final uData =
+                                                  snap.data!.data() as Map<String, dynamic>?;
+                                              final badges =
+                                                  List<String>.from(uData?['badges'] ?? []);
+                                              if (badges.isEmpty) return const SizedBox.shrink();
+
+                                              return Padding(
+                                                padding: const EdgeInsets.only(bottom: 6.0),
+                                                child: Wrap(
+                                                  spacing: 6,
+                                                  runSpacing: 4,
+                                                  children: badges.map((badgeId) {
+                                                    final badge = AppBadge.allBadges.firstWhere(
+                                                        (b) => b.id == badgeId,
+                                                        orElse: () => AppBadge.allBadges.first);
+                                                    return Container(
+                                                      padding: const EdgeInsets.all(4),
+                                                      decoration: BoxDecoration(
+                                                        color: badge.color.withOpacity(0.15),
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                      child: Icon(badge.icon,
+                                                          size: 12, color: badge.color),
+                                                    );
+                                                  }).toList(),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                          
+                                          // Takipçi Sayıları
+                                          Wrap(
+                                            spacing: 8,
+                                            runSpacing: 8,
+                                            children: [
+                                              _CountPill(
+                                                label: 'Takipçi', 
+                                                value: _followersCount ?? 0,
+                                                onTap: () => _showUserList('Takipçiler', 'followers'),
+                                              ),
+                                              _CountPill(
+                                                label: 'Takip', 
+                                                value: _followingCount ?? 0,
+                                                onTap: () => _showUserList('Takip Edilenler', 'following'),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
+                              
                               const SizedBox(height: 16),
+                              
+                              // Engelleme Uyarısı
                               if (_isBlocked || _hasBlockedMe)
                                 Container(
-                                  margin: const EdgeInsets.only(bottom: 12),
+                                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: Colors.red.withValues(alpha: 0.10),
+                                    color: Colors.red.withOpacity(0.10),
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(
                                         color: Theme.of(context)
                                             .colorScheme
                                             .error
-                                            .withValues(alpha: 0.4)),
+                                            .withOpacity(0.4)),
                                   ),
                                   child: Row(children: const [
                                     Icon(Icons.block, size: 16),
@@ -866,8 +823,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                     Expanded(child: Text('Bu kullanıcıyla etkileşim engellendi.'))
                                   ]),
                                 ),
+
+                              // Aksiyon Butonları
                               Padding(
-                                padding: const EdgeInsets.only(bottom: 12.0),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                                 child: Row(
                                   children: [
                                     if (!_isBlocked &&
@@ -875,17 +834,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                         FirebaseAuth.instance.currentUser?.uid != widget.uid) ...[
                                       Expanded(
                                         child: FilledButton.tonalIcon(
-                                          // --- DÜZELTME BURADA ---
-                                          // getOrCreateChat (DB Yazma) yerine chatIdFor (Sadece ID) kullanıldı.
                                           onPressed: () {
                                             final myUid =
                                                 FirebaseAuth.instance.currentUser?.uid;
                                             if (myUid == null) return;
-                                            
-                                            // DİKKAT: Burada 'await' ve 'getOrCreateChat' kaldırıldı.
                                             final chatId = ChatService.instance
                                                 .chatIdFor(myUid, widget.uid);
-                                                
                                             Navigator.push(
                                                 context,
                                                 MaterialPageRoute(
@@ -894,10 +848,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                           },
                                           style: FilledButton.styleFrom(
                                               padding: const EdgeInsets.symmetric(vertical: 12),
+                                              backgroundColor: isDark ? Colors.white24 : Colors.white,
                                               shape: RoundedRectangleBorder(
                                                   borderRadius: BorderRadius.circular(12))),
-                                          icon: const Icon(Icons.message_rounded, size: 20),
-                                          label: const Text('Mesaj'),
+                                          icon: Icon(Icons.message_rounded, size: 20, color: primaryGreen),
+                                          label: Text('Mesaj', style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)),
                                         ),
                                       ),
                                       if (FirebaseAuth.instance.currentUser?.uid != null &&
@@ -912,7 +867,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                           style: FilledButton.styleFrom(
                                             backgroundColor: _isFollowing == true
                                                 ? Colors.grey.shade800
-                                                : Colors.blue,
+                                                : primaryGreen,
                                             foregroundColor: Colors.white,
                                             padding: const EdgeInsets.symmetric(vertical: 12),
                                             shape: RoundedRectangleBorder(
@@ -937,86 +892,101 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                   ],
                                 ),
                               ),
-                              TabBar(
-                                indicator: UnderlineTabIndicator(
-                                    borderSide: BorderSide(
-                                        width: 2,
-                                        color: Theme.of(context).colorScheme.primary)),
-                                indicatorSize: TabBarIndicatorSize.tab,
-                                overlayColor: WidgetStateProperty.all(Colors.transparent),
-                                labelPadding: const EdgeInsets.symmetric(vertical: 6),
-                                labelStyle: Theme.of(context)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                                unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
-                                labelColor: Theme.of(context).colorScheme.onSurface,
-                                unselectedLabelColor: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.7),
-                                tabs: const [
-                                  Tab(text: 'Filmler'),
-                                  Tab(text: 'Aktiviteler'),
-                                  Tab(text: 'Listeler'),
-                                ],
+
+                              // Tab Bar
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child: Container(
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: isDark ? Colors.black45 : Colors.white.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: TabBar(
+                                    isScrollable: false,
+                                    indicator: BoxDecoration(
+                                      color: primaryGreen,
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: primaryGreen.withOpacity(0.4),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2)
+                                        )
+                                      ],
+                                    ),
+                                    indicatorSize: TabBarIndicatorSize.tab,
+                                    dividerColor: Colors.transparent,
+                                    labelPadding: EdgeInsets.zero,
+                                    labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                    unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                                    labelColor: Colors.white,
+                                    unselectedLabelColor: isDark ? Colors.white60 : Colors.black54,
+                                    overlayColor: WidgetStateProperty.all(Colors.transparent),
+                                    tabs: const [
+                                      Tab(text: 'Filmler', height: 40),
+                                      Tab(text: 'Aktiviteler', height: 40),
+                                      Tab(text: 'Listeler', height: 40),
+                                    ],
+                                  ),
+                                ),
                               ),
                               const SizedBox(height: 8),
                             ],
                           ),
-                        ),
-                        if (_matchScore != null && _matchScore! > 0)
-                          Positioned(
-                            top: MediaQuery.of(context).padding.top + kToolbarHeight + 10,
-                            right: 16,
-                            child: Container(
-                              width: 50,
-                              height: 50,
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade600,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
-                                boxShadow: [
-                                  BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.3),
-                                      blurRadius: 6,
-                                      offset: const Offset(0, 3))
-                                ],
-                              ),
-                              alignment: Alignment.center,
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text('%$_matchScore',
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w900,
-                                          height: 1.0)),
-                                  const Text('UYUM',
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 7,
-                                          fontWeight: FontWeight.w500,
-                                          height: 1.0)),
-                                ],
+                          if (_matchScore != null && _matchScore! > 0)
+                            Positioned(
+                              top: MediaQuery.of(context).padding.top + kToolbarHeight + 10,
+                              right: 16,
+                              child: Container(
+                                width: 50,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade600,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: Colors.black.withOpacity(0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 3))
+                                  ],
+                                ),
+                                alignment: Alignment.center,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text('%$_matchScore',
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w900,
+                                            height: 1.0)),
+                                    const Text('UYUM',
+                                        style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 7,
+                                            fontWeight: FontWeight.w500,
+                                            height: 1.0)),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ];
-              },
-              body: TabBarView(
-                children: [
-                  _buildProfileTabBody(data),
-                  _ActivitiesTab(uid: widget.uid),
-                  _PublicListsTab(uid: widget.uid),
-                ],
-              ),
-            );
-          },
+                  ];
+                },
+                body: TabBarView(
+                  children: [
+                    _buildProfileTabBody(data),
+                    _ActivitiesTab(uid: widget.uid),
+                    _PublicListsTab(uid: widget.uid),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -1032,6 +1002,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final genres = List<String>.from(data['favGenres'] ?? const []);
     final directors = List<String>.from(data['favDirectors'] ?? const []);
     final actors = List<String>.from(data['favActors'] ?? const []);
+    
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -1040,7 +1013,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           Padding(
               padding: const EdgeInsets.only(bottom: 16.0),
               child: Text(bio,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4))),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4, color: textColor))),
         if (age != null ||
             genres.isNotEmpty ||
             directors.isNotEmpty ||
@@ -1050,9 +1023,9 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               Padding(
                   padding: const EdgeInsets.only(bottom: 8.0),
                   child: Row(children: [
-                    const Icon(Icons.cake, size: 18),
+                    Icon(Icons.cake, size: 18, color: textColor),
                     const SizedBox(width: 6),
-                    Text('Yaş: $age')
+                    Text('Yaş: $age', style: TextStyle(color: textColor))
                   ])),
             if (genres.isNotEmpty) _ChipsSection(title: 'Sevdiği türler', items: genres),
             if (directors.isNotEmpty)
@@ -1075,20 +1048,185 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           const SizedBox(height: 16)
         ],
         
-        // Watchlist Başlığı (TÜMÜ butonlu)
-        _buildSectionHeader('Watchlist', watchlistKeys),
-        const SizedBox(height: 8),
-        _WatchlistSection(
-            data: data,
-            watchlistFutureCache: _watchlistFutureCache,
-            fetchCatalog: _fetchCatalogForKeys,
-            onFilmTap: _handleFilmTap),
+        // Watchlist
+        if(watchlistKeys.isNotEmpty) ...[
+           _buildSectionHeader('Watchlist', watchlistKeys),
+           const SizedBox(height: 8),
+           _WatchlistSection(
+              data: data,
+              watchlistFutureCache: _watchlistFutureCache,
+              fetchCatalog: _fetchCatalogForKeys,
+              onFilmTap: _handleFilmTap),
+        ]
       ],
     );
   }
 }
 
-// --- 2. SEKME: AKTİVİTELER ---
+// --- YARDIMCI WIDGETLAR ---
+
+class _ChipsSection extends StatelessWidget {
+  final String title;
+  final List<String> items;
+  const _ChipsSection({required this.title, required this.items});
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor)),
+          const SizedBox(height: 8),
+          Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: items.map((e) => Chip(
+                label: Text(e, style: const TextStyle(fontSize: 12)),
+                backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                side: BorderSide.none,
+                padding: EdgeInsets.zero
+              )).toList()),
+        ],
+      ),
+    );
+  }
+}
+
+class _CountPill extends StatelessWidget {
+  final String label;
+  final int value;
+  final VoidCallback? onTap;
+
+  const _CountPill({required this.label, required this.value, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Açık temada siyah, koyu temada beyaz yazı
+    final textColor = isDark ? Colors.white : Colors.black87;
+    // Açık temada gri çerçeve, koyu temada beyazımsı çerçeve
+    final borderColor = isDark ? Colors.white24 : Colors.black12;
+    // Açık temada çok hafif siyah dolgu, koyu temada çok hafif beyaz dolgu
+    final bgColor = isDark ? Colors.white10 : Colors.black.withOpacity(0.05);
+
+    final textStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w600,
+      color: textColor,
+    );
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: borderColor, width: 1),
+        ),
+        child: Text('$label: $value', style: textStyle),
+      ),
+    );
+  }
+}
+
+class _WatchlistSection extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final Map<String, Future<List<Map<String, dynamic>?>>> watchlistFutureCache;
+  final Future<List<Map<String, dynamic>?>> Function(List<String>) fetchCatalog;
+  final Function(String, String, String?, int?) onFilmTap;
+
+  const _WatchlistSection(
+      {required this.data,
+      required this.watchlistFutureCache,
+      required this.fetchCatalog,
+      required this.onFilmTap});
+
+  int? _extractTmdbId(Map<String, dynamic> m) {
+    final val = m['tmdbId'];
+    if (val is int) return val;
+    if (val is num) return val.toInt();
+    if (val is String) return int.tryParse(val);
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<dynamic> keysDyn = (data['watchlistKeys'] ?? []) as List<dynamic>;
+    final keys =
+        keysDyn.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+    final limited = keys.take(30).toList();
+    final hash = limited.join('|');
+
+    return FutureBuilder<List<Map<String, dynamic>?>>(
+      future: limited.isEmpty
+          ? Future.value([])
+          : (watchlistFutureCache[hash] ??= fetchCatalog(limited)),
+      builder: (context, fsnap) {
+        if (fsnap.connectionState == ConnectionState.waiting)
+          return const SizedBox(
+              height: 130, child: Center(child: CircularProgressIndicator()));
+        final films =
+            (fsnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+        if (films.isEmpty) return const Text('Watchlist boş.');
+        return SizedBox(
+          height: 130,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: films.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (_, i) {
+              final film = films[i];
+              final poster = (film['poster'] ?? film['posterUrl'] ?? '') as String;
+              final title = (film['title'] ?? '') as String;
+              final tmdbId = _extractTmdbId(film);
+              final docId = (film['docId'] ?? limited[i]).toString();
+
+              return GestureDetector(
+                onTap: () => onFilmTap(title, poster, docId, tmdbId),
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PosterImage(
+                            posterUrl: poster,
+                            tmdbId: tmdbId,
+                            title: title,
+                            fit: BoxFit.cover),
+                        if (title.isNotEmpty)
+                          Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4, vertical: 2),
+                                  color: Colors.black54,
+                                  child: Text(title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 10, color: Colors.white),
+                                      textAlign: TextAlign.center))),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+// --- DİĞER SEKME İÇERİKLERİ ---
+
 class _ActivitiesTab extends StatefulWidget {
   final String uid;
   const _ActivitiesTab({required this.uid});
@@ -1174,14 +1312,18 @@ class _ActivitiesTabState extends State<_ActivitiesTab>
 
   @override
   Widget build(BuildContext context) {
+    
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return RefreshIndicator(
       onRefresh: _loadActivities,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           Row(children: [
-            Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium)
+            Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor, fontWeight: FontWeight.bold))
           ]),
           const SizedBox(height: 10),
           if (_loadingActivities)
@@ -1189,16 +1331,16 @@ class _ActivitiesTabState extends State<_ActivitiesTab>
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()))
           else if (_activities.isEmpty)
-            const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('Henüz aktivite yok.'))
+            Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('Henüz aktivite yok.', style: TextStyle(color: textColor.withOpacity(0.7))))
           else
             ListView.separated(
               itemCount: _activities.length,
               physics: const NeverScrollableScrollPhysics(),
               shrinkWrap: true,
               padding: EdgeInsets.zero,
-              separatorBuilder: (_, __) => const Divider(height: 0.5, thickness: 0.5),
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, i) {
                 final a = _activities[i];
                 final when = a.createdAt;
@@ -1223,6 +1365,9 @@ class _ActivityWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
 
     return GestureDetector(
       onTap: () {
@@ -1234,13 +1379,14 @@ class _ActivityWidget extends StatelessWidget {
         );
       },
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: const Color.fromARGB(3, 255, 255, 255), width: 1)),
+            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4)),
+            ],
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1265,37 +1411,35 @@ class _ActivityWidget extends StatelessWidget {
                     Padding(
                         padding: const EdgeInsets.only(top: 4.0),
                         child: Text(item.text,
-                            maxLines: 4, overflow: TextOverflow.ellipsis)),
+                            maxLines: 4, overflow: TextOverflow.ellipsis, style: TextStyle(color: textColor))),
                   if (item.title.isNotEmpty &&
                       item.posterUrl.isEmpty &&
                       item.tmdbId == null)
                     Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Row(children: [
-                          const Icon(Icons.local_movies, size: 16),
+                          Icon(Icons.local_movies, size: 16, color: subTextColor),
                           const SizedBox(width: 6),
                           Expanded(
                               child: Text(item.title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall))
+                                  style: TextStyle(color: subTextColor)))
                         ])),
                   Padding(
-                    padding: const EdgeInsets.only(top: 6.0),
+                    padding: const EdgeInsets.only(top: 8.0),
                     child: Row(children: [
-                      const Icon(Icons.favorite_border, size: 16),
+                      Icon(Icons.favorite_border, size: 16, color: subTextColor),
                       const SizedBox(width: 4),
-                      Text('${item.likeCount}'),
+                      Text('${item.likeCount}', style: TextStyle(color: subTextColor)),
                       const SizedBox(width: 12),
-                      const Icon(Icons.mode_comment_outlined, size: 16),
+                      Icon(Icons.mode_comment_outlined, size: 16, color: subTextColor),
                       const SizedBox(width: 4),
-                      Text('${item.replyCount}'),
-                      const SizedBox(width: 12),
-                      const Icon(Icons.repeat, size: 16),
+                      Text('${item.replyCount}', style: TextStyle(color: subTextColor)),
                       const Spacer(),
                       if (timeLabel.isNotEmpty)
-                        Text('Paylaştı  $timeLabel',
-                            style: Theme.of(context).textTheme.labelSmall),
+                        Text('Paylaştı $timeLabel',
+                            style: TextStyle(color: subTextColor, fontSize: 11)),
                     ]),
                   ),
                 ],
@@ -1308,7 +1452,6 @@ class _ActivityWidget extends StatelessWidget {
   }
 }
 
-// --- 3. SEKME: LİSTELER ---
 class _PublicListsTab extends StatefulWidget {
   final String uid;
   const _PublicListsTab({required this.uid});
@@ -1325,6 +1468,8 @@ class _PublicListsTabState extends State<_PublicListsTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return RefreshIndicator(
         onRefresh: () async {
           await Future.delayed(const Duration(milliseconds: 500));
@@ -1337,11 +1482,10 @@ class _PublicListsTabState extends State<_PublicListsTab>
                 return const Center(child: CircularProgressIndicator());
               final lists = snapshot.data ?? [];
 
-              // Sadece herkese açık listeler
               final publicLists = lists.where((l) => l.isPublic).toList();
 
               if (publicLists.isEmpty) {
-                return const Center(child: Text("Henüz liste oluşturulmamış."));
+                return Center(child: Text("Henüz liste oluşturulmamış.", style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)));
               }
 
               return ListView.builder(
@@ -1361,6 +1505,9 @@ class _CustomListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -1373,8 +1520,9 @@ class _CustomListCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 12),
         height: 100,
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainer,
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(12),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4))],
         ),
         child: Row(
           children: [
@@ -1400,13 +1548,12 @@ class _CustomListCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(list.title,
-                      style:
-                          const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
                   Text('${list.movieCount} film',
-                      style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                      style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
                 ],
               ),
             ),
@@ -1419,127 +1566,10 @@ class _CustomListCard extends StatelessWidget {
   }
 }
 
-class _ChipsSection extends StatelessWidget {
-  final String title;
-  final List<String> items;
-  const _ChipsSection({required this.title, required this.items});
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: items.map((e) => Chip(label: Text(e))).toList()),
-        ],
-      ),
-    );
-  }
-}
-
-class _WatchlistSection extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final Map<String, Future<List<Map<String, dynamic>?>>> watchlistFutureCache;
-  final Future<List<Map<String, dynamic>?>> Function(List<String>) fetchCatalog;
-  final Function(String, String, String?, int?) onFilmTap; // Callback eklendi
-
-  const _WatchlistSection(
-      {required this.data,
-      required this.watchlistFutureCache,
-      required this.fetchCatalog,
-      required this.onFilmTap});
-
-  int? _extractTmdbId(Map<String, dynamic> m) {
-    final val = m['tmdbId'];
-    if (val is int) return val;
-    if (val is num) return val.toInt();
-    if (val is String) return int.tryParse(val);
-    return null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final List<dynamic> keysDyn = (data['watchlistKeys'] ?? []) as List<dynamic>;
-    final keys =
-        keysDyn.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
-    final limited = keys.take(30).toList();
-    final hash = limited.join('|');
-
-    return FutureBuilder<List<Map<String, dynamic>?>>(
-      future: limited.isEmpty
-          ? Future.value([])
-          : (watchlistFutureCache[hash] ??= fetchCatalog(limited)),
-      builder: (context, fsnap) {
-        if (fsnap.connectionState == ConnectionState.waiting)
-          return const SizedBox(
-              height: 180, child: Center(child: CircularProgressIndicator()));
-        final films =
-            (fsnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
-        if (films.isEmpty) return const Text('Watchlist boş.');
-        return SizedBox(
-          height: 130,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: films.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (_, i) {
-              final film = films[i];
-              final poster = (film['poster'] ?? film['posterUrl'] ?? '') as String;
-              final title = (film['title'] ?? '') as String;
-              final tmdbId = _extractTmdbId(film);
-              final docId = (film['docId'] ?? limited[i]).toString();
-
-              return GestureDetector(
-                // TIKLAMA EKLENDİ
-                onTap: () => onFilmTap(title, poster, docId, tmdbId),
-                child: AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        PosterImage(
-                            posterUrl: poster,
-                            tmdbId: tmdbId,
-                            title: title,
-                            fit: BoxFit.cover),
-                        if (title.isNotEmpty)
-                          Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 4),
-                                  color: Colors.black54,
-                                  child: Text(title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 12, color: Colors.white),
-                                      textAlign: TextAlign.center))),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-}
-
-// --- KULLANICI LİSTESİ PENCERESİ (YENİ) ---
 class _UserListSheet extends StatelessWidget {
   final String title;
   final String uid;
-  final String collection; // 'followers' or 'following'
+  final String collection;
 
   const _UserListSheet(
       {required this.title, required this.uid, required this.collection});
@@ -1577,7 +1607,7 @@ class _UserListSheet extends StatelessWidget {
                   itemCount: docs.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
-                    final docId = docs[index].id; // docId = user UID
+                    final docId = docs[index].id;
                     return FutureBuilder<DocumentSnapshot>(
                       future: FirebaseFirestore.instance
                           .collection('users')
