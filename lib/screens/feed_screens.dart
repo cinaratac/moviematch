@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:fluttergirdi/screens/search_page.dart';
 
 // --- YENİ IMPORTLAR (Controller ve Servisler) ---
 import '../controllers/feed_controller.dart';
@@ -105,7 +106,7 @@ class _FeedPageState extends State<FeedPage> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 220),
               child: InkWell(
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchProfilesScreen())),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchPage())),
                 borderRadius: BorderRadius.circular(24),
                 child: Container(
                   height: 40,
