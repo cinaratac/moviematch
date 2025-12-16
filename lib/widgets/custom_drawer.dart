@@ -302,7 +302,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
                       const SizedBox(height: 4),
                       Text(email, style: TextStyle(fontSize: 13, color: isDark ? Colors.white54 : Colors.black54), maxLines: 1, overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 6),
-                      Text("Profili Görüntüle", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Theme.of(context).primaryColor)),
+                      
                     ],
                   ),
                 ),
