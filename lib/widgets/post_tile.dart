@@ -401,7 +401,7 @@ class _PostTileState extends State<PostTile> {
                     color: Colors.black12,
                     child: CachedNetworkImage(
                       imageUrl: widget.postImage!,
-                      memCacheWidth: 1080, 
+                      memCacheWidth: 700, 
                       fit: BoxFit.cover,
                       placeholder: (context, url) => const SizedBox(
                         height: 250,

@@ -1,20 +1,26 @@
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+
+// --- YENİ IMPORTLAR (Controller ve Servisler) ---
+import '../controllers/feed_controller.dart';
+import '../services/user_cache_service.dart';
+import '../widgets/post_skeleton.dart';
+import '../services/feed_service.dart';
+
+// MEVCUT IMPORTLAR (Projenizdeki widget'lar)
 import 'package:fluttergirdi/screens/search_profiles_screen.dart';
-import 'package:fluttergirdi/services/feed_service.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
-import 'package:fluttergirdi/widgets/green_characters.dart';
-import 'package:fluttergirdi/widgets/notifications.dart';
+import 'package:fluttergirdi/widgets/notifications.dart'; // NotificationsButton için
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:fluttergirdi/widgets/custom_drawer.dart';
-// YENİ İMPORTLAR
 import 'package:fluttergirdi/widgets/dashboard_stats_row.dart';
 import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
+import 'package:fluttergirdi/widgets/green_characters.dart'; // Takip akışı boşsa gösterilen karakter
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -24,155 +30,55 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
-  final ScrollController _listController = ScrollController();
-  static const int _pageSize = 20;
-  bool _initialLoading = true;
-  bool _loadingMore = false;
-  bool _hasMore = true;
-  Set<String> _myLikedPostIds = {};
-  Set<String> _myFollowingUserIds = {};
-  
-  List<DocumentSnapshot<Map<String, dynamic>>> _posts = [];
-  DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
-  
-  final Map<String, Map<String, String>> _authorCache = {};
+  // Logic'i Controller'a taşıdık (Sadece Popüler akış için)
+  final FeedController _controller = FeedController();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _listController.addListener(_onScroll);
-    _loadInitial();
+    // Controller'daki değişiklikleri dinleyip ekranı yeniliyoruz
+    _controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+    
+    _controller.init();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(() {}); 
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _onScroll() {
-    if (_loadingMore || !_hasMore) return;
-    if (!_listController.hasClients) return;
-    final pos = _listController.position;
-    if (pos.pixels > pos.maxScrollExtent - (pos.viewportDimension * 2)) {
-      _loadMore();
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    
+    // Listenin sonuna yaklaşıldığında yeni veri çek
+    if (maxScroll - currentScroll <= 200) {
+      _controller.loadMore();
     }
   }
 
-  Future<void> _fetchAuthorsForPosts(List<DocumentSnapshot> posts) async {
-    final uidsToFetch = <String>{};
-    for (var doc in posts) {
-      final data = doc.data() as Map<String, dynamic>?;
-      final uid = data?['authorId'] as String?;
-      if (uid != null && uid.isNotEmpty && !_authorCache.containsKey(uid)) {
-        uidsToFetch.add(uid);
-      }
-    }
-    if (uidsToFetch.isEmpty) return;
-    final chunks = <List<String>>[];
-    final list = uidsToFetch.toList();
-    for (var i = 0; i < list.length; i += 10) {
-      chunks.add(list.sublist(i, i + 10 > list.length ? list.length : i + 10));
-    }
-    for (var chunk in chunks) {
-      try {
-        final qs = await FirebaseFirestore.instance
-            .collection('users')
-            .where(FieldPath.documentId, whereIn: chunk)
-            .get(const GetOptions(source: Source.serverAndCache));
-        for (var uDoc in qs.docs) {
-          final d = uDoc.data();
-          final name = (d['displayName'] ?? '').toString();
-          final user = (d['username'] ?? '').toString();
-          final lb = (d['letterboxdUsername'] ?? '').toString();
-          final photo = (d['photoURL'] ?? '').toString();
-          String handle = '';
-          if (user.isNotEmpty) handle = '@$user';
-          else if (lb.isNotEmpty) handle = '@$lb';
-          _authorCache[uDoc.id] = {
-            'displayName': name.isNotEmpty ? name : 'Kullanıcı',
-            'handle': handle,
-            'photoURL': photo,
-          };
-        }
-      } catch (e) { debugPrint('Yazar verisi çekilemedi: $e'); }
-    }
-  }
-
-  Future<void> _loadInitial() async {
-    _authorCache.clear();
-    setState(() { 
-      _initialLoading = true; 
-      _hasMore = true; 
-      _posts.clear(); 
-      _lastDoc = null; 
-    });
-
-    try {
-      final me = FirebaseAuth.instance.currentUser?.uid;
-      
-      // Postları ve Kullanıcı etkileşimlerini PARALEL (aynı anda) çekiyoruz:
-      final results = await Future.wait([
-        FeedService.instance.fetchInitial(limit: _pageSize), // Postlar
-        if (me != null) FeedService.instance.fetchUserLikedPostIds(me), // Beğenilerim
-        if (me != null) FeedService.instance.fetchUserFollowingIds(me), // Takiplerim
-      ]);
-
-      final serverQs = results[0] as QuerySnapshot<Map<String, dynamic>>;
-      
-      if (me != null) {
-        _myLikedPostIds = results[1] as Set<String>;
-        _myFollowingUserIds = results[2] as Set<String>;
-      }
-
-      final serverDocs = serverQs.docs;
-      await _fetchAuthorsForPosts(serverDocs); // (Bunu sonraki adımda kaldıracağız ama şimdilik kalsın)
-
-      if (!mounted) return;
-      setState(() {
-        _posts = List<DocumentSnapshot<Map<String, dynamic>>>.from(serverDocs);
-        _lastDoc = serverDocs.isNotEmpty ? serverDocs.last : null;
-        _hasMore = serverDocs.length == _pageSize;
-        _initialLoading = false;
-      });
-    } catch (e) { 
-      debugPrint('Feed Yükleme Hatası: $e');
-      if (mounted) setState(() => _initialLoading = false); 
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (_loadingMore || !_hasMore) return;
-    if (_lastDoc == null) return;
-    setState(() => _loadingMore = true);
-    try {
-      final qs = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: _pageSize);
-      final docs = qs.docs;
-      await _fetchAuthorsForPosts(docs);
-      setState(() {
-        _posts.addAll(docs);
-        _lastDoc = docs.isNotEmpty ? docs.last : _lastDoc;
-        _hasMore = docs.length == _pageSize;
-      });
-    } catch (_) {
-    } finally { if (mounted) setState(() => _loadingMore = false); }
-  }
-
-  Future<void> _refresh() async { await _loadInitial(); }
-
+  // Helper: Timestamp formatlama
   static String _timeAgo(DateTime dt) {
-    final now = DateTime.now();
-    final diff = now.difference(dt);
+    final diff = DateTime.now().difference(dt);
     if (diff.inSeconds < 60) return '${diff.inSeconds}s';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
     if (diff.inHours < 24) return '${diff.inHours}h';
     if (diff.inDays < 7) return '${diff.inDays}g';
-    final years = diff.inDays ~/ 365;
-    return '${years}y';
+    return '${diff.inDays ~/ 365}y';
   }
 
   int? _parseTmdbId(Map<String, dynamic> m) {
-    dynamic rawId;
-    if (m['movie'] is Map) {
-      final movieMap = m['movie'] as Map;
-      rawId = movieMap['tmdbId'] ?? movieMap['id'];
-    }
-    rawId ??= m['tmdbId'];
-
+    dynamic rawId = (m['movie'] is Map) 
+        ? (m['movie']['tmdbId'] ?? m['movie']['id']) 
+        : m['tmdbId'];
     if (rawId is int) return rawId;
     if (rawId is String) return int.tryParse(rawId);
     if (rawId is double) return rawId.toInt();
@@ -194,24 +100,20 @@ class _FeedPageState extends State<FeedPage> {
           scrolledUnderElevation: 0,
           toolbarHeight: 60,
           titleSpacing: 0,
-          
           title: Align(
             alignment: Alignment.centerLeft,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 220),
               child: InkWell(
-                onTap: () {
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SearchProfilesScreen()));
-                },
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchProfilesScreen())),
                 borderRadius: BorderRadius.circular(24),
                 child: Container(
                   height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
                     color: cs.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(24),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  alignment: Alignment.centerLeft,
                   child: Row(
                     children: [
                       Icon(Icons.search, size: 20, color: cs.onSurfaceVariant),
@@ -223,12 +125,10 @@ class _FeedPageState extends State<FeedPage> {
               ),
             ),
           ),
-          
           actions: const [
             NotificationsButton(),
             SizedBox(width: 8),
           ],
-          
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(50),
             child: Container(
@@ -243,7 +143,6 @@ class _FeedPageState extends State<FeedPage> {
                 isScrollable: false,
                 indicatorSize: TabBarIndicatorSize.tab,
                 dividerColor: Colors.transparent,
-                
                 indicator: BoxDecoration(
                   color: cs.surface,
                   borderRadius: BorderRadius.circular(18),
@@ -255,158 +154,37 @@ class _FeedPageState extends State<FeedPage> {
                     ),
                   ],
                 ),
-                
                 labelColor: cs.onSurface,
                 unselectedLabelColor: cs.onSurfaceVariant,
-                labelStyle: const TextStyle(
-                  fontWeight: FontWeight.w700, 
-                  fontSize: 13,
-                  letterSpacing: -0.2
-                ),
+                labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, letterSpacing: -0.2),
                 labelPadding: EdgeInsets.zero,
                 overlayColor: WidgetStateProperty.all(Colors.transparent),
-                
-                tabs: const [
-                  Tab(text: 'Popüler'),
-                  Tab(text: 'Takip Edilenler'),
-                ],
+                tabs: const [Tab(text: 'Popüler'), Tab(text: 'Takip Edilenler')],
               ),
             ),
           ),
         ),
-        
         body: Column(
           children: [
-            const OfflineBanner(), 
+            const OfflineBanner(),
             Expanded(
               child: TabBarView(
                 children: [
-                  // 1) POPÜLER AKIŞ
+                  // 1) POPÜLER AKIŞ (Controller ile yönetiliyor - Optimize Edilmiş)
                   RefreshIndicator(
-                    onRefresh: _refresh,
-                    child: _initialLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : ListView.separated(
-                            controller: _listController,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemCount: _posts.length + 1 + (_loadingMore ? 1 : 0),
-                            separatorBuilder: (_, __) => const SizedBox(height: 12),
-                            itemBuilder: (context, i) {
-                              // 1. ÖĞE: ÖNERİ KARTI + DASHBOARD
-if (i == 0) {
-  return const Column(
-    children: [
-      RecommendationCard(),
-      // Araya biraz boşluk bırakmak istersen SizedBox ekleyebilirsin
-      // SizedBox(height: 8), 
-      DashboardStatsRow(),
-      DiscoveryListsWidget(),
-    ],
-  );
-}
-                              
-                              final postIndex = i - 1;
-                              if (_loadingMore && postIndex == _posts.length) {
-                                return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator()));
-                              }
-                              
-                              final d = _posts[postIndex];
-                              final m = d.data() ?? {};
-                              final authorId = (m['authorId'] ?? '') as String;
-
-                              final cachedUser = _authorCache[authorId];
-                              final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
-                              final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
-                              final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
-
-                              final createdAt = (m['createdAt'] as Timestamp?);
-                              final timeLabel = createdAt == null ? '' : _timeAgo(createdAt.toDate());
-                              final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
-                              final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
-                              
-                              int? movieTmdbId = _parseTmdbId(m);
-
-                              final postImage = (m['postImage'] ?? '') as String;
-
-                              final double? rating = (m['rating'] as num?)?.toDouble();
-                              final bool isSpoiler = (m['isSpoiler'] == true);
-                              final String? reviewTitle = m['reviewTitle'] as String?;
-                              final List<String> tags = List<String>.from(m['tags'] ?? []);
-
-                              final postWidget = PostTile(
-                                initialIsLiked: _myLikedPostIds.contains(d.id),
-    initialIsFollowing: _myFollowingUserIds.contains(authorId),
-                                // PERFORMANS İÇİN ÖNEMLİ: Key eklendi!
-                                key: ValueKey(d.id), 
-                                postId: d.id,
-                                authorId: authorId,
-                                displayName: displayName, 
-                                handle: handle,
-                                photoURL: photoURL,
-                                timeLabel: timeLabel,
-                                movieTitle: movieTitle.isEmpty ? null : movieTitle,
-                                moviePoster: moviePoster.isEmpty ? null : moviePoster,
-                                movieTmdbId: movieTmdbId,
-                                postImage: postImage.isEmpty ? null : postImage,
-                                text: (m['text'] ?? '') as String,
-                                likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
-                                replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-                                rating: rating,
-                                isSpoiler: isSpoiler,
-                                reviewTitle: reviewTitle,
-                                tags: tags,
-                                onToggleLike: (pid, like) {
-                                  if (like) {
-                                    _myLikedPostIds.add(pid);
-                                  } else {
-                                    _myLikedPostIds.remove(pid);
-                                  }
-                                  FeedService.instance.toggleLike(postId: pid, like: like);
-                                },
-                                onStartChat: (String _) async {},
-                                                          onFollow: (uid) async {
-                                  setState(() {
-                                    _myFollowingUserIds.add(uid);
-                                  });
-                                  await FeedService.instance.followUser(uid);
-                                  await FeedService.instance.notifyFollow(toUid: uid);
-                                },
-                                onReport: (pid) => FeedService.instance.reportPost(pid),
-                                onDelete: () {
-                                  if (mounted) {
-                                    setState(() {
-                                      _posts.removeWhere((element) => element.id == d.id);
-                                    });
-                                  }
-                                },
-                              );
-
-                              if (postIndex == 3) {
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    postWidget,
-                                    const SizedBox(height: 12),
-                                    const RecommendedUsers(title: 'Önerilen kullanıcılar', limit: 10),
-                                  ],
-                                );
-                              }
-                              return postWidget;
-                            },
-                          ),
+                    onRefresh: _controller.refresh,
+                    child: _buildPopularFeed(),
                   ),
-
-                  // 2) TAKİP EDİLENLER
+            
+                  // 2) TAKİP EDİLENLER (Eski Yapı Geri Getirildi)
                   const _FollowingFeed(),
                 ],
               ),
             ),
           ],
         ),
-        
-        // BUTON YUKARI TAŞINDI
         floatingActionButton: Padding(
-          padding: const EdgeInsets.only(bottom: 70.0), // Biraz daha yukarı alındı (50->70)
+          padding: const EdgeInsets.only(bottom: 70.0),
           child: FloatingActionButton(
             heroTag: 'feed_compose_fab',
             onPressed: () {
@@ -420,6 +198,7 @@ if (i == 0) {
                     Navigator.pop(context);
                     final user = FirebaseAuth.instance.currentUser;
                     if (user == null) return;
+                    
                     try {
                       String? imageUrl;
                       if (image != null) {
@@ -428,20 +207,22 @@ if (i == 0) {
                         await ref.putFile(image);
                         imageUrl = await ref.getDownloadURL();
                       }
+
                       await FeedService.instance.createPost(
-                        text: text,
-                        movie: movie,
-                        photoURL: imageUrl,
-                        displayName: user.displayName,
-                        handle: user.email?.split('@')[0] ?? 'user',
-                        rating: rating,
-                        isSpoiler: isSpoiler,
-                        tags: tags,
-                        reviewTitle: reviewTitle,
+                          text: text,
+                          movie: movie,
+                          photoURL: imageUrl,
+                          displayName: user.displayName,
+                          handle: user.email?.split('@')[0] ?? 'user',
+                          rating: rating,
+                          isSpoiler: isSpoiler,
+                          tags: tags,
+                          reviewTitle: reviewTitle,
                       );
+                      
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Gönderildi!')));
-                        _refresh();
+                        _controller.refresh(); // Listeyi yenile
                       }
                     } catch (e) {
                       debugPrint('Post gönderme hatası: $e');
@@ -458,13 +239,112 @@ if (i == 0) {
     );
   }
 
-  @override
-  void dispose() {
-    _listController.removeListener(_onScroll);
-    _listController.dispose();
-    super.dispose();
+  Widget _buildPopularFeed() {
+    // 1. YÜKLENİYORSA: SKELETON GÖSTER
+    if (_controller.isLoading) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(8),
+        itemCount: 5, 
+        itemBuilder: (ctx, index) => const PostSkeleton(),
+      );
+    }
+
+    // 2. LİSTE DOLUYSA
+    return ListView.separated(
+      controller: _scrollController,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: _controller.posts.length + 1 + (_controller.isLoadingMore ? 1 : 0),
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, i) {
+        // En üstte Dashboard ve Öneriler
+        if (i == 0) {
+          return const Column(
+            children: [
+              RecommendationCard(),
+              DashboardStatsRow(),
+              DiscoveryListsWidget(),
+            ],
+          );
+        }
+
+        final postIndex = i - 1;
+
+        // En altta yükleniyor ikonu
+        if (postIndex >= _controller.posts.length) {
+          return const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final doc = _controller.posts[postIndex];
+        final m = doc.data() ?? {};
+        final pid = doc.id;
+        final authorId = (m['authorId'] ?? '') as String;
+
+        // --- CACHE'DEN KULLANICI BİLGİSİ ALMA ---
+        final cachedUser = UserCacheService.instance.getFromCache(authorId);
+        final displayName = cachedUser?.displayName ?? (m['displayName'] ?? 'Kullanıcı');
+        final handle = cachedUser?.handle ?? (m['handle'] ?? '');
+        final photoURL = cachedUser?.photoURL ?? (m['photoURL'] ?? '');
+
+        final createdAt = (m['createdAt'] as Timestamp?);
+        final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
+
+        final movieTitle = ((m['movieTitle'] ?? m['movie']?['title']) ?? '').toString();
+        final moviePoster = ((m['moviePoster'] ?? m['movie']?['poster'] ?? m['movie']?['posterUrl']) ?? '').toString();
+        
+        final postWidget = PostTile(
+          key: ValueKey(pid),
+          postId: pid,
+          authorId: authorId,
+          displayName: displayName,
+          handle: handle,
+          photoURL: photoURL,
+          timeLabel: timeLabel,
+          movieTitle: movieTitle.isEmpty ? null : movieTitle,
+          moviePoster: moviePoster.isEmpty ? null : moviePoster,
+          movieTmdbId: _parseTmdbId(m),
+          postImage: (m['postImage'] ?? '') as String,
+          text: m['text'] ?? '',
+          likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+          replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+          rating: (m['rating'] as num?)?.toDouble(),
+          isSpoiler: m['isSpoiler'] == true,
+          tags: List<String>.from(m['tags'] ?? []),
+          reviewTitle: m['reviewTitle'] as String?,
+          
+          initialIsLiked: _controller.myLikedPostIds.contains(pid),
+          initialIsFollowing: _controller.myFollowingUserIds.contains(authorId),
+          
+          onToggleLike: (id, liked) => _controller.toggleLike(id, liked),
+          onFollow: (uid) => _controller.followUser(uid),
+          onStartChat: (_) {}, 
+          onReport: (id) => FeedService.instance.reportPost(id),
+          onDelete: () => _controller.removePost(pid),
+        );
+
+        // Araya önerilen kullanıcıları eklemek istersen (Eski koddaki gibi 3. posttan sonra)
+        if (postIndex == 3) {
+           return Column(
+             crossAxisAlignment: CrossAxisAlignment.stretch,
+             children: [
+               postWidget,
+               const SizedBox(height: 12),
+               const RecommendedUsers(title: 'Önerilen kullanıcılar', limit: 10),
+             ],
+           );
+        }
+
+        return postWidget;
+      },
+    );
   }
 }
+
+// ---------------------------------------------------------------------------
+// AŞAĞISI ESKİ KODDAN KURTARILAN "TAKİP EDİLENLER" (FOLLOWING) KISMI
+// ---------------------------------------------------------------------------
 
 class _FollowingFeed extends StatefulWidget {
   const _FollowingFeed({Key? key}) : super(key: key);
@@ -478,7 +358,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   List<DocumentSnapshot<Map<String, dynamic>>> _items = [];
   final Map<String, Map<String, String>> _localAuthorCache = {};
   
-  // Beğeni ve Takip durumlarını tutacak listeler
   Set<String> _myLikedPostIds = {};
   Set<String> _myFollowingUserIds = {};
 
@@ -491,6 +370,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
     _load();
   }
 
+  // Bu fonksiyonu UserCacheService'e taşıyabiliriz ama eski kodun çalışması için bıraktım
   Future<void> _fetchAuthors(List<DocumentSnapshot> posts) async {
     final uids = <String>{};
     for(var d in posts) {
@@ -499,23 +379,9 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       if(id != null && !_localAuthorCache.containsKey(id)) uids.add(id);
     }
     if(uids.isEmpty) return;
-    final list = uids.toList();
-    for(var i=0; i<list.length; i+=10) {
-      final chunk = list.sublist(i, i+10 > list.length ? list.length : i+10);
-      try {
-        final qs = await FirebaseFirestore.instance.collection('users').where(FieldPath.documentId, whereIn: chunk).get();
-        for(var ud in qs.docs) {
-          final d = ud.data();
-          final nm = (d['displayName'] ?? '').toString();
-          final ph = (d['photoURL'] ?? '').toString();
-          final usr = (d['username'] ?? '').toString();
-          final lb = (d['letterboxdUsername'] ?? '').toString();
-          String h = '';
-          if(usr.isNotEmpty) h='@$usr'; else if(lb.isNotEmpty) h='@$lb';
-          _localAuthorCache[ud.id] = {'displayName': nm.isNotEmpty?nm:'Kullanıcı', 'handle': h, 'photoURL': ph};
-        }
-      } catch(_){}
-    }
+    
+    // UserCacheService kullanarak optimize edelim
+    await UserCacheService.instance.fetchUsers(uids.toList());
   }
 
   Future<void> _load() async {
@@ -528,14 +394,11 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         return;
       }
 
-      // 1. Etkileşim verilerini (Like/Follow) paralel çek
       final interactionsFuture = Future.wait([
         FeedService.instance.fetchUserLikedPostIds(me),
         FeedService.instance.fetchUserFollowingIds(me),
       ]);
 
-      // 2. Takip edilen kişilerin listesini çek (Limiti artırdık: 200)
-      // Sıralama önemli değil çünkü hepsini alıp postları tarihe göre biz dizeceğiz.
       final followingQs = await FirebaseFirestore.instance
           .collection('users')
           .doc(me)
@@ -550,26 +413,22 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         return;
       }
 
-      // 3. Kullanıcıları 10'arlı gruplara böl ve PARALEL sorgu hazırla
-      // Firestore 'whereIn' limiti 30'dur, güvenli olması için 10 kullanıyoruz.
       List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
       
       for (var i = 0; i < uids.length; i += 10) {
         final end = (i + 10 < uids.length) ? i + 10 : uids.length;
         final chunk = uids.sublist(i, end);
         
-        // Her gruptan en güncel 5 postu iste
         futures.add(
           FirebaseFirestore.instance
             .collection('posts')
             .where('authorId', whereIn: chunk)
             .orderBy('createdAt', descending: true)
             .limit(5)
-            .get() // Source belirtmiyoruz, cache veya server
+            .get() 
         );
       }
 
-      // 4. Tüm sorguları aynı anda çalıştır (Hız optimizasyonu)
       final results = await Future.wait(futures);
       
       final List<DocumentSnapshot<Map<String, dynamic>>> allPosts = [];
@@ -577,20 +436,17 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         allPosts.addAll(qs.docs);
       }
 
-      // 5. Gelen tüm postları bellekte tarihe göre (Yeniden Eskiye) sırala
       allPosts.sort((a, b) {
         final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
         final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
         if (ta == null) return 1; if (tb == null) return -1;
-        return tb.compareTo(ta); // Descending (Yeniden eskiye)
+        return tb.compareTo(ta); 
       });
 
-      // 6. İlk 50 tanesini göster (Performans için sınırla)
       final finalItems = allPosts.take(50).toList();
 
       await _fetchAuthors(finalItems);
 
-      // Etkileşim verilerini bekle
       final interactionResults = await interactionsFuture;
       _myLikedPostIds = interactionResults[0];
       _myFollowingUserIds = interactionResults[1];
@@ -621,7 +477,16 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    
+    // Skeleton Loading Ekledik (Optimize edildi)
+    if (_loading) {
+      return ListView.builder(
+        itemCount: 5,
+        padding: const EdgeInsets.all(8),
+        itemBuilder: (_,__) => const PostSkeleton()
+      );
+    }
+    
     if (_items.isEmpty) {
       return RefreshIndicator(
         onRefresh: _load,
@@ -656,10 +521,13 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final d = _items[i];
           final m = d.data() ?? {};
           final authorId = (m['authorId'] ?? '') as String;
-          final cachedUser = _localAuthorCache[authorId];
-          final displayName = cachedUser?['displayName'] ?? (m['displayName'] ?? '') as String;
-          final handle = cachedUser?['handle'] ?? (m['handle'] ?? '') as String;
-          final photoURL = cachedUser?['photoURL'] ?? (m['photoURL'] ?? '') as String;
+          
+          // UserCacheService kullanarak veriyi çekiyoruz (daha hızlı)
+          final cachedUser = UserCacheService.instance.getFromCache(authorId);
+          final displayName = cachedUser?.displayName ?? (m['displayName'] ?? '') as String;
+          final handle = cachedUser?.handle ?? (m['handle'] ?? '') as String;
+          final photoURL = cachedUser?.photoURL ?? (m['photoURL'] ?? '') as String;
+          
           final createdAt = (m['createdAt'] as Timestamp?);
           final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
@@ -693,7 +561,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             reviewTitle: reviewTitle,
             tags: tags,
             
-            // Beğeni ve Takip durumu
             initialIsLiked: _myLikedPostIds.contains(d.id),
             initialIsFollowing: _myFollowingUserIds.contains(authorId),
             
@@ -712,7 +579,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
                  _myFollowingUserIds.add(uid);
                });
                await FeedService.instance.followUser(uid);
-               // Bildirim fonksiyonunu kaldırdık (Cloud Functions hallediyor)
             },
             onReport: (pid) => FeedService.instance.reportPost(pid),
             onDelete: () {
