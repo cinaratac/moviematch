@@ -50,7 +50,28 @@ class ChatService {
   String getChatId(String uidA, String uidB) {
     return chatIdFor(uidA, uidB);
   }
-  
+  Future<void> sendEventMessage(String chatId, String myUid, Map<String, dynamic> eventData) async {
+    await send(
+      chatId, 
+      myUid, 
+      "📅 Yeni Etkinlik: ${eventData['title']}", // Bildirimlerde görünecek metin
+      otherUid: "", // Gruplarda genellikle boştur ama gerekirse doldurulabilir
+      customType: 'event',
+      customData: eventData,
+    );
+  }
+
+  // --- YENİ: Anket Mesajı Gönderme ---
+  Future<void> sendPollMessage(String chatId, String myUid, Map<String, dynamic> pollData) async {
+    await send(
+      chatId, 
+      myUid, 
+      "📊 Yeni Anket: ${pollData['question']}",
+      otherUid: "",
+      customType: 'poll',
+      customData: pollData,
+    );
+  }
   // GÜNCELLENDİ: Mesaj atarken de güncel profil bilgilerini basıyoruz
   Future<void> send(
     String chatId,
@@ -59,6 +80,8 @@ class ChatService {
     required String otherUid,
     Map<String, dynamic>? movie,
     String? imageUrl,
+    String? customType,        // <--- YENİ
+    Map<String, dynamic>? customData,
   }) async {
     final chatRef = _fs.collection('chats').doc(chatId);
     final msgRef = chatRef.collection('messages').doc();
@@ -81,6 +104,12 @@ class ChatService {
       msgData['type'] = 'image';
       msgData['imageUrl'] = imageUrl;
     }
+    else if (customType != null) {
+      msgData['type'] = customType;
+      if (customData != null) {
+        msgData[customType] = customData; // 'event' veya 'poll' alanı açar
+      }
+    }
 
     batch.set(msgRef, msgData);
 
@@ -89,6 +118,8 @@ class ChatService {
     if (lastMsgText.isEmpty) {
       if (movie != null) lastMsgText = '🎬 Film paylaştı';
       else if (imageUrl != null) lastMsgText = '📷 Fotoğraf';
+      else if (customType == 'event') lastMsgText = '📅 Etkinlik'; 
+      else if (customType == 'poll') lastMsgText = '📊 Anket';
     }
 
     final me = _auth.currentUser;
@@ -181,4 +212,5 @@ class ChatService {
       }
     } catch (_) {}
   }
+  
 }

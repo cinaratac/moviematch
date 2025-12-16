@@ -193,21 +193,27 @@ class ClubService {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // Etkinliği oluştur
-    await _db.collection('clubs').doc(clubId).collection('events').add({
+    // 1. Etkinliği kulübün alt koleksiyonuna ekle ve referansını (ID'sini) al
+    final docRef = await _db.collection('clubs').doc(clubId).collection('events').add({
       'title': title,
       'date': date,
       'participants': [],
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // YENİ: Sohbet mesajı gönder
+    // 2. Sohbet mesajı gönder (GÜNCELLENDİ)
+    // 'type': 'event' yaparak ve 'event' verisini ekleyerek kart görünümünü tetikliyoruz.
     final message = "📅 Yeni Etkinlik: $title";
     await _db.collection('chats').doc(clubId).collection('messages').add({
       'text': message,
       'authorId': user.uid,
       'createdAt': FieldValue.serverTimestamp(),
-      'type': 'system', 
+      'type': 'event', // Kart görünümü için kritik
+      'event': {
+        'id': docRef.id,
+        'title': title,
+        'date': date,
+      }
     });
 
     await _db.collection('chats').doc(clubId).update({
@@ -230,9 +236,22 @@ class ClubService {
   }
 
   Future<void> deleteEvent(String clubId, String eventId) async {
+    // 1. Etkinlik dökümanını sil
     await _db.collection('clubs').doc(clubId).collection('events').doc(eventId).delete();
-  }
 
+    // 2. Sohbetteki ilgili mesajı bul ve sil
+    final messagesQuery = await _db
+        .collection('chats')
+        .doc(clubId)
+        .collection('messages')
+        .where('type', isEqualTo: 'event')
+        .where('event.id', isEqualTo: eventId)
+        .get();
+
+    for (var doc in messagesQuery.docs) {
+      await doc.reference.delete();
+    }
+  }
   // 4. ANKETLER
   Stream<QuerySnapshot> getClubPolls(String clubId) {
     return _db.collection('clubs').doc(clubId).collection('polls')
@@ -246,21 +265,27 @@ class ClubService {
 
     final opts = options.map((o) => {'text': o, 'voteCount': 0}).toList();
     
-    // Anketi oluştur
-    await _db.collection('clubs').doc(clubId).collection('polls').add({
+    // 1. Anketi kulübün alt koleksiyonuna ekle
+    final docRef = await _db.collection('clubs').doc(clubId).collection('polls').add({
       'question': question,
       'options': opts,
       'voters': {}, 
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // YENİ: Sohbet mesajı gönder
+    // 2. Sohbet mesajı gönder (GÜNCELLENDİ)
+    // 'type': 'poll' yaparak ve 'poll' verisini ekleyerek kart görünümünü tetikliyoruz.
     final message = "📊 Yeni Anket: $question";
     await _db.collection('chats').doc(clubId).collection('messages').add({
       'text': message,
       'authorId': user.uid,
       'createdAt': FieldValue.serverTimestamp(),
-      'type': 'system',
+      'type': 'poll', // Kart görünümü için kritik
+      'poll': {
+        'id': docRef.id,
+        'question': question,
+        'options': opts,
+      }
     });
 
     await _db.collection('chats').doc(clubId).update({
@@ -295,6 +320,20 @@ class ClubService {
   }
   
   Future<void> deletePoll(String clubId, String pollId) async {
+    // 1. Anket dökümanını sil
     await _db.collection('clubs').doc(clubId).collection('polls').doc(pollId).delete();
+
+    // 2. Sohbetteki ilgili mesajı bul ve sil
+    final messagesQuery = await _db
+        .collection('chats')
+        .doc(clubId)
+        .collection('messages')
+        .where('type', isEqualTo: 'poll')
+        .where('poll.id', isEqualTo: pollId)
+        .get();
+
+    for (var doc in messagesQuery.docs) {
+      await doc.reference.delete();
+    }
   }
 }
