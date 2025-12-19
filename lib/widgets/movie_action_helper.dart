@@ -1,4 +1,4 @@
-import 'dart:io'; // EKLENDİ (File kullanımı için)
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,12 +9,18 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/models/shelf_target.dart'; 
 import 'package:fluttergirdi/services/feed_service.dart';
 
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:fluttergirdi/secrets.dart';
+// HTTP paketini kaldırabilirsiniz veya kalsın ama kullanmayacağız
+// import 'package:http/http.dart' as http; 
+// import 'dart:convert';
+// import 'package:fluttergirdi/secrets.dart'; // <-- BUNU SİLİN
+
+// YENİ: Cloud Functions ekleyin
+import 'package:cloud_functions/cloud_functions.dart';
+
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
 class MovieActionHelper {
+  // ... (show metodu aynı kalacak) ...
   static void show(
     BuildContext context, {
     required String title,
@@ -40,6 +46,7 @@ class MovieActionHelper {
 }
 
 class _MovieActionSheet extends StatelessWidget {
+  // ... (Değişkenler ve constructor aynı kalacak) ...
   final String title;
   final String posterUrl;
   final String? docId;
@@ -74,25 +81,34 @@ class _MovieActionSheet extends StatelessWidget {
 
     if (tmdbId == null) {
       try {
-        final searchUrl = Uri.parse(
-          'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(title)}&language=tr-TR&include_adult=false'
-        );
-        final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
+        // --- DEĞİŞEN KISIM BAŞLANGIÇ ---
+        // Secrets.tmdbHeaders yerine Cloud Functions kullanıyoruz
+        final result = await FirebaseFunctions.instance
+            .httpsCallable('callTMDB')
+            .call({
+              'endpoint': '/3/search/movie',
+              'params': {
+                'query': title,
+                'include_adult': 'false',
+              }
+            });
         
-        if (res.statusCode == 200) {
-          final data = json.decode(res.body);
-          final results = data['results'] as List?;
-          if (results != null && results.isNotEmpty) {
-            tmdbId = results[0]['id'];
-            if (docId != null && tmdbId != null) {
-              FirebaseFirestore.instance
-                  .collection('catalog_films')
-                  .doc(docId)
-                  .set({'tmdbId': tmdbId}, SetOptions(merge: true));
-            }
+        final data = result.data as Map<String, dynamic>;
+        final results = data['results'] as List?;
+        
+        if (results != null && results.isNotEmpty) {
+          tmdbId = results[0]['id'];
+          if (docId != null && tmdbId != null) {
+            FirebaseFirestore.instance
+                .collection('catalog_films')
+                .doc(docId)
+                .set({'tmdbId': tmdbId}, SetOptions(merge: true));
           }
         }
-      } catch (_) {}
+        // --- DEĞİŞEN KISIM BİTİŞ ---
+      } catch (e) {
+        debugPrint("Detay çekme hatası: $e");
+      }
     }
 
     if (!context.mounted) return;
@@ -117,7 +133,11 @@ class _MovieActionSheet extends StatelessWidget {
     }
   }
 
+  // ... (Geri kalan _deleteFromProfile, build, _shareOnFeed vb. metodları aynen kalacak) ...
+  // Buradan aşağısında Secrets kullanımı yok, o yüzden değişiklik gerekmez.
+  // Kodu kısaltmak için buraya kopyalamadım, mevcut dosyanızdaki halini koruyun.
   Future<void> _deleteFromProfile(BuildContext context) async {
+    // ... (Aynen kalsın) ...
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || docId == null || target == null) return;
 
@@ -174,6 +194,7 @@ class _MovieActionSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+      // ... (Aynen kalsın) ...
     final theme = Theme.of(context);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     
@@ -249,6 +270,7 @@ class _MovieActionSheet extends StatelessWidget {
   }
 
   void _shareOnFeed(BuildContext context) {
+       // ... (Aynen kalsın) ...
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ComposePostPage(
@@ -311,6 +333,7 @@ class _MovieActionSheet extends StatelessWidget {
 }
 
 class _InboxPickerSheet extends StatelessWidget {
+     // ... (Aynen kalsın) ...
   final String movieTitle;
   final String moviePoster;
   final String? docId; 

@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
+// YENİ: Cloud Functions paketi
+import 'package:cloud_functions/cloud_functions.dart'; 
+
+// "import '../secrets.dart';"  <-- BU SATIRI SİLİN, ARTIK GEREK YOK
 import '../models/shelf_target.dart';
-import '../secrets.dart';
 import '../widgets/poster_image.dart'; 
 import '../screens/profilescreen.dart';
 
@@ -20,22 +21,25 @@ extension ShelfTargetXLocal on ShelfTarget {
   }
 }
 
+// BU FONKSİYONU DEĞİŞTİRİYORUZ
 Future<List<dynamic>> _tmdbSearchMovies(String query) async {
   final q = query.trim();
   if (q.isEmpty) return [];
-  final bearer = Secrets.tmdbAccessToken;
-  if (bearer.isEmpty) throw Exception('TMDB Token eksik');
-  
-  final uri = Uri.https('api.themoviedb.org', '/3/search/movie', {
-    'query': q,
-    'include_adult': 'false',
-    'language': 'tr-TR', 
-    'page': '1',
-  });
-  final resp = await http.get(uri, headers: {'Authorization': 'Bearer $bearer', 'Accept': 'application/json'});
-  if (resp.statusCode != 200) throw Exception('TMDB error ${resp.statusCode}');
-  final data = jsonDecode(resp.body) as Map<String, dynamic>;
-  return (data['results'] as List?) ?? const [];
+
+  // ARTIK TOKEN YOK, SUNUCUYA SORUYORUZ
+  try {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('searchMovies') // Backend'deki fonksiyon adı
+        .call({'query': q});
+    
+    // Backend { results: [...] } formatında dönüyor
+    final data = result.data as Map<String, dynamic>;
+    return (data['results'] as List?) ?? [];
+  } catch (e) {
+    print("Arama Hatası: $e");
+    // Hata durumunda boş liste dönebilir veya hatayı yukarı fırlatabilirsiniz
+    throw Exception("Arama sırasında hata oluştu: $e");
+  }
 }
 
 class SearchMoviePage extends StatefulWidget {
@@ -53,28 +57,36 @@ class SearchMoviePage extends StatefulWidget {
 }
 
 class _SearchMoviePageState extends State<SearchMoviePage> {
+  // ... (Geri kalan kodlarınız aynı kalıyor, sadece build metodunda değişiklik yok) ...
+  // ... Copy-Paste yaparken SearchMoviePage class'ının altındaki _searchMovies metodunun
+  // ... yukarıdaki global _tmdbSearchMovies'i çağırdığından emin olun.
+  
+  // (Kodun devamını buraya kopyalamıyorum, sadece üstteki _tmdbSearchMovies değişimi yeterli. 
+  // Sınıfın geri kalanı aynı çalışır.)
+  
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _movies = [];
   bool _isLoading = false;
   String? _error;
   Timer? _debounce;
+
   @override
-void dispose() {
-  _debounce?.cancel(); // Timer'ı temizlemeyi unutmayın
-  _searchController.dispose();
-  super.dispose();
-}
+  void dispose() {
+    _debounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
 
   String get _hintText {
-    if (widget.isSelectionMode) return 'Listeye eklemek için film ara...';
-    if (widget.target == null) return 'Film ara...';
-    switch (widget.target!) {
-      case ShelfTarget.fiveStar: return 'Sevdiğin filmi ara...';
-      case ShelfTarget.disliked: return 'Sevmediğin filmi ara...';
-      case ShelfTarget.favorites: return 'Favori filmini ara...';
-      case ShelfTarget.watchlist: return 'İzlemek istediğin filmi ara...';
-    }
-  }
+     if (widget.isSelectionMode) return 'Listeye eklemek için film ara...';
+     if (widget.target == null) return 'Film ara...';
+     switch (widget.target!) {
+       case ShelfTarget.fiveStar: return 'Sevdiğin filmi ara...';
+       case ShelfTarget.disliked: return 'Sevmediğin filmi ara...';
+       case ShelfTarget.favorites: return 'Favori filmini ara...';
+       case ShelfTarget.watchlist: return 'İzlemek istediğin filmi ara...';
+     }
+   }
 
   Future<void> _searchMovies(String query) async {
     if (query.isEmpty) {
@@ -83,6 +95,7 @@ void dispose() {
     }
     setState(() { _isLoading = true; _error = null; });
     try {
+      // YENİ FONKSİYONU ÇAĞIRIYOR
       final results = await _tmdbSearchMovies(query);
       setState(() => _movies = results);
     } catch (e) {
@@ -92,10 +105,8 @@ void dispose() {
     }
   }
 
-  // Geliştirilmiş Slugify (Türkçe karakterleri ve sembolleri düzgün temizler)
   String _slugify(String s) {
     var slug = s.toLowerCase();
-    // Türkçe karakterleri latinize et (daha iyi eşleşme için)
     slug = slug
       .replaceAll('ı', 'i')
       .replaceAll('ğ', 'g')
@@ -103,15 +114,14 @@ void dispose() {
       .replaceAll('ş', 's')
       .replaceAll('ö', 'o')
       .replaceAll('ç', 'c');
-    
-    // Alfanümerik olmayan her şeyi tire yap
     slug = slug.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
-    // Baştaki ve sondaki tireleri sil
     slug = slug.replaceAll(RegExp(r'^-+|-+$'), '');
     return slug;
   }
 
   void _showMovieDetails(dynamic movie) {
+    // ... (Mevcut _showMovieDetails kodunuz aynı kalacak) ...
+    // Kodu buraya tekrar yapıştırıp kalabalık yapmıyorum, bu kısımda değişiklik yok.
     final theme = Theme.of(context);
     final posterPath = movie['poster_path'];
     final posterUrl = (posterPath is String && posterPath.isNotEmpty)
@@ -159,7 +169,6 @@ void dispose() {
                             child: Text(year, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold)),
                           ),
                         ],
-                        // Bilgi amaçlı orijinal başlığı göster
                          Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text('Orijinal: $originalTitle', style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
@@ -202,36 +211,23 @@ void dispose() {
                       final int yearInt = int.tryParse(year) ?? 0;
                       
                       final db = FirebaseFirestore.instance;
-
-                      // --- KESİN ÇÖZÜM: TÜRKÇE KAYITLARI BOŞVER ---
-                      // Var olan "Örümcek Adam" kaydını ARAMIYORUZ.
-                      // Doğrudan "Original Title" üzerinden ID üretiyoruz.
-                      // Böylece Letterboxd ile %100 uyumlu oluyor.
                       
                       final sourceForSlug = originalTitle.isNotEmpty ? originalTitle : title;
                       final String guessLbSlug = _slugify(sourceForSlug);
-                      
-                      // ID'yi zorla İngilizce slug'a sabitliyoruz
                       final String primaryKey = 'film:$guessLbSlug';
                       
-                      print('--- FORCING ENGLISH/ORIGINAL ID ---');
-                      print('Original: $sourceForSlug');
-                      print('Generated ID: $primaryKey');
-
-                      // Dokümanı oluştur veya güncelle (Türkçe başlığı da içine kaydediyoruz ama ID İngilizce)
                       await db.collection('catalog_films').doc(primaryKey).set({
-                        'title': title,           // UI'da Türkçe görünsün
+                        'title': title,           
                         'originalTitle': originalTitle,
                         'posterUrl': posterUrl, 
                         'tmdbId': tmdbId, 
                         'year': yearInt,
                         'titleLc': title.toLowerCase(),
-                        'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']), // Gelecek aramalar için
+                        'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']), 
                         'source': 'tmdb', 
                         'updatedAt': FieldValue.serverTimestamp(),
                       }, SetOptions(merge: true));
 
-                      // Kullanıcıya Ekle (Bu yeni ID'yi kullanıcının listesine ekle)
                       if (widget.target != null) {
                         final String field = widget.target!.userArrayField;
                         await db.collection('users').doc(uid).set({
@@ -245,7 +241,6 @@ void dispose() {
                            await db.collection('userTasteProfiles').doc(uid).set({'lowRatings': FieldValue.arrayUnion([primaryKey])}, SetOptions(merge: true));
                         }
                         
-                        // Local Cache Update
                         final Map<String, String> newLocalItem = {'title': title, 'poster': posterUrl, 'posterUrl': posterUrl};
                         switch (widget.target!) {
                           case ShelfTarget.fiveStar: UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)..add(newLocalItem); break;
@@ -276,6 +271,7 @@ void dispose() {
 
   @override
   Widget build(BuildContext context) {
+     // ... (Build metodu aynı kalıyor) ...
     final theme = Theme.of(context);
     return Scaffold(
       backgroundColor: theme.colorScheme.surface,
@@ -300,18 +296,18 @@ void dispose() {
               suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear, size: 20), onPressed: () { _searchController.clear(); _searchMovies(''); }) : null,
             ),
             onChanged: (value) {
-  if (_debounce?.isActive ?? false) _debounce!.cancel();
-  _debounce = Timer(const Duration(milliseconds: 800), () { // 800ms ideal bir süredir
-    _searchMovies(value);
-  });
-},
+              if (_debounce?.isActive ?? false) _debounce!.cancel();
+              _debounce = Timer(const Duration(milliseconds: 800), () { 
+                _searchMovies(value);
+              });
+            },
           ),
         ),
       ),
       body: _buildBody(),
     );
   }
-
+  
   Widget _buildBody() {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text(_error!, textAlign: TextAlign.center)));
@@ -326,6 +322,7 @@ void dispose() {
   }
 
   Widget _buildGridItem(dynamic movie) {
+      // ... (Grid Item kodu aynı kalıyor) ...
     final posterPath = movie['poster_path'];
     final posterUrl = (posterPath is String && posterPath.isNotEmpty) ? 'https://image.tmdb.org/t/p/w500$posterPath' : '';
     final title = movie['title'] ?? '';

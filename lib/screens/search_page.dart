@@ -5,7 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart'; // Önbellek için eklendi
-
+import 'package:cloud_functions/cloud_functions.dart';
 // İlgili importlar
 import '../screens/public_profile_screen.dart';
 import '../screens/movie_detail_screen.dart';
@@ -261,42 +261,31 @@ class _MovieSearchTabState extends State<_MovieSearchTab> {
   // ------------------------------------
 
   Future<void> _searchMovies(String query) async {
-    if (query.isEmpty) {
-      if (mounted) setState(() { _movies = []; _error = null; _isLoading = false; });
-      return;
-    }
-
-    setState(() { _isLoading = true; _error = null; });
-
-    try {
-      final bearer = Secrets.tmdbAccessToken;
-      final uri = Uri.https('api.themoviedb.org', '/3/search/movie', {
-        'query': query,
-        'include_adult': 'false',
-        'language': 'tr-TR',
-        'page': '1',
-      });
-
-      final resp = await http.get(uri, headers: {
-        'Authorization': 'Bearer $bearer', 
-        'Accept': 'application/json'
-      });
-
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        if (mounted) {
-          setState(() {
-            _movies = (data['results'] as List?) ?? [];
-            _isLoading = false;
-          });
-        }
-      } else {
-        throw Exception('TMDB Hata: ${resp.statusCode}');
-      }
-    } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
-    }
+  if (query.isEmpty) {
+    if (mounted) setState(() { _movies = []; _error = null; _isLoading = false; });
+    return;
   }
+
+  setState(() { _isLoading = true; _error = null; });
+
+  try {
+    // YENİ YÖNTEM: Cloud Function Çağrısı
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('searchMovies')
+        .call({'query': query});
+
+    final data = result.data as Map<String, dynamic>;
+    
+    if (mounted) {
+      setState(() {
+        _movies = (data['results'] as List?) ?? [];
+        _isLoading = false;
+      });
+    }
+  } catch (e) {
+    if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
+  }
+}
 
   @override
   Widget build(BuildContext context) {

@@ -1,34 +1,29 @@
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:http/http.dart' as http; // Sadece resim kontrolü (HEAD isteği) için
 import 'package:cloud_firestore/cloud_firestore.dart';
+// Cloud Functions paketini ekliyoruz
+import 'package:cloud_functions/cloud_functions.dart';
 
-import '../secrets.dart';
+// ARTIK SECRETS IMPORT YOK!
 
-/// Tek noktadan poster çözümü.
-/// 1) existing valid ise ve erişilebiliyorsa onu döner.
-/// 2) Değilse ve tmdbId varsa /movie/{id} ile poster_path alır.
-/// 3) imdbId varsa /find/{imdb_id}
-/// 4) title(+year) ile /search/movie
 class PosterFallbackService {
   PosterFallbackService._();
   static final PosterFallbackService instance = PosterFallbackService._();
 
-  // Boş veya hatalı olduğu bilinen URL'leri filtrele
+  // URL format kontrolü
   bool _looksValid(String? url) {
     if (url == null || url.trim().isEmpty) return false;
     final u = url.trim();
     if (!(u.startsWith('http://') || u.startsWith('https://'))) return false;
     if (u.contains('empty-poster')) return false;
-    if (u.contains('null')) return false; // Bazen string olarak 'null' gelebilir
+    if (u.contains('null')) return false; 
     return true;
   }
 
-  /// URL'in gerçekten resim döndürüp döndürmediğini kontrol eder.
+  // URL erişilebilirlik kontrolü
   Future<bool> _isReachable(String url) async {
     try {
       final uri = Uri.parse(url);
-      // Önce HEAD isteği ile hızlı kontrol (Timeout kısa tutuldu: 3sn)
       final head = await http
           .head(uri, headers: {'Accept': 'image/*'})
           .timeout(const Duration(seconds: 3));
@@ -37,10 +32,9 @@ class PosterFallbackService {
         return true;
       }
       
-      // Bazı CDN'ler HEAD'e izin vermez, 403/405 dönerse küçük bir GET dene
       if (head.statusCode == 403 || head.statusCode == 404 || head.statusCode == 405) {
         final get = await http
-            .get(uri, headers: {'Range': 'bytes=0-10'}) // Sadece ilk byte'ları iste
+            .get(uri, headers: {'Range': 'bytes=0-10'}) 
             .timeout(const Duration(seconds: 4));
         return get.statusCode >= 200 && get.statusCode < 300;
       }
@@ -51,6 +45,7 @@ class PosterFallbackService {
     }
   }
 
+  // Ana Fonksiyon
   Future<String?> resolvePosterUrl({
     String? existing,
     int? tmdbId,
@@ -59,32 +54,32 @@ class PosterFallbackService {
     int? year,
     bool writeBackToCatalog = true,
   }) async {
-    // 1. Adım: Mevcut URL sağlam mı?
+    // 1. Mevcut URL sağlam mı?
     if (_looksValid(existing)) {
       final works = await _isReachable(existing!.trim());
       if (works) {
-        return existing; // Sağlamsa maceraya gerek yok, kullan.
+        return existing; 
       }
-      // Değilse aşağı devam et (Fallback mekanizması)
     }
 
     String? found;
 
-    // 2. Adım: En güvenilir kaynak TMDB ID'dir.
-   if (tmdbId != null && tmdbId > 0) {
+    // 2. TMDB ID ile Cloud Function çağır
+    if (tmdbId != null && tmdbId > 0) {
       found = await _byTmdbId(tmdbId);
     }
-    // 3. Adım: IMDb ID ile bulmaya çalış.
+    
+    // 3. IMDb ID ile Cloud Function çağır
     if (found == null && imdbId != null && imdbId.isNotEmpty) {
       found = await _byImdbId(imdbId);
     }
 
-    // 4. Adım: İsim ve Yıl ile arama yap (En son çare).
+    // 4. İsim ve Yıl ile Cloud Function çağır
     if (found == null && (title != null && title.trim().isNotEmpty)) {
       found = await _bySearch(title: title.trim(), year: year);
     }
 
-    // 5. Adım: Eğer yeni bir poster bulunduysa, kataloğa geri yaz (Tamir et).
+    // 5. Kataloğu güncelle
     if (writeBackToCatalog && found != null && found != existing) {
       _updateCatalog(found, tmdbId, imdbId, title, year);
     }
@@ -92,15 +87,12 @@ class PosterFallbackService {
     return found;
   }
 
-  // --- Firestore Güncelleme ---
   Future<void> _updateCatalog(String newUrl, int? tmdbId, String? imdbId, String? title, int? year) async {
      try {
         final db = FirebaseFirestore.instance;
         QuerySnapshot? q;
 
-        // Belgeyi bulmaya çalış
         if (tmdbId != null && tmdbId > 0) {
-          // Önce doc ID olarak dene, yoksa sorgula
           final docId = 'tmdb:$tmdbId';
           final docCheck = await db.collection('catalog_films').doc(docId).get();
           if (docCheck.exists) {
@@ -120,33 +112,19 @@ class PosterFallbackService {
         if (q != null && q.docs.isNotEmpty) {
           await q.docs.first.reference.set({'posterUrl': newUrl}, SetOptions(merge: true));
         }
-      } catch (_) {
-        // Log hatası (sessizce geç)
-      }
+      } catch (_) {}
   }
 
-  // --- TMDB API Yardımcıları ---
+  // --- CLOUD FUNCTIONS İLE İSTEK ATMA ---
 
   Future<String?> _byTmdbId(int tmdbId) async {
-    final bearer = Secrets.tmdbAccessToken;
-    if (bearer.isEmpty) return null;
-    
     try {
-      final uri = Uri.parse('https://api.themoviedb.org/3/movie/$tmdbId?language=tr-TR'); 
-      // Not: Dil tercihi posterde çok fark etmez ama metadata için tr-TR denenebilir, 
-      // poster yoksa en-US fallback yapılabilir ama basitleştirmek için varsayılanı kullanıyoruz.
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/movie/$tmdbId',
+        'params': {'language': 'tr-TR'}
+      });
       
-      final resp = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $bearer',
-          'Accept': 'application/json',
-        },
-      );
-
-      if (resp.statusCode != 200) return null;
-      
-      final map = json.decode(resp.body) as Map<String, dynamic>;
+      final map = result.data as Map<String, dynamic>;
       final p = (map['poster_path'] ?? '') as String;
       
       if (p.isEmpty) return null;
@@ -157,20 +135,16 @@ class PosterFallbackService {
   }
 
   Future<String?> _byImdbId(String imdbId) async {
-    final bearer = Secrets.tmdbAccessToken;
-    if (bearer.isEmpty) return null;
     try {
-      final uri = Uri.https('api.themoviedb.org', '/3/find/$imdbId', {
-        'external_source': 'imdb_id',
-        'language': 'en-US',
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/find/$imdbId',
+        'params': {
+          'external_source': 'imdb_id',
+          'language': 'en-US',
+        }
       });
-      final resp = await http.get(
-        uri,
-        headers: {'Authorization': 'Bearer $bearer', 'Accept': 'application/json'},
-      );
-      if (resp.statusCode != 200) return null;
       
-      final map = json.decode(resp.body) as Map<String, dynamic>;
+      final map = result.data as Map<String, dynamic>;
       final List results = (map['movie_results'] ?? []) as List;
       if (results.isEmpty) return null;
       
@@ -185,27 +159,23 @@ class PosterFallbackService {
   }
 
   Future<String?> _bySearch({required String title, int? year}) async {
-    final bearer = Secrets.tmdbAccessToken;
-    if (bearer.isEmpty) return null;
     try {
-      final qp = <String, String>{
+      final params = <String, dynamic>{
         'query': title,
         'include_adult': 'false',
-        'language': 'en-US', // Poster için global arama daha güvenli
+        'language': 'en-US',
         'page': '1',
       };
       if (year != null && year > 0) {
-        qp['primary_release_year'] = year.toString();
+        params['primary_release_year'] = year.toString();
       }
       
-      final uri = Uri.https('api.themoviedb.org', '/3/search/movie', qp);
-      final resp = await http.get(
-        uri,
-        headers: {'Authorization': 'Bearer $bearer', 'Accept': 'application/json'},
-      );
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/search/movie',
+        'params': params
+      });
       
-      if (resp.statusCode != 200) return null;
-      final map = json.decode(resp.body) as Map<String, dynamic>;
+      final map = result.data as Map<String, dynamic>;
       final List results = (map['results'] ?? []) as List;
       if (results.isEmpty) return null;
       

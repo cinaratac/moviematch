@@ -15,10 +15,7 @@ import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 import 'package:fluttergirdi/models/gamification.dart'; 
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:fluttergirdi/secrets.dart';
-import 'package:fluttergirdi/models/shelf_target.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
@@ -75,63 +72,68 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   Future<void> _handleFilmTap(String title, String posterUrl, String? docId, int? existingTmdbId) async {
-    int? id = existingTmdbId;
+  int? id = existingTmdbId;
 
-    if (id == null) {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (c) => const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
-      );
+  if (id == null) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
+    );
 
-      try {
-        final searchUrl = Uri.parse(
-            'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(title)}&language=tr-TR&include_adult=false');
-        final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
-
-        if (!mounted) return;
-        Navigator.pop(context); 
-
-        if (res.statusCode == 200) {
-          final data = json.decode(res.body);
-          final results = data['results'] as List?;
-          if (results != null && results.isNotEmpty) {
-            id = results[0]['id'];
-            if (docId != null && docId.isNotEmpty && id != null) {
-              FirebaseFirestore.instance
-                  .collection('catalog_films')
-                  .doc(docId)
-                  .set({'tmdbId': id}, SetOptions(merge: true));
-            }
-          } else {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('Film detayları bulunamadı.')));
-            return;
-          }
+    try {
+      // YENİ: Cloud Functions Kullanımı
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/search/movie',
+        'params': {
+          'query': title,
+          'language': 'tr-TR',
+          'include_adult': 'false'
         }
-      } catch (e) {
-        if (!mounted) return;
-        Navigator.pop(context);
+      });
+
+      if (!mounted) return;
+      Navigator.pop(context); // Loading kapat
+
+      final data = result.data as Map<String, dynamic>;
+      final results = data['results'] as List?;
+      
+      if (results != null && results.isNotEmpty) {
+        id = results[0]['id'];
+        if (docId != null && docId.isNotEmpty && id != null) {
+          FirebaseFirestore.instance
+              .collection('catalog_films')
+              .doc(docId)
+              .set({'tmdbId': id}, SetOptions(merge: true));
+        }
+      } else {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Bağlantı hatası oluştu.')));
+            .showSnackBar(const SnackBar(content: Text('Film detayları bulunamadı.')));
         return;
       }
-    }
-
-    if (id != null && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MovieDetailScreen(
-            tmdbId: id!,
-            title: title,
-            posterUrl: posterUrl,
-          ),
-        ),
-      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Hata olsa da loading kapat
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Hata oluştu: $e')));
+      return;
     }
   }
+
+  if (id != null && mounted) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieDetailScreen(
+          tmdbId: id!,
+          title: title,
+          posterUrl: posterUrl,
+        ),
+      ),
+    );
+  }
+}
 
   void _showEnlargedImage(String imageUrl) {
     if (imageUrl.isEmpty) return;

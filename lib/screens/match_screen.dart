@@ -2,10 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
-import 'dart:convert'; // EKLENDİ: JSON decode için
-import 'package:http/http.dart' as http; // EKLENDİ: API isteği için
-import 'package:fluttergirdi/secrets.dart'; // EKLENDİ: Token için
-
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:fluttergirdi/services/match_service.dart' as global_match;
 import 'package:fluttergirdi/services/like_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
@@ -370,77 +367,73 @@ class _MatchScreenState extends State<MatchScreen> {
   }
 
   // YENİ EKLENEN FONKSİYON: TMDB ID'si yoksa arayıp bulur
-  Future<void> _handleFilmTap(BuildContext context, FilmItem film) async {
-    int? id = film.tmdbId;
+  // lib/screens/match_screen.dart içinde _handleFilmTap fonksiyonunu bulun ve bununla değiştirin:
 
-    if (id == null) {
-      // ID yok, arama yapmamız lazım. Kullanıcıya bir loading gösterelim.
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (c) => const Center(child: CircularProgressIndicator()),
-      );
+Future<void> _handleFilmTap(BuildContext context, FilmItem film) async {
+  int? id = film.tmdbId;
 
-      try {
-        final searchUrl = Uri.parse(
-          'https://api.themoviedb.org/3/search/movie?query=${Uri.encodeComponent(film.title)}&language=tr-TR&include_adult=false'
-        );
-        final res = await http.get(searchUrl, headers: Secrets.tmdbHeaders);
-        
-        // HATA DÜZELTME: Async işlemden sonra mounted kontrolü
-        if (!mounted) return;
-        Navigator.pop(context); // Loading'i kapat
+  if (id == null) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(child: CircularProgressIndicator()),
+    );
 
-        if (res.statusCode == 200) {
-          final data = json.decode(res.body);
-          final results = data['results'] as List?;
-          if (results != null && results.isNotEmpty) {
-            id = results[0]['id'];
-            
-            // Gelecekte tekrar aramayalım diye Firestore'a kaydedelim
-            if (film.id.isNotEmpty && id != null) {
-              FirebaseFirestore.instance
-                  .collection('catalog_films')
-                  .doc(film.id)
-                  .set({'tmdbId': id}, SetOptions(merge: true));
-            }
-          } else {
-             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Film detayları bulunamadı.'))
-            );
-            return;
-          }
-        } else {
-           // HTTP Hata durumu
-           ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(content: Text('Bağlantı hatası oluştu.'))
-           );
-           return;
+    try {
+      // YENİ: Cloud Functions Kullanımı
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/search/movie',
+        'params': {
+          'query': film.title,
+          'language': 'tr-TR',
+          'include_adult': 'false'
         }
-      } catch (e) {
-        // HATA DÜZELTME: Catch bloğunda mounted kontrolü
-        if (!mounted) return;
-        Navigator.pop(context); // Loading'i kapat (eğer açıksa)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bağlantı hatası oluştu.'))
+      });
+      
+      if (!mounted) return;
+      Navigator.pop(context); // Loading kapat
+
+      final data = result.data as Map<String, dynamic>;
+      final results = data['results'] as List?;
+
+      if (results != null && results.isNotEmpty) {
+        id = results[0]['id'];
+        
+        if (film.id.isNotEmpty && id != null) {
+          FirebaseFirestore.instance
+              .collection('catalog_films')
+              .doc(film.id)
+              .set({'tmdbId': id}, SetOptions(merge: true));
+        }
+      } else {
+         ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Film detayları bulunamadı.'))
         );
         return;
       }
-    }
-
-    if (id != null && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MovieDetailScreen(
-            tmdbId: id!,
-            title: film.title,
-            posterUrl: film.posterUrl,
-          ),
-        ),
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Hata: $e'))
       );
+      return;
     }
   }
+
+  if (id != null && mounted) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieDetailScreen(
+          tmdbId: id!,
+          title: film.title,
+          posterUrl: film.posterUrl,
+        ),
+      ),
+    );
+  }
+}
 
   @override
   Widget build(BuildContext context) {

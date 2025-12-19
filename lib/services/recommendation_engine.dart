@@ -1,11 +1,9 @@
-import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart'; // debugPrint için
-import '../secrets.dart';
+import 'package:cloud_functions/cloud_functions.dart'; // YENİ
+// import '../secrets.dart'; // SİLİN
 
-
-/// Film Öneri Modeli
+// ... (MovieRecommendation ve UserTasteProfile sınıfları AYNEN kalacak) ...
 class MovieRecommendation {
   final int tmdbId;
   final String title;
@@ -57,13 +55,12 @@ class MovieRecommendation {
   }
 }
 
-/// Kullanıcı Zevk Profili
 class UserTasteProfile {
   final List<String> favoriteGenres;
   final List<String> favoriteDirectors;
   final List<String> favoriteActors;
   final List<int> lovedMovieTmdbIds;
-  final List<String> lovedMovieTitles; // ID yoksa isimle aramak için
+  final List<String> lovedMovieTitles; 
   final List<int> dislikedMovieTmdbIds;
   final int? age;
 
@@ -83,15 +80,13 @@ class RecommendationEngine {
   static final RecommendationEngine instance = RecommendationEngine._();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final String _tmdbBearer = Secrets.tmdbAccessToken;
+  // String _tmdbBearer = Secrets.tmdbAccessToken; // ARTIK YOK
 
   // Cache süresi (7 Gün)
   static const Duration _cacheDuration = Duration(days: 7);
   List<MovieRecommendation>? _memoryCache;
   DateTime? _lastFetchTime;
 
-  /// ÖNERİLERİ KAYDETTİĞİMİZ YENİ GÜVENLİ YOL
-  /// users -> {uid} -> recommendations -> feed
   DocumentReference _getRecRef(String uid) {
     return _db.collection('users').doc(uid).collection('recommendations').doc('feed');
   }
@@ -106,7 +101,7 @@ class RecommendationEngine {
 
     final Set<int> ignoreIds = {};
     
-    // 2. Firebase Cache Kontrolü (YENİ ADRES)
+    // 2. Firebase Cache Kontrolü
     try {
       final docRef = _getRecRef(uid);
       final snapshot = await docRef.get();
@@ -124,7 +119,6 @@ class RecommendationEngine {
              return list;
            }
         }
-        // Veri eskiyse ID'leri al (tekrar önermemek için)
         final recs = data['recommendations'] as List?;
         if (recs != null) {
           for (var r in recs) ignoreIds.add(r['tmdbId']);
@@ -138,7 +132,7 @@ class RecommendationEngine {
     final profile = await _fetchUserProfile(uid);
     final rawRecommendations = <MovieRecommendation>[];
 
-    // 4. API İstekleri (Hataları Yutmadan)
+    // 4. API İstekleri (Backend Üzerinden)
     await Future.wait([
       _getGenreBasedRecommendations(profile, rawRecommendations),
       _getDirectorBasedRecommendations(profile, rawRecommendations),
@@ -178,7 +172,7 @@ class RecommendationEngine {
     filtered.sort((a, b) => b.matchScore.compareTo(a.matchScore));
     final top30 = filtered.take(30).toList();
 
-    // 7. Firebase'e Yazma (YENİ ADRES)
+    // 7. Firebase'e Yazma
     if (top30.isNotEmpty) {
       try {
         await _getRecRef(uid).set({
@@ -268,29 +262,27 @@ class RecommendationEngine {
     }
   }
 
-  // --- API Fetcher Helper ---
+  // --- API Fetcher Helper (ARTIK CLOUD FUNCTIONS İLE) ---
   
-  Map<String, String> get _headers => {
-    'Authorization': 'Bearer $_tmdbBearer',
-    'Accept': 'application/json',
-  };
-
   Future<void> _fetchAndAddRecommendations(String path, List<MovieRecommendation> list, String reason) async {
     try {
-      final uri = Uri.https('api.themoviedb.org', path, {'language': 'tr-TR', 'page': '1'});
-      final resp = await http.get(uri, headers: _headers);
-      if (resp.statusCode == 200) {
-        final data = json.decode(resp.body);
-        final results = data['results'] as List;
-        for (final movie in results.take(5)) {
-          final vote = (movie['vote_average'] ?? 0.0).toDouble();
-          final score = 50.0 + (vote * 4.5);
-          list.add(_createRecommendation(
-            movie,
-            matchScore: score.clamp(0.0, 92.0),
-            matchReason: reason,
-          ));
-        }
+      // YENİ: Backend çağrısı
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': path,
+        'params': {'language': 'tr-TR', 'page': '1'}
+      });
+
+      final data = result.data as Map<String, dynamic>;
+      final results = data['results'] as List;
+      
+      for (final movie in results.take(5)) {
+        final vote = (movie['vote_average'] ?? 0.0).toDouble();
+        final score = 50.0 + (vote * 4.5);
+        list.add(_createRecommendation(
+          movie,
+          matchScore: score.clamp(0.0, 92.0),
+          matchReason: reason,
+        ));
       }
     } catch (e) {
       debugPrint("API Error: $e");
@@ -306,16 +298,20 @@ class RecommendationEngine {
       final id = genreMap[g.toLowerCase().trim()];
       if (id != null) {
         try {
-          final uri = Uri.https('api.themoviedb.org', '/3/discover/movie', {
-            'with_genres': id.toString(), 'sort_by': 'popularity.desc', 'language': 'tr-TR'
+          // Cloud Function ile discover/movie çağrısı
+          final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+            'endpoint': '/3/discover/movie',
+            'params': {
+              'with_genres': id.toString(), 
+              'sort_by': 'popularity.desc', 
+              'language': 'tr-TR'
+            }
           });
-          final resp = await http.get(uri, headers: _headers);
-          if(resp.statusCode==200) {
-             final res = json.decode(resp.body)['results'] as List;
-             for(var m in res.take(5)) {
-               final vote = (m['vote_average'] ?? 0.0).toDouble();
-               recommendations.add(_createRecommendation(m, matchScore: (50.0 + (vote * 5.0)).clamp(0.0, 95.0), matchReason: 'Tür: $g'));
-             }
+          
+          final res = (result.data as Map<String, dynamic>)['results'] as List;
+          for(var m in res.take(5)) {
+            final vote = (m['vote_average'] ?? 0.0).toDouble();
+            recommendations.add(_createRecommendation(m, matchScore: (50.0 + (vote * 5.0)).clamp(0.0, 95.0), matchReason: 'Tür: $g'));
           }
         } catch(_){}
       }
@@ -336,29 +332,38 @@ class RecommendationEngine {
 
   Future<void> _fetchPersonCredits(String name, String dept, List<MovieRecommendation> list, String roleLabel) async {
     try {
-      final sUri = Uri.https('api.themoviedb.org', '/3/search/person', {'query': name, 'language': 'tr-TR'});
-      final sResp = await http.get(sUri, headers: _headers);
-      if (sResp.statusCode != 200) return;
-      final sRes = json.decode(sResp.body)['results'] as List;
+      // 1. Kişiyi Ara
+      final sResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/search/person',
+        'params': {'query': name, 'language': 'tr-TR'}
+      });
+      final sRes = (sResult.data as Map<String, dynamic>)['results'] as List;
       if (sRes.isEmpty) return;
+      
       final personId = sRes.first['id'];
-      final cUri = Uri.https('api.themoviedb.org', '/3/person/$personId/movie_credits', {'language': 'tr-TR'});
-      final cResp = await http.get(cUri, headers: _headers);
-      if (cResp.statusCode == 200) {
-        final cData = json.decode(cResp.body);
-        var credits = (dept == 'Directing' ? cData['crew'] : cData['cast']) as List;
-        if (dept == 'Directing') {
-          credits = credits.where((c) => c['job'] == 'Director').toList();
-        }
-        credits.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
-        for (final movie in credits.take(4)) {
-           final vote = (movie['vote_average'] ?? 0.0).toDouble();
-           list.add(_createRecommendation(
-             movie,
-             matchScore: (55.0 + (vote * 4.0)).clamp(0.0, 90.0),
-             matchReason: '$roleLabel: $name',
-           ));
-        }
+
+      // 2. Kredilerini Çek
+      final cResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/person/$personId/movie_credits',
+        'params': {'language': 'tr-TR'}
+      });
+
+      final cData = cResult.data as Map<String, dynamic>;
+      var credits = (dept == 'Directing' ? cData['crew'] : cData['cast']) as List;
+      
+      if (dept == 'Directing') {
+        credits = credits.where((c) => c['job'] == 'Director').toList();
+      }
+      
+      credits.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
+      
+      for (final movie in credits.take(4)) {
+         final vote = (movie['vote_average'] ?? 0.0).toDouble();
+         list.add(_createRecommendation(
+           movie,
+           matchScore: (55.0 + (vote * 4.0)).clamp(0.0, 90.0),
+           matchReason: '$roleLabel: $name',
+         ));
       }
     } catch (_) {}
   }
@@ -371,14 +376,15 @@ class RecommendationEngine {
     // İsim ile (ID Bulup)
     for (var title in profile.lovedMovieTitles.take(3)) {
       try {
-        final sUri = Uri.https('api.themoviedb.org', '/3/search/movie', {'query': title, 'language': 'tr-TR'});
-        final sResp = await http.get(sUri, headers: _headers);
-        if (sResp.statusCode == 200) {
-          final res = json.decode(sResp.body)['results'] as List;
-          if (res.isNotEmpty) {
-            final id = res.first['id'];
-            await _fetchAndAddRecommendations('/3/movie/$id/recommendations', recommendations, 'Benzer: $title');
-          }
+        final sResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+          'endpoint': '/3/search/movie',
+          'params': {'query': title, 'language': 'tr-TR'}
+        });
+        
+        final res = (sResult.data as Map<String, dynamic>)['results'] as List;
+        if (res.isNotEmpty) {
+          final id = res.first['id'];
+          await _fetchAndAddRecommendations('/3/movie/$id/recommendations', recommendations, 'Benzer: $title');
         }
       } catch(_){}
     }

@@ -1,16 +1,16 @@
-import 'dart:convert';
+
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:fluttergirdi/secrets.dart';
+
 import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
-
+import 'package:cloud_functions/cloud_functions.dart';
 class MovieDetailScreen extends StatefulWidget {
   final int tmdbId;
   final String? title;
@@ -40,38 +40,39 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     _fetchDetails();
   }
 
-  Future<void> _fetchDetails() async {
-    try {
-      final url = Uri.parse('https://api.themoviedb.org/3/movie/${widget.tmdbId}?language=tr-TR&append_to_response=credits,release_dates');
-      
-      final response = await http.get(
-        url,
-        headers: Secrets.tmdbHeaders,
-      );
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (mounted) {
-          setState(() {
-            _movieData = data;
-            _cast = data['credits']['cast'] ?? [];
-            _crew = data['credits']['crew'] ?? [];
-            _loading = false;
-          });
-        }
-      } else {
-        throw Exception('API Hatası: ${response.statusCode}');
+
+Future<void> _fetchDetails() async {
+  try {
+    // YENİ: Cloud Functions Kullanımı
+    final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+      'endpoint': '/3/movie/${widget.tmdbId}',
+      'params': {
+        'language': 'tr-TR',
+        'append_to_response': 'credits,release_dates'
       }
-    } catch (e) {
-      debugPrint('Film detayı çekilemedi: $e');
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _hasError = true;
-        });
-      }
+    });
+
+    final data = result.data as Map<String, dynamic>;
+    
+    if (mounted) {
+      setState(() {
+        _movieData = data;
+        _cast = data['credits']['cast'] ?? [];
+        _crew = data['credits']['crew'] ?? [];
+        _loading = false;
+      });
+    }
+  } catch (e) {
+    debugPrint('Film detayı çekilemedi: $e');
+    if (mounted) {
+      setState(() {
+        _loading = false;
+        _hasError = true;
+      });
     }
   }
+}
 
   // --- KATALOG VE LİSTE İŞLEMLERİ ---
 
