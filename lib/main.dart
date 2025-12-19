@@ -1,7 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode; // kReleaseMode eklendi
 
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/shell.dart';
@@ -10,9 +10,11 @@ import 'package:fluttergirdi/services/notification_service.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+// App Check importu
+import 'package:firebase_app_check/firebase_app_check.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
-// KRİTİK EKLEME: SharedPreferences import edilmeli
 import 'package:shared_preferences/shared_preferences.dart'; 
 
 @pragma('vm:entry-point')
@@ -32,26 +34,34 @@ Future<void> main() async {
   // 2. Firebase Başlatma
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   
+  // --- APP CHECK AKTİVASYONU (KRİTİK DÜZELTME) ---
+  // Bu blok Cloud Functions ve Storage isteklerinin güvenli şekilde yapılmasını sağlar.
+  await FirebaseAppCheck.instance.activate(
+    // Android için: Yayında Play Integrity, testte Debug provider
+    androidProvider: kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug,
+    // iOS için: Yayında App Attest veya DeviceCheck, testte Debug provider
+    appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
+    // Web için: ReCaptcha v3 (gerekirse site key ekleyin)
+    webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'), 
+  );
+  // -------------------------------------------------
+  
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
     cacheSizeBytes: 100 * 1024 * 1024, 
   );
 
-  // --- TAM ÇÖZÜM: KAYITLI TEMAYI YÜKLE ---
-  // Uygulama açılırken SharedPreferences'dan 'themeMode' anahtarını oku.
+  // --- KAYITLI TEMAYI YÜKLE ---
   final prefs = await SharedPreferences.getInstance();
   final String? savedTheme = prefs.getString('themeMode');
 
-  // Okunan değere göre ThemeBridge içindeki ValueNotifier'ı güncelle.
   if (savedTheme == 'light') {
     ThemeBridge.themeMode.value = ThemeMode.light;
   } else if (savedTheme == 'dark') {
     ThemeBridge.themeMode.value = ThemeMode.dark;
   } else {
-    // Eğer kayıt yoksa veya 'system' ise sistem ayarına güven.
     ThemeBridge.themeMode.value = ThemeMode.system;
   }
-  // ---------------------------------------
 
   if (!kIsWeb) {
     await NotificationService.I.init();
@@ -66,7 +76,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ThemeBridge.themeMode'u dinleyerek uygulama temasını anlık ve açılışta değiştirir
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeBridge.themeMode,
       builder: (context, mode, _) {
@@ -75,7 +84,7 @@ class MyApp extends StatelessWidget {
           title: 'Cinematch',
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
-          themeMode: mode, // main içindeki yüklemeden gelen değer burada kullanılır
+          themeMode: mode,
           home: StreamBuilder<User?>(
             stream: FirebaseAuth.instance.authStateChanges(),
             builder: (context, snapshot) {

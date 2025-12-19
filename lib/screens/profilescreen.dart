@@ -483,6 +483,15 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
+  // Helper to extract TMDB ID safely
+  int? _extractTmdbId(Map<String, dynamic> m) {
+    final val = m['tmdbId'];
+    if (val is int) return val;
+    if (val is num) return val.toInt();
+    if (val is String) return int.tryParse(val);
+    return null;
+  }
+
   @override
   void dispose() {
     _userSub?.cancel();
@@ -552,12 +561,15 @@ class _ProfilePageState extends State<ProfilePage> {
               final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
+              final tmdbId = _extractTmdbId(film); // TMDB ID Extraction
              
              return GestureDetector(
                 onTap: () {
                   if (title.isNotEmpty) MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: ShelfTarget.watchlist, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
                 },
-                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800), if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
+                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [
+                  PosterImage(posterUrl: poster, title: title, tmdbId: tmdbId, fit: BoxFit.cover), // Passed tmdbId
+                  if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
               );
             },
           ),
@@ -612,11 +624,15 @@ class _ProfilePageState extends State<ProfilePage> {
               final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
+              final tmdbId = _extractTmdbId(film); // TMDB ID Extraction
+
               return GestureDetector(
                 onTap: () {
                   if (title.isNotEmpty) MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: target, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
                 },
-                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [poster.isNotEmpty ? PosterImage(posterUrl: poster, title: title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800), if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
+                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [
+                  PosterImage(posterUrl: poster, title: title, tmdbId: tmdbId, fit: BoxFit.cover), // Passed tmdbId
+                  if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
               );
             },
           ),

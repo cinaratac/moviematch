@@ -3,7 +3,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/services/poster_fallback_service.dart'; 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
-// CacheManager global olarak tanımlı
 final customCacheManager = CacheManager(
   Config(
     'moviePosterCache', 
@@ -19,7 +18,6 @@ class PosterImage extends StatefulWidget {
   final double? width;
   final double? height;
   final BoxFit fit;
-  // Optimize için yeni parametre: İstenilen bellek önbellek boyutu
   final int? cacheWidth;
 
   const PosterImage({
@@ -30,7 +28,7 @@ class PosterImage extends StatefulWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
-    this.cacheWidth, // Yeni parametre
+    this.cacheWidth,
   });
 
   @override
@@ -48,8 +46,9 @@ class _PosterImageState extends State<PosterImage> {
     super.initState();
     _currentUrl = widget.posterUrl;
     
+    // Eğer URL baştan boşsa hemen fallback dene
     if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
-      _tryFallback();
+      _tryFallback(force: true);
     }
   }
 
@@ -68,16 +67,17 @@ class _PosterImageState extends State<PosterImage> {
       });
 
       if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
-        _tryFallback();
+        _tryFallback(force: true);
       }
     }
   }
 
   bool _isEmpty(String? s) => s == null || s.trim().isEmpty;
 
-  Future<void> _tryFallback() async {
-    if (_isLoadingFallback || _isEmpty(widget.title) || _retryCount >= 2) {
-      if (mounted && _retryCount >= 2) setState(() => _failed = true);
+  // force: true ise mevcut URL'yi kontrol etmeden direkt TMDB'ye gider
+  Future<void> _tryFallback({bool force = false}) async {
+    if (_isLoadingFallback || _isEmpty(widget.title) || _retryCount >= 3) {
+      if (mounted && _retryCount >= 3) setState(() => _failed = true);
       return;
     }
     
@@ -92,6 +92,7 @@ class _PosterImageState extends State<PosterImage> {
         title: widget.title,
         tmdbId: widget.tmdbId,
         existing: widget.posterUrl,
+        ignoreExisting: force, // KRİTİK DEĞİŞİKLİK
       );
       
       if (mounted) {
@@ -118,7 +119,35 @@ class _PosterImageState extends State<PosterImage> {
     }
 
     if (_isLoadingFallback && _isEmpty(_currentUrl)) {
-      return Container(
+      return _buildLoading();
+    }
+
+    final int? optimalMemCacheWidth = widget.cacheWidth ?? 
+        (widget.width != null ? (widget.width! * 2.5).toInt() : 200);
+
+    return CachedNetworkImage(
+      imageUrl: _currentUrl!,
+      cacheManager: customCacheManager,
+      memCacheWidth: optimalMemCacheWidth,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
+      errorWidget: (context, url, error) {
+        // CachedNetworkImage yükleyemediyse URL bozuktur.
+        // Bu yüzden force: true ile çağırıyoruz.
+        if (!_isLoadingFallback && !_failed) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _tryFallback(force: true);
+            });
+        }
+        return _buildPlaceholder();
+      },
+      placeholder: (context, url) => _buildLoading(),
+    );
+  }
+
+  Widget _buildLoading() {
+    return Container(
         width: widget.width,
         height: widget.height,
         color: Colors.grey[900],
@@ -130,40 +159,6 @@ class _PosterImageState extends State<PosterImage> {
           ),
         ),
       );
-    }
-
-    // OPTİMİZASYON: Bellek boyutunu hesapla
-    // Eğer dışarıdan cacheWidth verilmişse onu kullan.
-    // Verilmemişse ama widget.width belliyse onun 2.5 katını kullan (Retina ekranlar için).
-    // Hiçbiri yoksa varsayılan 200 kullan (Eski 300'den daha güvenli).
-    final int? optimalMemCacheWidth = widget.cacheWidth ?? 
-        (widget.width != null ? (widget.width! * 2.5).toInt() : 200);
-
-    return CachedNetworkImage(
-      imageUrl: _currentUrl!,
-      cacheManager: customCacheManager,
-      
-      // ÖNEMLİ: Sadece RAM'deki boyutu kısıtlıyoruz. 
-      // Disktekini orijinal boyutta tutabiliriz, böylece detay sayfasına geçince tekrar indirmeyiz.
-      memCacheWidth: optimalMemCacheWidth,
-      
-      width: widget.width,
-      height: widget.height,
-      fit: widget.fit,
-      errorWidget: (context, url, error) {
-        if (!_isLoadingFallback && !_failed) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _tryFallback();
-            });
-        }
-        return _buildPlaceholder();
-      },
-      placeholder: (context, url) => Container(
-        width: widget.width,
-        height: widget.height,
-        color: Colors.grey[850],
-      ),
-    );
   }
 
   Widget _buildPlaceholder() {
