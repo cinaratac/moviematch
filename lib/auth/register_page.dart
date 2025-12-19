@@ -562,7 +562,7 @@ class _RegisterPageState extends State<RegisterPage> {
         keyboardType: keyboardType,
         onTap: onTap,
         validator: validator,
-        style: const TextStyle(fontSize: 16),
+        style: const TextStyle(fontSize: 16, color: Colors.black),
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: Colors.grey[400]),
           suffixIcon: isPassword

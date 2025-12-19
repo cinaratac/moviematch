@@ -52,7 +52,7 @@ class CustomListDetailScreen extends StatelessWidget {
                         style: const TextStyle(
                           fontSize: 10, // Daha küçük font
                           fontWeight: FontWeight.normal,
-                          color: Colors.white70, // Hafif silik beyaz
+                          color: Colors.white, // Hafif silik beyaz
                           shadows: [Shadow(color: Colors.black, blurRadius: 8)]
                         ),
                       ),
@@ -132,7 +132,7 @@ class CustomListDetailScreen extends StatelessWidget {
                               TextSpan(
                                 text: list.ownerName,
                                 style: TextStyle(
-                                  color: Theme.of(context).primaryColor,
+                                  color: Colors.green,
                                   fontWeight: FontWeight.bold,
                                   decoration: TextDecoration.underline,
                                 ),

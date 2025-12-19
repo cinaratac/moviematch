@@ -47,14 +47,15 @@ class _SearchPageState extends State<SearchPage> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  void _onSearchChanged(String val) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 500), () {
-      setState(() {
-        _searchText = val.trim();
-      });
+ 
+void _onSearchChanged(String val) {
+  if (_debounce?.isActive ?? false) _debounce!.cancel();
+  _debounce = Timer(const Duration(milliseconds: 960), () { // 500'den 750'ye çıkarıldı
+    setState(() {
+      _searchText = val.trim();
     });
-  }
+  });
+}
 
   @override
   Widget build(BuildContext context) {

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'dart:async';
 import '../models/shelf_target.dart';
 import '../secrets.dart';
 import '../widgets/poster_image.dart'; 
@@ -57,6 +57,13 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
   List<dynamic> _movies = [];
   bool _isLoading = false;
   String? _error;
+  Timer? _debounce;
+  @override
+void dispose() {
+  _debounce?.cancel(); // Timer'ı temizlemeyi unutmayın
+  _searchController.dispose();
+  super.dispose();
+}
 
   String get _hintText {
     if (widget.isSelectionMode) return 'Listeye eklemek için film ara...';
@@ -292,7 +299,12 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),
               suffixIcon: _searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.clear, size: 20), onPressed: () { _searchController.clear(); _searchMovies(''); }) : null,
             ),
-            onChanged: (value) { setState(() {}); _searchMovies(value); },
+            onChanged: (value) {
+  if (_debounce?.isActive ?? false) _debounce!.cancel();
+  _debounce = Timer(const Duration(milliseconds: 800), () { // 800ms ideal bir süredir
+    _searchMovies(value);
+  });
+},
           ),
         ),
       ),

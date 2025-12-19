@@ -279,7 +279,7 @@ class _LoginPageState extends State<LoginPage> {
         controller: controller,
         obscureText: isPassword && !isVisible,
         keyboardType: isPassword ? TextInputType.visiblePassword : TextInputType.emailAddress,
-        style: const TextStyle(fontSize: 16),
+       style: const TextStyle(fontSize: 16, color: Colors.black),
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: Colors.grey[400]),
           suffixIcon: isPassword

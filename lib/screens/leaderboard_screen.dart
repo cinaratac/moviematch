@@ -56,8 +56,8 @@ class LeaderboardScreen extends StatelessWidget {
                 overlayColor: WidgetStateProperty.all(Colors.transparent),
                 tabs: const [
                   Tab(text: 'En Popüler'),
-                  Tab(text: 'Film Kurtları'),
-                  Tab(text: 'Genel Puan'), // İsmi güncelledik
+                  Tab(text: 'En Sinefiller'),
+                  Tab(text: 'Yarışma Liderleri'), 
                 ],
               ),
             ),
