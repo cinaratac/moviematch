@@ -8,8 +8,6 @@ import '../controllers/feed_controller.dart';
 import '../services/user_cache_service.dart';
 import '../widgets/post_skeleton.dart';
 import '../services/feed_service.dart';
-
-import 'package:fluttergirdi/screens/search_profiles_screen.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/notifications.dart'; 

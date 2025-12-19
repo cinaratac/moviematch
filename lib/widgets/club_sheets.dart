@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-
+import 'package:fluttergirdi/services/tab_service.dart'; // TabService importu
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
@@ -123,7 +123,18 @@ class ClubDetailSheet extends StatelessWidget {
               icon: const Icon(Icons.edit, color: Colors.white),
               onPressed: () {
                 Navigator.pop(context);
-                showModalBottomSheet(context: context, isScrollControlled: true, builder: (_) => EditClubSheet(clubId: clubId, currentName: data['name'], currentDesc: data['description'], currentImage: imageUrl));
+                showModalBottomSheet(
+                  context: context, 
+                  isScrollControlled: true, 
+                  builder: (_) => EditClubSheet(
+                    clubId: clubId, 
+                    currentName: data['name'], 
+                    currentDesc: data['description'], 
+                    currentImage: imageUrl,
+                    // YENİ: Kurucu bilgisini gönderiyoruz
+                    isOwner: data['ownerId'] == FirebaseAuth.instance.currentUser?.uid, 
+                  )
+                );
               },
             ),
           ),
@@ -562,8 +573,9 @@ class EditClubSheet extends StatefulWidget {
   final String? currentName;
   final String? currentDesc;
   final String? currentImage;
+  final bool isOwner;
 
-  const EditClubSheet({super.key, required this.clubId, this.currentName, this.currentDesc, this.currentImage});
+  const EditClubSheet({super.key, required this.clubId, this.currentName, this.currentDesc, this.currentImage, required this.isOwner});
 
   @override
   State<EditClubSheet> createState() => _EditClubSheetState();
@@ -593,22 +605,108 @@ class _EditClubSheetState extends State<EditClubSheet> {
     } catch (_) {} 
     finally { if(mounted) setState(() => _isLoading = false); }
   }
+  // ... (EditClubSheetState sınıfının içi)
 
-  @override
+  Future<void> _deleteClub() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Kulübü Sil?"),
+        content: const Text("Bu işlem geri alınamaz. Kulüp ve tüm verileri kalıcı olarak silinecektir."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("İptal")),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text("Sil"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _isLoading = true);
+      try {
+        // 1. Kulübü veritabanından sil
+        await ClubService.instance.deleteClub(widget.clubId);
+        
+        if (mounted) {
+          // 2. Açık olan pencereleri kapat
+          Navigator.pop(context); // Edit Sheet'i kapatır
+          Navigator.pop(context); // Alttaki Club Detail Sheet'i kapatır
+
+          // 3. Mesajlar Sekmesine Yönlendir
+          // NOT: '3' yerine projenizdeki Mesajlar sekmesinin indeks numarasını yazın.
+          // Genellikle: 0=Ana Sayfa, 1=Arama, 2=Kulüpler, 3=Mesajlar, 4=Profil şeklindedir.
+          TabService.instance.changeTab(4); 
+        }
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Hata: $e")));
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    }
+  }
+
+ @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 24, right: 24, top: 24),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        GestureDetector(
-          onTap: () async { final p = await ImagePicker().pickImage(source: ImageSource.gallery); if(p!=null) setState(() => _imageFile = File(p.path)); },
-          child: Container(height: 120, decoration: BoxDecoration(color: Colors.grey.shade800, borderRadius: BorderRadius.circular(12), image: (_imageFile!=null || widget.currentImage!=null) ? DecorationImage(image: _imageFile!=null ? FileImage(_imageFile!) as ImageProvider : NetworkImage(widget.currentImage!), fit: BoxFit.cover) : null), child: const Center(child: Icon(Icons.add_a_photo))),
-        ),
-        const SizedBox(height: 16),
-        TextField(controller: _descCtrl, decoration: const InputDecoration(labelText: 'Açıklama', border: OutlineInputBorder()), maxLines: 3),
-        const SizedBox(height: 16),
-        SizedBox(width: double.infinity, child: FilledButton(onPressed: _isLoading ? null : _save, child: _isLoading ? const CircularProgressIndicator() : const Text('Kaydet'))),
-        const SizedBox(height: 24),
-      ]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min, 
+        children: [
+          GestureDetector(
+            onTap: () async { 
+              final p = await ImagePicker().pickImage(source: ImageSource.gallery); 
+              if(p!=null) setState(() => _imageFile = File(p.path)); 
+            },
+            child: Container(
+              height: 120, 
+              decoration: BoxDecoration(
+                color: Colors.grey.shade800, 
+                borderRadius: BorderRadius.circular(12), 
+                image: (_imageFile!=null || widget.currentImage!=null) 
+                  ? DecorationImage(
+                      image: _imageFile!=null ? FileImage(_imageFile!) as ImageProvider : NetworkImage(widget.currentImage!), 
+                      fit: BoxFit.cover
+                    ) 
+                  : null
+              ), 
+              child: const Center(child: Icon(Icons.add_a_photo))
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _descCtrl, 
+            decoration: const InputDecoration(labelText: 'Açıklama', border: OutlineInputBorder()), 
+            maxLines: 3
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity, 
+            child: FilledButton(
+              onPressed: _isLoading ? null : _save, 
+              child: _isLoading ? const CircularProgressIndicator() : const Text('Kaydet')
+            )
+          ),
+          
+          // YENİ: SİLME BUTONU (Sadece Kurucuysa Göster)
+          if (widget.isOwner) ...[
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: _isLoading ? null : _deleteClub,
+                icon: const Icon(Icons.delete_forever, color: Colors.red),
+                label: const Text("Kulübü Kalıcı Olarak Sil", style: TextStyle(color: Colors.red)),
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
+        ]
+      ),
     );
   }
 }

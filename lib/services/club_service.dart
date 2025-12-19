@@ -293,6 +293,30 @@ class ClubService {
       'lastMessageAt': FieldValue.serverTimestamp(),
     });
   }
+  // --- KULÜP SİLME (Sadece Kurucu) ---
+  Future<void> deleteClub(String clubId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    final clubRef = _db.collection('clubs').doc(clubId);
+    final doc = await clubRef.get();
+    
+    if (!doc.exists) return;
+    
+    // Güvenlik Kontrolü: Sadece kurucu (ownerId) silebilir
+    if (doc.data()?['ownerId'] != user.uid) {
+      throw Exception('Yetkisiz işlem: Bu kulübü sadece kurucusu silebilir.');
+    }
+
+    // Kulüp ve sohbet dokümanlarını sil
+    await _db.runTransaction((tx) async {
+      tx.delete(clubRef);
+      tx.delete(_db.collection('chats').doc(clubId));
+    });
+    
+    // Not: Alt koleksiyonlar (events, polls) Firestore'da otomatik silinmez.
+    // Ancak ana doküman silindiğinde uygulamada görünmezler.
+  }
 
   Future<void> votePoll(String clubId, String pollId, String uid, int optionIndex) async {
     final ref = _db.collection('clubs').doc(clubId).collection('polls').doc(pollId);
