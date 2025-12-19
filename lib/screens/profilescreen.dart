@@ -626,43 +626,35 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // --- 1. SEKME: FİLMLER ---
-  Widget _buildSectionHeader(String title, List<String> keys) {
-    final textColor = Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87;
-    return Padding(
-      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor),
-          ),
-          if (keys.isNotEmpty) 
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FullShelfScreen(
-                      title: title,
-                      filmKeys: keys,
-                    ),
+ 
+Widget _buildSectionHeader(String title, List<String> keys, ShelfTarget target) { // target eklendi
+  final textColor = Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87;
+  return Padding(
+    padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor)),
+        if (keys.isNotEmpty) 
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => FullShelfScreen(
+                    title: title,
+                    filmKeys: keys,
+                    target: target, 
                   ),
-                );
-              },
-              child: const Text(
-                'Tümü',
-                style: TextStyle(
-                  color: Color(0xFF2E7D32), // Temanın yeşili
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
                 ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+              );
+            },
+            child: const Text('Tümü', style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 14)),
+          ),
+      ],
+    ),
+  );
+}
   
   Widget _buildProfileContentAfterHeader() {
     final favKeys = List<String>.from((_lastUserData?['favoritesKeys'] ?? []).map((e) => e.toString()));
@@ -702,17 +694,20 @@ class _ProfilePageState extends State<ProfilePage> {
         const SizedBox(height: 16),
 
         // --- BÖLÜMLER ---
-        _buildSectionHeader('Favori Filmler', favKeys),
-        _shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 10),
+        _buildSectionHeader('Favori Filmler', favKeys, ShelfTarget.favorites), // ShelfTarget.favorites eklendi
+_shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 10),
 
-        _buildSectionHeader('Sevdiği Filmler', fiveStarKeys),
-        _shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 10),
+// Sevdiği Filmler
+_buildSectionHeader('Sevdiği Filmler', fiveStarKeys, ShelfTarget.fiveStar), // ShelfTarget.fiveStar eklendi
+_shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 10),
 
-        _buildSectionHeader('Sevmediği Filmler', dislikedKeys),
-        _shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 10),
+// Sevmediği Filmler
+_buildSectionHeader('Sevmediği Filmler', dislikedKeys, ShelfTarget.disliked), // ShelfTarget.disliked eklendi
+_shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 10),
 
-        _buildSectionHeader('Watchlist', watchlistKeys),
-        _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
+// Watchlist
+_buildSectionHeader('Watchlist', watchlistKeys, ShelfTarget.watchlist), // ShelfTarget.watchlist eklendi
+_watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
 
         const SizedBox(height: 52),
       ],

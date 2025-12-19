@@ -2,15 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+import 'package:fluttergirdi/widgets/movie_action_helper.dart'; 
+import 'package:fluttergirdi/models/shelf_target.dart'; 
+
 
 class FullShelfScreen extends StatefulWidget {
   final String title;
   final List<String> filmKeys;
+  final ShelfTarget? target;
 
   const FullShelfScreen({
     super.key,
     required this.title,
     required this.filmKeys,
+    this.target,
   });
 
   @override
@@ -155,36 +160,43 @@ class _FullShelfScreenState extends State<FullShelfScreen> {
                       final title = movie['title'] ?? '';
                       final tmdbId = movie['tmdbId'];
 
-                      return GestureDetector(
-                        onTap: () {
-                          // Filme tıklayınca detay sayfasına git
-                          if (tmdbId != null && tmdbId is int) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => MovieDetailScreen(
-                                  tmdbId: tmdbId,
-                                  title: title,
-                                  posterUrl: posterUrl,
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              PosterImage(
-                                posterUrl: posterUrl,
-                                title: title,
-                                fit: BoxFit.cover,
-                              ),
-                            ],
+                        // FullShelfScreen içindeki itemBuilder
+                        return GestureDetector(
+                          // GridView içindeki film kartının onTap kısmı
+onTap: () {
+  if (widget.target == null) {
+    // Başkasının profili (target null ise): Doğrudan detay sayfasına git
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieDetailScreen(
+          tmdbId: tmdbId,
+          title: title,
+          posterUrl: posterUrl,
+        ),
+      ),
+    );
+  } else {
+    // Kendi profilimiz (target dolu ise): MovieActionHelper menüsünü aç
+    MovieActionHelper.show(
+      context,
+      title: title,
+      posterUrl: posterUrl,
+      docId: movie['docId'] ?? movie['id'],
+      target: widget.target,
+      onItemDeleted: () => setState(() => _loadedFilms.removeAt(index)),
+    );
+  }
+},
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: PosterImage(
+                              posterUrl: posterUrl,
+                              title: title,
+                              fit: BoxFit.cover,
+                            ),
                           ),
-                        ),
-                      );
+                        );
                     },
                   ),
                 ),

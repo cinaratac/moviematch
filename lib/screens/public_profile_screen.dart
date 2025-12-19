@@ -18,6 +18,7 @@ import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:fluttergirdi/secrets.dart';
+import 'package:fluttergirdi/models/shelf_target.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
@@ -253,44 +254,45 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
   
   Widget _buildSectionHeader(String title, List<String> keys) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    
-    return Padding(
-      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor),
-          ),
-          if (keys.isNotEmpty) 
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FullShelfScreen(
-                      title: title,
-                      filmKeys: keys,
-                    ),
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  final textColor = isDark ? Colors.white : Colors.black87;
+  
+  return Padding(
+    padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor),
+        ),
+        if (keys.isNotEmpty) 
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => FullShelfScreen(
+                    title: title,
+                    filmKeys: keys,
+                    target: null,
                   ),
-                );
-              },
-              child: const Text(
-                'Tümü',
-                style: TextStyle(
-                  color: Color(0xFF2E7D32),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
                 ),
+              );
+            },
+            child: const Text(
+              'Tümü',
+              style: TextStyle(
+                color: Color(0xFF2E7D32),
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
               ),
             ),
-        ],
-      ),
-    );
-  }
+          ),
+      ],
+    ),
+  );
+}
 
   Future<List<Map<String, dynamic>?>> _fetchCatalogForKeys(List<String> keys) async {
     final fs = FirebaseFirestore.instance;
