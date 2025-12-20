@@ -92,6 +92,7 @@ flutter:
     - assets/docs/sozlesme.pdf
     - assets/icon/app_icon.png
     - assets/fonts/
+    - assets/images/
 
   fonts:
     - family: Inter

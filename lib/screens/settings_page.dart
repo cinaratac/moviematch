@@ -544,7 +544,8 @@ Future<void> _deleteAccount() async {
                   ),
                 ],
               ),
-              
+              const SizedBox(height: 20),
+              _buildTmdbAttribution(), // TMDB Atıf Widget'ı
               const SizedBox(height: 40),
             ],
           ),
@@ -621,6 +622,7 @@ class _SettingsSection extends StatelessWidget {
     );
   }
 }
+
 
 class _SettingsTile extends StatelessWidget {
   final IconData? icon;
@@ -732,4 +734,41 @@ class _ThemeOption extends StatelessWidget {
       onTap: () => onTap(val),
     );
   }
+}
+// TMDB Atıf Widget'ı
+Widget _buildTmdbAttribution() {
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Divider(), // Üstüne ince bir çizgi çeker, şık durur
+      const SizedBox(height: 20),
+      
+      // LOGO KISMI
+      Opacity(
+        opacity: 0.8, // Logoyu çok az şeffaf yapar, bağırmaz
+        child: Image.asset(
+          'assets/images/tmdb_logo.png', // Dosya yolun burası
+          width: 60, // İdeal boyut
+          height: 60,
+        ),
+      ),
+      
+      const SizedBox(height: 10),
+
+      // ZORUNLU METİN KISMI
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 30.0),
+        child: Text(
+          "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.grey.shade600, // Silik gri renk
+            fontSize: 10, // Çok küçük font (Caption tarzı)
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ),
+      const SizedBox(height: 30), // En altta biraz boşluk bırakır
+    ],
+  );
 }
