@@ -26,7 +26,8 @@ class _CardData {
   final List<_PosterData> fivePosters;
   final List<_PosterData> favPosters;
   final List<_PosterData> watchPosters;
-  
+  final List<_PosterData> userFavPosters;
+
   final int? commonFiveCount;
   final int? commonFavCount;
   final int? commonWatchCount;
@@ -41,6 +42,7 @@ class _CardData {
     this.fivePosters = const [],
     this.favPosters = const [],
     this.watchPosters = const [],
+    this.userFavPosters = const [],
     this.commonFiveCount,
     this.commonFavCount,
     this.commonWatchCount,
@@ -436,6 +438,10 @@ class _LikesDetailCardState extends State<_LikesDetailCard>
            _SectionHeader(title: 'İzleme Listesi'),
            const SizedBox(height: 10),
            _PosterStrip(data: cd.watchPosters),
+           ] else if (cd.userFavPosters.isNotEmpty) ...[
+           _SectionHeader(title: 'KULLANICININ FAVORİLERİ'),
+           const SizedBox(height: 10),
+           _PosterStrip(data: cd.userFavPosters),
         ] else ...[
            Container(
              height: 80,
@@ -603,19 +609,14 @@ class _SkeletonBox extends StatelessWidget {
 
 // --- DATA LOGIC (POSTER FIX ve NULL SAFETY) ---
 
+// BU FONKSİYONU ESKİSİYLE DEĞİŞTİRİN
 Future<_CardData> _loadCardData(
   String otherUid,
   Map<String, dynamic> my,
 ) async {
   final fs = FirebaseFirestore.instance;
 
-  List<String> ls(dynamic x) {
-    if (x is List) return x.map((e) => e.toString()).toList();
-    return const <String>[];
-  }
-  
-
-
+  // --- YARDIMCI METOTLAR ---
   List<String> extractIds(dynamic v) {
     final out = <String>[];
     if (v is List) {
@@ -629,7 +630,19 @@ Future<_CardData> _loadCardData(
     }
     return out;
   }
+
+  // İki haritayı (Taste Profile + User Doc) kontrol edip birleştiren fonksiyon
+  List<String> pickMergedIds(
+      Map<String, dynamic> map1, Map<String, dynamic> map2, List<String> keys) {
+    final Set<String> combined = {};
+    for (final k in keys) {
+      combined.addAll(extractIds(map1[k]));
+      combined.addAll(extractIds(map2[k]));
+    }
+    return combined.toList();
+  }
   
+  // Sadece tek map kontrol eden (kendi profilimiz için)
   List<String> pickIds(Map<String, dynamic> map, List<String> keys) {
     for (final k in keys) {
       final ids = extractIds(map[k]);
@@ -637,96 +650,153 @@ Future<_CardData> _loadCardData(
     }
     return const <String>[];
   }
-  
 
   List<String> inter(List<String> a, List<String> b) {
     final bs = b.toSet();
     return a.where(bs.contains).toList();
   }
-  
-  // POSTER FETCH: Hem Null-Safe, hem de Detaylı (Fallback destekli)
+
   Future<List<_PosterData>> fetchPosters(List<String> ids) async {
     if (ids.isEmpty) return [];
-    final postersData = <_PosterData>[];
+    
+    final postersMap = <String, _PosterData>{};
     final targetIds = ids.take(10).toList();
+    
     try {
-      var qs = await fs.collection('catalog_films')
+      // 1. Döküman ID araması
+      final docIdQuery = fs.collection('catalog_films')
           .where(FieldPath.documentId, whereIn: targetIds)
           .get();
-          
-      if (qs.docs.isEmpty) {
-        qs = await fs.collection('catalog_films').where('key', whereIn: targetIds).get();
-      }
-      
-      for (final d in qs.docs) {
-         // NULL SAFETY
-         final data = d.data() as Map<String, dynamic>?;
-         
-         final p = (data?['poster'] ?? data?['posterUrl'] ?? '').toString();
-         final title = (data?['title'] ?? data?['titleTr'] ?? data?['originalTitle'] ?? '') as String?;
-         final tmdbId = data?['tmdbId'] as int?;
 
-         if (p.isNotEmpty) {
-           postersData.add(_PosterData(
-             posterUrl: p,
-             title: title,
-             tmdbId: tmdbId,
-           ));
-         }
+      // 2. TMDB ID (Sayısal) araması
+      final numericIds = targetIds
+          .map((e) => int.tryParse(e))
+          .where((e) => e != null)
+          .toList();
+
+      Future<QuerySnapshot<Map<String, dynamic>>>? tmdbQuery;
+      if (numericIds.isNotEmpty) {
+        tmdbQuery = fs.collection('catalog_films')
+            .where('tmdbId', whereIn: numericIds)
+            .get();
       }
+
+      final results = await Future.wait([
+        docIdQuery,
+        if (tmdbQuery != null) tmdbQuery else Future.value(null),
+      ]);
+
+      final docIdSnap = results[0] as QuerySnapshot<Map<String, dynamic>>?;
+      final tmdbSnap = results[1] as QuerySnapshot<Map<String, dynamic>>?;
+
+      void processDocs(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+        for (final d in docs) {
+          final data = d.data();
+          if (postersMap.containsKey(d.id)) continue;
+
+          final p = (data['poster'] ?? data['posterUrl'] ?? '').toString();
+          final title = (data['title'] ?? data['titleTr'] ?? data['originalTitle'] ?? '') as String?;
+          final tmdbId = data['tmdbId'] as int?;
+
+          if (p.isNotEmpty) {
+            postersMap[d.id] = _PosterData(
+              posterUrl: p,
+              title: title,
+              tmdbId: tmdbId,
+            );
+          }
+        }
+      }
+
+      if (docIdSnap != null) processDocs(docIdSnap.docs);
+      if (tmdbSnap != null) processDocs(tmdbSnap.docs);
+
     } catch (_) { }
-    return postersData;
+    
+    return postersMap.values.toList();
   }
-  
-  final hisTaste = await fs.collection('userTasteProfiles').doc(otherUid).get();
-  final his = hisTaste.data() ?? const <String, dynamic>{};
 
-  final hisGenres = ls(his['genres'] ?? his['favoriteGenres']);
-  final hisDirectors = ls(his['directors'] ?? his['favoriteDirectors']);
-  final hisActors = ls(his['actors'] ?? his['favoriteActors']);
+  // --- VERİ ÇEKME (PARALEL) ---
+  // Hem 'userTasteProfiles' hem 'users' dökümanlarını aynı anda çekiyoruz.
+  final results = await Future.wait([
+    fs.collection('userTasteProfiles').doc(otherUid).get(),
+    fs.collection('users').doc(otherUid).get(),
+  ]);
 
-final myFiveIds = pickIds(my, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
-final hisFiveIds = pickIds(his, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
+  final tasteDoc = results[0];
+  final userDoc = results[1];
+
+  final hisTaste = tasteDoc.data() ?? const <String, dynamic>{};
+  final u = userDoc.data() ?? const <String, dynamic>{}; // User doc verisi
+
+  // Türler, Yönetmenler (Taste + User birleşimi)
+  final hisGenres = pickMergedIds(hisTaste, u, ['genres', 'favoriteGenres']);
+  final hisDirectors = pickMergedIds(hisTaste, u, ['directors', 'favoriteDirectors']);
+  final hisActors = pickMergedIds(hisTaste, u, ['actors', 'favoriteActors']);
+
+  // ID Listeleri (Taste + User birleşimi)
+  // Artık hem 'hisTaste' hem 'u' (users) haritalarındaki alanlara bakıyoruz.
+  final hisFiveIds = pickMergedIds(hisTaste, u, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
+  final hisFavIds = pickMergedIds(hisTaste, u, ['favIds', 'favoriteFilmIds', 'favorites']);
+  final hisWatchIds = pickMergedIds(hisTaste, u, ['watchIds', 'watchlist']);
+
+  // Benim ID'lerim (Sadece myTaste)
+  final myFiveIds = pickIds(my, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']);
   final myFavIds = pickIds(my, ['favIds', 'favoriteFilmIds', 'favorites']);
-  final hisFavIds = pickIds(his, ['favIds', 'favoriteFilmIds', 'favorites']);
   final myWatchIds = pickIds(my, ['watchIds', 'watchlist']);
-  final hisWatchIds = pickIds(his, ['watchIds', 'watchlist']);
   
+  // Ortakları Bul
   final commonFiveIds = inter(myFiveIds, hisFiveIds);
   final commonFavIds = inter(myFavIds, hisFavIds);
   final commonWatchIds = inter(myWatchIds, hisWatchIds);
   
-  // Zengin poster verilerini çekiyoruz
-  List<_PosterData> fivePosters = [];
-  List<_PosterData> favPosters = [];
-  List<_PosterData> watchPosters = [];
+  // Ortak Posterleri Çek
+  List<_PosterData> fivePosters = await fetchPosters(commonFiveIds);
+  List<_PosterData> favPosters = await fetchPosters(commonFavIds);
+  List<_PosterData> watchPosters = await fetchPosters(commonWatchIds);
+  
+  // --- FALLBACK MANTIĞI (Kullanıcı Verisi Gösterme) ---
+  List<_PosterData> userFavPosters = [];
+  
+  // Ortak hiçbir şey yoksa karşı tarafın listelerini dene
+  if (fivePosters.isEmpty && favPosters.isEmpty && watchPosters.isEmpty) {
+     
+     // 1. Favoriler
+     if (hisFavIds.isNotEmpty) {
+       userFavPosters = await fetchPosters(hisFavIds);
+     }
+     
+     // 2. 5 Yıldızlar
+     if (userFavPosters.isEmpty && hisFiveIds.isNotEmpty) {
+       userFavPosters = await fetchPosters(hisFiveIds);
+     }
+     
+     // 3. İzleme Listesi
+     if (userFavPosters.isEmpty && hisWatchIds.isNotEmpty) {
+       userFavPosters = await fetchPosters(hisWatchIds);
+     }
+  }
 
-  if (commonFiveIds.isNotEmpty) fivePosters = await fetchPosters(commonFiveIds);
-  if (commonFavIds.isNotEmpty) favPosters = await fetchPosters(commonFavIds);
-  if (commonWatchIds.isNotEmpty) watchPosters = await fetchPosters(commonWatchIds);
-
+  // Profil Bilgileri (Zaten çekmiştik)
   String? title;
   String? photoURL;
   int? age;
-  try {
-    final userDoc = await fs.collection('users').doc(otherUid).get();
-    final u = userDoc.data();
-    if (u != null) {
-      photoURL = (u['photoURL'] ?? '') as String?;
-      title = u['displayName'] ?? u['username'] ?? 'Kullanıcı';
-      
-      final bd = u['birthdate'];
-      if (bd is Timestamp) {
-        final d = bd.toDate();
-        final now = DateTime.now();
-        int a = now.year - d.year;
-        if (DateTime(now.year, d.month, d.day).isAfter(now)) a -= 1;
-        age = a;
-      } else if (u['age'] is int) {
-        age = u['age'] as int;
-      }
+  
+  if (userDoc.exists) {
+    photoURL = (u['photoURL'] ?? '') as String?;
+    title = u['displayName'] ?? u['username'] ?? 'Kullanıcı';
+    
+    final bd = u['birthdate'];
+    if (bd is Timestamp) {
+      final d = bd.toDate();
+      final now = DateTime.now();
+      int a = now.year - d.year;
+      if (DateTime(now.year, d.month, d.day).isAfter(now)) a -= 1;
+      age = a;
+    } else if (u['age'] is int) {
+      age = u['age'] as int;
     }
-  } catch (_) {}
+  }
   
   return _CardData(
     title: title,
@@ -738,6 +808,7 @@ final hisFiveIds = pickIds(his, ['loved', 'fiveIds', 'fiveFilmIds', 'fiveStars']
     fivePosters: fivePosters,
     favPosters: favPosters,
     watchPosters: watchPosters,
+    userFavPosters: userFavPosters,
     commonFiveCount: commonFiveIds.length,
     commonFavCount: commonFavIds.length,
     commonWatchCount: commonWatchIds.length,
