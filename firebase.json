@@ -27,6 +27,7 @@
     }
   },
   "hosting": {
+    "site": "cinematchsocial", 
     "public": "public",
     "ignore": [
       "firebase.json",
