@@ -222,7 +222,7 @@ class _FeedPageState extends State<FeedPage> {
                         _controller.refresh(); 
                       }
                     } catch (e) {
-                      debugPrint('Post gönderme hatası: $e');
+                 
                       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hata oluştu.')));
                     }
                   },
@@ -442,7 +442,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         setState(() { _items = finalItems; _loading = false; });
       }
     } catch (e) {
-      debugPrint("Takip akışı hatası: $e");
+
       if (mounted) setState(() => _loading = false);
     }
   }

@@ -92,7 +92,7 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
       });
 
     } catch (e) {
-      debugPrint('Rozet hesaplama hatası: $e');
+   
       if (mounted) setState(() => _loading = false);
     }
   }

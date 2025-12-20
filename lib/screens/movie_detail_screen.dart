@@ -64,7 +64,7 @@ Future<void> _fetchDetails() async {
       });
     }
   } catch (e) {
-    debugPrint('Film detayı çekilemedi: $e');
+   
     if (mounted) {
       setState(() {
         _loading = false;

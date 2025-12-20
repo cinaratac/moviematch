@@ -72,7 +72,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
         });
       }
     } catch (e) {
-      debugPrint('Resim seçilemedi: $e');
+      debugPrint('');
     }
   }
 

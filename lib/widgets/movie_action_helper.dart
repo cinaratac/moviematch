@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -107,7 +106,7 @@ class _MovieActionSheet extends StatelessWidget {
         }
         // --- DEĞİŞEN KISIM BİTİŞ ---
       } catch (e) {
-        debugPrint("Detay çekme hatası: $e");
+        debugPrint("");
       }
     }
 
@@ -183,7 +182,7 @@ class _MovieActionSheet extends StatelessWidget {
         );
       }
     } catch (e) {
-      debugPrint('Silme hatası: $e');
+      
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Silinirken bir hata oluştu.')),
@@ -471,7 +470,7 @@ class _InboxPickerSheet extends StatelessWidget {
         );
       }
     } catch (e) {
-      debugPrint("Gönderim hatası: $e");
+      
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Hata oluştu: $e')),

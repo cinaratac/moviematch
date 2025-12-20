@@ -125,7 +125,7 @@ class RecommendationEngine {
         }
       }
     } catch (e) {
-      debugPrint("Cache okuma hatası: $e");
+      debugPrint("");
     }
 
     // 3. Profil Analizi
@@ -183,7 +183,7 @@ class RecommendationEngine {
         _memoryCache = top30;
         _lastFetchTime = DateTime.now();
       } catch (e) {
-        debugPrint("Yazma hatası: $e");
+        debugPrint("");
       }
     }
 
@@ -285,7 +285,7 @@ class RecommendationEngine {
         ));
       }
     } catch (e) {
-      debugPrint("API Error: $e");
+      debugPrint("");
     }
   }
 

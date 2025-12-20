@@ -95,7 +95,7 @@ class ClubService {
           }
         }
       } catch (e) {
-        print("Bildirim gönderme hatası: $e");
+        print("");
       }
 
     } else {

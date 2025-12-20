@@ -36,7 +36,7 @@ Future<List<dynamic>> _tmdbSearchMovies(String query) async {
     final data = result.data as Map<String, dynamic>;
     return (data['results'] as List?) ?? [];
   } catch (e) {
-    print("Arama Hatası: $e");
+   
     // Hata durumunda boş liste dönebilir veya hatayı yukarı fırlatabilirsiniz
     throw Exception("Arama sırasında hata oluştu: $e");
   }
@@ -256,7 +256,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title listene eklendi (ID: $primaryKey)'), backgroundColor: theme.colorScheme.primary));
                       }
                     } catch (e) {
-                      print('HATA: $e');
+                 
                       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
                     }
                   },

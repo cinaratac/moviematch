@@ -49,7 +49,7 @@ class PushTokenService {
       }
     } catch (e) {
       // Hata olsa bile devam et
-      print("PushTokenService hatası: $e");
+    
     } finally {
       _isInitializing = false; // Kilidi aç
     }

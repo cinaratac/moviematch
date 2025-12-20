@@ -53,7 +53,7 @@ class FeedService {
       }
       return likedIds;
     } catch (e) {
-      print("LIKE SORGU HATASI: $e");
+      
       return {};
     }
   }

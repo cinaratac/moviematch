@@ -69,7 +69,7 @@ class PosterFallbackService {
     }
 
     // Konsola bilgi bas (Debug için)
-    print("PosterFallback: TMDB'den çekiliyor... (ID: $tmdbId, Title: $title)");
+  
     String? found;
 
     // 2. TMDB ID ile çağır
@@ -112,10 +112,10 @@ class PosterFallbackService {
 
         if (q != null && q.docs.isNotEmpty) {
           await q.docs.first.reference.set({'posterUrl': newUrl}, SetOptions(merge: true));
-          print("Katalog güncellendi: ${q.docs.first.id} -> $newUrl");
+        
         }
       } catch (e) {
-        print("Katalog güncelleme hatası: $e");
+      
       }
   }
 
@@ -135,7 +135,7 @@ class PosterFallbackService {
       if (p.isEmpty) return null;
       return 'https://image.tmdb.org/t/p/w500$p';
     } catch (e) {
-      print("TMDB ID Error: $e");
+      
       return null;
     }
   }
@@ -161,7 +161,7 @@ class PosterFallbackService {
       
       return 'https://image.tmdb.org/t/p/w500$p';
     } catch (e) {
-      print("IMDB ID Error: $e");
+    
       return null;
     }
   }
@@ -195,7 +195,7 @@ class PosterFallbackService {
       
       return 'https://image.tmdb.org/t/p/w500$p';
     } catch (e) {
-      print("Search Error: $e");
+  
       return null;
     }
   }

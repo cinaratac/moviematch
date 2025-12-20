@@ -107,7 +107,7 @@ class _RegisterPageState extends State<RegisterPage> {
           await batch.commit();
         }
       } catch (e) {
-        debugPrint('Firestore set error: $e');
+        debugPrint('');
       }
 
       // 4) Yönlendirme

@@ -217,7 +217,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
         }
         // Bulunamayanlar {} olarak kalır (yani silinmiş)
       } catch (e) {
-        debugPrint('Kullanıcı verisi çekilemedi: $e');
+        debugPrint('');
       }
     }
     

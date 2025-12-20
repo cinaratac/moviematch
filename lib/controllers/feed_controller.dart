@@ -86,7 +86,7 @@ class FeedController extends ChangeNotifier {
       hasMore = newDocs.length == _pageSize;
       
     } catch (e) {
-      debugPrint("Feed Error: $e");
+      
     } finally {
       isLoading = false;
       isLoadingMore = false;

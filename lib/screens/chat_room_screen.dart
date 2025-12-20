@@ -85,7 +85,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         await sp.setBool('seen_watchlist_guide', true);
       }
     } catch (e) {
-      debugPrint('Rehber hatası: $e');
+      debugPrint('');
     }
   }
 

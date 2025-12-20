@@ -3,13 +3,11 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart'; // Önbellek için eklendi
 import 'package:cloud_functions/cloud_functions.dart';
 // İlgili importlar
 import '../screens/public_profile_screen.dart';
 import '../screens/movie_detail_screen.dart';
-import '../secrets.dart'; 
 import '../widgets/poster_image.dart'; 
 
 class SearchPage extends StatefulWidget {

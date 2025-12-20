@@ -237,7 +237,7 @@ class NotificationService {
         if ((m['authorId'] ?? '') == myUid) continue; // kendi mesajım
         final txt = (m['text'] ?? 'Yeni mesaj').toString();
         await _showChat(title: 'Yeni mesaj', body: txt);
-        if (kDebugMode) debugPrint('notif: chat $chatId -> $txt');
+        if (kDebugMode) debugPrint('');
       }
     });
   }

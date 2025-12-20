@@ -156,9 +156,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
       _cancelReply(); 
       FocusScope.of(context).unfocus();
 
-    } catch (e) {
-      debugPrint('Yorum hatası: $e');
-    } finally {
+    }  finally {
       if (mounted) setState(() => _isSending = false);
     }
   }

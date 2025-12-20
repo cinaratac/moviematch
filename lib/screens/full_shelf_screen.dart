@@ -115,7 +115,7 @@ class _FullShelfScreenState extends State<FullShelfScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Hata: $e");
+     
       if (mounted) setState(() => _isLoading = false);
     }
   }

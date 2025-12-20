@@ -65,7 +65,7 @@ class UserCacheService {
           _cache[doc.id] = user;
         }
       } catch (e) {
-        debugPrint('UserCache Error: $e');
+        debugPrint('');
       }
     }
   }

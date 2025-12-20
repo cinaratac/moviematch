@@ -40,7 +40,7 @@ class AnnouncementService {
         }
       }
     } catch (e) {
-      debugPrint('Duyuru kontrol hatası: $e');
+      debugPrint('');
     }
   }
 

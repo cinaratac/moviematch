@@ -238,7 +238,7 @@ class MatchService {
 
     // --- YÖNTEM A: CLOUD FUNCTION DENEMESİ ---
     try {
-      print("🔍 Cloud Function ile eşleşme aranıyor...");
+    
       final callable = FirebaseFunctions.instance.httpsCallable('findMatchesCallable');
       final resp = await callable.call();
       
@@ -260,16 +260,15 @@ class MatchService {
       if (out.isNotEmpty) {
         out.sort((a, b) => b.score.compareTo(a.score));
         _findCache[myUid] = _FindCache(out, DateTime.now());
-        print("✅ Cloud Function ${out.length} eşleşme buldu.");
+       
         return out;
       } else {
-         print("⚠️ Cloud Function boş döndü, yerel sorguya geçiliyor.");
+        
          cloudFailed = true;
       }
 
     } catch (e) {
-      print("❌ Cloud Function hatası: $e");
-      print("⚠️ Yerel sorguya (eski yönteme) geçiliyor...");
+  
       cloudFailed = true;
     }
 

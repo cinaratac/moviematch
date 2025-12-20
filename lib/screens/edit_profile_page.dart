@@ -70,7 +70,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         });
       }
     } catch (e) {
-      debugPrint('Resim seçme hatası: $e');
+  
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Resim seçilemedi.')),
       );
@@ -406,7 +406,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
              );
            }
         } catch (e) {
-          debugPrint("LB Sync Error: $e");
+         
            if (mounted) {
              ScaffoldMessenger.of(context).showSnackBar(
                const SnackBar(content: Text('Profil kaydedildi ama Letterboxd verileri çekilemedi.')),
