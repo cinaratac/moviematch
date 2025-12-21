@@ -1,14 +1,11 @@
-// lib/auth/auth_gate.dart dosyasının güncellenmiş hali
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'login_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'login_page.dart';
+import 'google_register_page.dart'; // EKLENDİ
 import '../shell.dart';
-import '../onboarding/letterboxd_onboarding.dart'; // YENİ IMPORT
+import '../onboarding/letterboxd_onboarding.dart';
 
-/// İleride burada token/SharedPreferences kontrolü yapabilirsin.
-/// Şimdilik uygulama açıldığında LoginPage gösteriyoruz.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
 
@@ -17,47 +14,43 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
+        // 1. Auth Durumu Bekleniyor
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+
+        // 2. Kullanıcı Giriş Yapmış mı?
         if (snapshot.hasData) {
           final user = snapshot.data!;
+          
           return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-            future: (() async {
-              final ref = FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(user.uid);
-              // First, try to get from cache
-              var snap = await ref.get(const GetOptions(source: Source.cache));
-              // If not found in cache, fall back to server
-              if (!snap.exists) {
-                snap = await ref.get(const GetOptions(source: Source.server));
-              }
-              return snap;
-            })(),
+            future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
+                return const Scaffold(body: Center(child: CircularProgressIndicator()));
               }
-              if (!snap.hasData || !snap.data!.exists) {
-                // HESAP SİLİNDİĞİNDE GİRİŞ EKRANINA YÖNLENDİR
-                return const LoginPage();
+
+              // --- KRİTİK DÜZELTME BURADA ---
+              
+              // Veri yoksa veya 'termsAccepted' (Sözleşme onayı) true değilse -> KAYIT SAYFASINA
+              if (!snap.hasData || !snap.data!.exists || snap.data!.data()?['termsAccepted'] != true) {
+                return GoogleRegisterPage(user: user);
               }
+
+              // Buraya geldiyse kayıt tamdır. Diğer kontroller:
               final data = snap.data!.data();
               final lb = (data?['letterboxdUsername'] ?? '').toString();
+              
               if (lb.isEmpty) {
-                // DÜZELTME: Letterboxd bilgisi eksikse Onboarding ekranına yönlendir
-                return const OnboardingLetterboxd(); // DEĞİŞTİ!
+                return const OnboardingLetterboxd();
               }
+              
               return const HomeShell();
             },
           );
         }
-        // Firebase Auth'tan çıkış yapıldıysa/silindiyse LoginPage göster
+
+        // 3. Giriş Yapılmamış -> Login Sayfası
         return const LoginPage();
       },
     );

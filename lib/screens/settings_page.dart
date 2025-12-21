@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
+import '../auth/login_page.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -87,28 +88,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // --- Yardımcı Fonksiyonlar ---
   
-  Future<String?> _promptText({required String title, String? initial, String? hint, TextInputType? keyboardType}) async {
-    final ctrl = TextEditingController(text: initial ?? '');
-    // Platform kontrolü burada yapılabilir, şimdilik standart dialog
-    return showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(title),
-          content: TextField(
-            controller: ctrl,
-            autofocus: true,
-            decoration: InputDecoration(hintText: hint),
-            keyboardType: keyboardType,
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Vazgeç')),
-            TextButton(onPressed: () => Navigator.of(context).pop(ctrl.text.trim()), child: const Text('Tamam')),
-          ],
-        );
-      },
-    );
-  }
+
 
   Future<void> _resetPassword() async {
     final user = _user;
@@ -294,86 +274,143 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // lib/screens/settings_page.dart içinde _deleteAccount fonksiyonunu bununla değiştirin:
 
-Future<void> _deleteAccount() async {
-  // 1. Onay Diyaloğu
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Hesabı Sil'),
-      content: const Text(
-          'Bu işlem geri alınamaz. Profiliniz ve tüm verileriniz kalıcı olarak silinecektir.'),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Vazgeç')),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Sil', style: TextStyle(color: Colors.red)),
+
+
+// ... SettingsPage sınıfının içine ...
+
+  Future<void> _deleteAccount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    bool confirm = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Hesabı Sil"),
+        content: const Text(
+          "Hesabınızı ve tüm verilerinizi kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
         ),
-      ],
-    ),
-  );
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("İptal"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Evet, Sil"),
+          ),
+        ],
+      ),
+    ) ?? false;
 
-  if (confirm != true) return;
+    if (!confirm) return;
 
-  final user = _user;
-  if (user == null || user.email == null) return;
+    try {
+      // 1. Kullanıcının hangi yöntemle girdiğini bul (Google mı, Şifre mi?)
+      // providerData listesinde 'google.com' varsa Google kullanıcısıdır.
+      bool isGoogleUser = user.providerData.any((info) => info.providerId == 'google.com');
 
-  // 2. Güvenlik Doğrulaması (Şifre İste)
-  final password = await _promptText(
-    title: 'Güvenlik Doğrulaması',
-    hint: 'Hesabınızı silmek için şifrenizi girin',
-    keyboardType: TextInputType.visiblePassword,
-  );
+      if (isGoogleUser) {
+        // --- GOOGLE İLE RE-AUTHENTICATE (YENİDEN DOĞRULAMA) ---
+        // Kullanıcıdan tekrar Google hesabını seçmesini iste
+        final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+        
+        if (googleUser == null) {
+          // Kullanıcı Google panelini kapattı, işlemi iptal et
+          return;
+        }
 
-  if (password == null || password.isEmpty) return;
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+        final AuthCredential credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
 
-  setState(() => _busy = true);
+        // Firebase'e "Bak bu kullanıcı gerçekten o kişi" diye kanıtla
+        await user.reauthenticateWithCredential(credential);
+        
+      } else {
+        // --- E-POSTA/ŞİFRE İLE RE-AUTHENTICATE ---
+        // Şifresini girmesi için bir diyalog aç
+        String? password = await _showPasswordDialog();
+        if (password == null) return; // İptal etti
 
-  try {
-    // 3. Re-Authenticate (Tekrar Giriş Yaparak Yetki Tazele)
-    AuthCredential credential = EmailAuthProvider.credential(
-      email: user.email!,
-      password: password,
-    );
-    await user.reauthenticateWithCredential(credential);
+        final AuthCredential credential = EmailAuthProvider.credential(
+          email: user.email!,
+          password: password,
+        );
 
-    // 4. Verileri Sil (Firestore Batch)
-    final uid = user.uid;
-    final batch = FirebaseFirestore.instance.batch();
+        await user.reauthenticateWithCredential(credential);
+      }
 
-    // Kullanıcı dokümanlarını sil
-    batch.delete(FirebaseFirestore.instance.collection('users').doc(uid));
-    batch.delete(FirebaseFirestore.instance.collection('userTasteProfiles').doc(uid));
-    batch.delete(FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .collection('recommendations')
-        .doc('feed'));
+      // 2. Önce Firestore Verilerini Temizle (Opsiyonel ama önerilir)
+      // Auth silindikten sonra veritabanı kuralları (Rules) erişimi engelleyebilir, o yüzden önce veriyi sil.
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
+      
+      // Varsa diğer koleksiyonlardaki verileri de burada silebilirsiniz.
+      
+      // 3. Auth Hesabını Sil
+      await user.delete();
 
-    await batch.commit();
+      // 4. Çıkış Yap ve Login Ekranına At
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (_) => false,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Hesabınız başarıyla silindi.")),
+        );
+      }
 
-    // 5. Hesabı Sil (Authentication)
-    await user.delete();
-
-    // 6. KRİTİK ADIM: Yönlendirme
-    if (mounted) {
-      // Tüm sayfaları kapat, AuthGate (Login) ekranına düş
-      Navigator.of(context).popUntil((route) => route.isFirst);
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        // Eğer re-auth başarısız olursa (örn: yanlış şifre veya Google iptal)
+        String errorMsg = "Bir hata oluştu.";
+        if (e.code == 'wrong-password') errorMsg = "Girdiğiniz şifre yanlış.";
+        if (e.code == 'requires-recent-login') errorMsg = "Güvenlik gereği tekrar giriş yapmalısınız.";
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Hata: $e"), backgroundColor: Colors.red),
+        );
+      }
     }
-
-  } on FirebaseAuthException catch (e) {
-    if (e.code == 'wrong-password') {
-      _toast('Hatalı şifre.');
-    } else {
-      _toast('Hata: ${e.message}');
-    }
-  } catch (e) {
-    _toast('Bir sorun oluştu: $e');
-  } finally {
-    if (mounted) setState(() => _busy = false);
   }
-}
+
+  // Şifre ile girenlerden şifre istemek için yardımcı fonksiyon
+  Future<String?> _showPasswordDialog() async {
+    String? password;
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Şifrenizi Girin"),
+        content: TextField(
+          obscureText: true,
+          onChanged: (value) => password = value,
+          decoration: const InputDecoration(
+            hintText: "Mevcut şifreniz",
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("İptal"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, password),
+            child: const Text("Onayla"),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showAboutApp() {
     showCupertinoDialog(

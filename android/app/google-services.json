@@ -50,6 +50,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "266660427246-j6icg6srl34hcgqj1h9ge2sr7fj5bmu7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.kozmosoft.cinematch",
+            "certificate_hash": "780d741933bf505b8ec0cb2b11d414b2334de17e"
+          }
+        },
+        {
           "client_id": "266660427246-k3lmulk15j7knljhvupo8s6kodeio42i.apps.googleusercontent.com",
           "client_type": 3
         }

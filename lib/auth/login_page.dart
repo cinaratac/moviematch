@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/auth/register_page.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart'; // YEŞİL KARAKTER İÇİN EKLENDİ
+import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore eklendi
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:fluttergirdi/auth/google_register_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -14,7 +17,8 @@ class _LoginPageState extends State<LoginPage> {
   // Controller'lar
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+  bool _isGoogleLoading = false;
+
   // Durum değişkenleri
   bool _isLoading = false;
   bool _isPasswordVisible = false;
@@ -83,6 +87,61 @@ class _LoginPageState extends State<LoginPage> {
           SnackBar(content: Text('Hata: $e')),
         );
       }
+    }
+  }
+  // ... importlar ...
+
+// _signInWithGoogle fonksiyonunu bu şekilde güncelleyin:
+Future<void> _signInWithGoogle() async {
+    setState(() => _isGoogleLoading = true);
+    
+    try {
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) {
+        setState(() => _isGoogleLoading = false);
+        return;
+      }
+
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // Firebase'e giriş yap
+      final UserCredential userCredential = 
+          await FirebaseAuth.instance.signInWithCredential(credential);
+      final User? user = userCredential.user;
+      
+      if (user != null) {
+        // Kullanıcı verisini kontrol et
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        if (mounted) {
+           // KONTROL DEĞİŞTİ: Sadece döküman varlığı yetmez, 'termsAccepted' true olmalı.
+           if (userDoc.exists && userDoc.data()?['termsAccepted'] == true) {
+            // Kayıtlı kullanıcı -> AuthGate zaten HomeShell'e yönlendirir.
+            // Hiçbir şey yapma.
+          } else {
+            // Yeni kullanıcı veya kaydı yarım kalan -> Register sayfasına git
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => GoogleRegisterPage(user: user),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isGoogleLoading = false);
     }
   }
 
@@ -217,6 +276,26 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                     ),
                   ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    height: 56,
+                    child: OutlinedButton.icon(
+                      onPressed: (_isLoading || _isGoogleLoading) ? null : _signInWithGoogle,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.grey),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        backgroundColor: Colors.white,
+                      ),
+                      icon: _isGoogleLoading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Image.asset('assets/images/google_logo.png', height: 24, width: 24, errorBuilder: (c,o,s) => const Icon(Icons.login)), // Google logosu yoksa icon gösterir
+                      label: Text(
+                        _isGoogleLoading ? 'Bağlanılıyor...' : 'Google ile Bağlan',
+                        style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  
                   const SizedBox(height: 24),
 
                   // --- KAYIT OL ALANI ---
