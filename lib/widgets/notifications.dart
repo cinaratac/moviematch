@@ -135,18 +135,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const Spacer(),
-                  TextButton(
-        onPressed: () async {
-          // Sadece kullanıcı basarsa bu maliyetli işlem yapılır
-          final batch = FirebaseFirestore.instance.batch();
-          final qs = await _q.where('read', isEqualTo: false).get();
-          for (final d in qs.docs) {
-            batch.update(d.reference, {'read': true});
-          }
-          await batch.commit();
-        },
-        child: const Text("Tümünü Oku", style: TextStyle(fontSize: 12)),
-      ),
+                 
                   IconButton(
                     tooltip: 'Kapat',
                     onPressed: () => Navigator.pop(context),

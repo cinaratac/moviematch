@@ -1,7 +1,11 @@
-import 'dart:convert';
+import 'dart:convert'; // <--- JSON İÇİN BU GEREKLİ
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../utils/date_helper.dart'; // <--- BU IMPORT ÇOK ÖNEMLİ
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import '../utils/date_helper.dart';
+import 'admin_questions_list_screen.dart'; // Tüm sorular ekranı için
 
 class AdminTriviaScreen extends StatefulWidget {
   const AdminTriviaScreen({super.key});
@@ -20,90 +24,51 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
     TextEditingController(),
   ];
   int _correctIndex = 0;
+  bool _uploadForNextWeek = false;
   
-  // EKSİK OLAN DEĞİŞKEN BUYDU:
-  bool _uploadForNextWeek = false; 
+  // --- RESİM İÇİN DEĞİŞKENLER ---
+  File? _selectedImage;
+  bool _isUploading = false;
+  final ImagePicker _picker = ImagePicker();
 
-  // JSON verisi
+  // --- HAZIR JSON VERİSİ ---
   final String _jsonRawData = '''
-  [
-    {
-      "question": "Sinema tarihinde çekilen ilk uzun metrajlı film hangisi olarak kabul edilir?",
-      "options": ["A Trip to the Moon", "The Story of the Kelly Gang", "Birth of a Nation", "Metropolis"],
-      "correctIndex": 1,
-      "difficulty": "medium",
-      "isActive": true
-    },
-    {
-      "question": "Oscar tarihinde En İyi Film ödülünü kazanan ilk film hangisidir?",
-      "options": ["Wings", "Gone with the Wind", "Sunrise", "All Quiet on the Western Front"],
-      "correctIndex": 0,
-      "difficulty": "medium",
-      "isActive": true
-    },
-    {
-      "question": "Alfred Hitchcock’un hiç görünmediği (cameo yapmadığı) tek filmi hangisidir?",
-      "options": ["Psycho", "The Birds", "Rebecca", "Lifeboat"],
-      "correctIndex": 2,
-      "difficulty": "hard",
-      "isActive": true
-    },
-    {
-      "question": "Hangi film 'Rosebud' kelimesiyle özdeşleşmiştir?",
-      "options": ["Casablanca", "Citizen Kane", "Vertigo", "Rear Window"],
-      "correctIndex": 1,
-      "difficulty": "easy",
-      "isActive": true
-    },
-    {
-      "question": "IMAX formatında çekilen ilk Hollywood filmi hangisidir?",
-      "options": ["The Dark Knight", "Avatar", "Interstellar", "Transformers"],
-      "correctIndex": 0,
-      "difficulty": "medium",
-      "isActive": true
-    },
-    {
-      "question": "Stanley Kubrick’in '2001: A Space Odyssey' filmi hangi yılda gösterime girmiştir?",
-      "options": ["1965", "1968", "1971", "1975"],
-      "correctIndex": 1,
-      "difficulty": "easy",
-      "isActive": true
-    },
-    {
-      "question": "En çok Oscar kazanan film rekorunu (11 ödül) paylaşan filmlerden biri değildir?",
-      "options": ["Titanic", "Ben-Hur", "The Lord of the Rings: The Return of the King", "Schindler’s List"],
-      "correctIndex": 3,
-      "difficulty": "medium",
-      "isActive": true
-    },
-    {
-      "question": "Sessiz sinema döneminin en ikonik komedyenlerinden biri değildir?",
-      "options": ["Charlie Chaplin", "Buster Keaton", "Harold Lloyd", "Marlon Brando"],
-      "correctIndex": 3,
-      "difficulty": "easy",
-      "isActive": true
-    },
-    {
-      "question": "Quentin Tarantino’nun yönettiği ilk uzun metrajlı film hangisidir?",
-      "options": ["Pulp Fiction", "Reservoir Dogs", "Jackie Brown", "Kill Bill"],
-      "correctIndex": 1,
-      "difficulty": "easy",
-      "isActive": true
-    },
-    {
-      "question": "Hangi yönetmen aynı yıl içinde En İyi Yönetmen Oscar’ını iki farklı filmle aday olarak alan ilk kişidir?",
-      "options": ["Steven Spielberg", "Francis Ford Coppola", "Michael Curtiz", "Alfred Hitchcock"],
-      "correctIndex": 2,
-      "difficulty": "hard",
-      "isActive": true
-    }
-  ]
+  
+    
   ''';
 
+  // --- RESİM SEÇME ---
+  Future<void> _pickImage() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      setState(() {
+        _selectedImage = File(image.path);
+      });
+    }
+  }
+
+  // --- RESİM YÜKLEME ---
+  Future<String?> _uploadImageToStorage() async {
+    if (_selectedImage == null) return null;
+    try {
+      String fileName = "trivia_${DateTime.now().millisecondsSinceEpoch}.jpg";
+      Reference ref = FirebaseStorage.instance.ref().child('trivia_images').child(fileName);
+      
+      UploadTask uploadTask = ref.putFile(_selectedImage!);
+      TaskSnapshot snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      debugPrint("Resim yükleme hatası: $e");
+      return null;
+    }
+  }
+
+  // --- TEK SORU KAYDETME ---
   Future<void> _saveQuestion() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Hangi hafta için?
+    setState(() => _isUploading = true);
+
     String targetWeekId;
     if (_uploadForNextWeek) {
       final nextWeekDate = DateTime.now().add(const Duration(days: 7));
@@ -112,22 +77,38 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
       targetWeekId = DateHelper.getCurrentWeekId();
     }
 
+    // 1. Önce resmi yükle (varsa)
+    String? imageUrl;
+    if (_selectedImage != null) {
+      imageUrl = await _uploadImageToStorage();
+    }
+
+    // 2. Veriyi kaydet
     await FirebaseFirestore.instance.collection('trivia_questions').add({
       'question': _questionCtrl.text.trim(),
       'options': _optionsCtrl.map((c) => c.text.trim()).toList(),
       'correctIndex': _correctIndex,
       'createdAt': FieldValue.serverTimestamp(),
-      'weekId': targetWeekId, // YENİ SİSTEM
+      'weekId': targetWeekId,
+      'imageUrl': imageUrl,
+      'isActive': true,
     });
 
-    if (!mounted) return; // BuildContext hatası için kontrol
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Soru eklendi!')));
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Soru ve resim eklendi!')));
     
     _questionCtrl.clear();
     for (var c in _optionsCtrl) c.clear();
-    setState(() => _correctIndex = 0);
+    setState(() {
+      _correctIndex = 0;
+      _selectedImage = null;
+      _isUploading = false;
+    });
   }
 
+  // --- TOPLU YÜKLEME (BULK UPLOAD) ---
+  // Bu fonksiyon JSON verisini veritabanına yazar
   Future<void> _bulkUpload() async {
     // 1. JSON Listesini Hazırla
     List<dynamic> dataList;
@@ -147,8 +128,7 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
       targetWeekId = DateHelper.getCurrentWeekId();
     }
 
-    // --- GÜVENLİK KONTROLÜ BAŞLIYOR ---
-    // Yükleme yapmadan önce veritabanına soruyoruz:
+    // --- GÜVENLİK KONTROLÜ ---
     final existingDocs = await FirebaseFirestore.instance
         .collection('trivia_questions')
         .where('weekId', isEqualTo: targetWeekId)
@@ -157,29 +137,23 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
     final currentCount = existingDocs.docs.length;
     final newCount = dataList.length;
 
-    // Kural: Bir haftada toplam en fazla 10 soru olabilir.
     if (currentCount >= 10) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('HATA: $targetWeekId haftası için zaten $currentCount soru var. Kota dolu!'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('HATA: $targetWeekId haftası için kota dolu! ($currentCount soru var)'), backgroundColor: Colors.red),
       );
-      return; // İşlemi iptal et
+      return;
     }
 
     if (currentCount + newCount > 10) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('HATA: İçeride $currentCount soru var. $newCount tane daha eklerseniz 10 sınırını aşarsınız.'),
-          backgroundColor: Colors.orange,
-        ),
+        SnackBar(content: Text('HATA: 10 soru sınırını aşıyorsunuz.'), backgroundColor: Colors.orange),
       );
-      return; // İşlemi iptal et
+      return;
     }
-    // --- GÜVENLİK KONTROLÜ BİTTİ ---
+
+    setState(() => _isUploading = true);
 
     try {
       final batch = FirebaseFirestore.instance.batch();
@@ -195,6 +169,8 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
           'isActive': true,
           'createdAt': FieldValue.serverTimestamp(),
           'weekId': targetWeekId,
+          // Toplu yüklemede resim yok varsayıyoruz
+          'imageUrl': null, 
         });
       }
 
@@ -202,22 +178,20 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('BAŞARILI: $newCount soru $targetWeekId haftasına yüklendi.'),
-          backgroundColor: Colors.green,
-        ),
+        SnackBar(content: Text('BAŞARILI: $newCount soru yüklendi.'), backgroundColor: Colors.green),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Yükleme Hatası: $e')),
       );
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Bilgilendirme için ID'leri hesapla
     final currentW = DateHelper.getCurrentWeekId();
     final nextW = DateHelper.getWeekIdFor(DateTime.now().add(const Duration(days: 7)));
 
@@ -254,8 +228,41 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
               ),
               const SizedBox(height: 20),
 
+              // RESİM EKLEME ALANI
+              GestureDetector(
+                onTap: _pickImage,
+                child: Container(
+                  height: 200,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey),
+                    image: _selectedImage != null 
+                      ? DecorationImage(image: FileImage(_selectedImage!), fit: BoxFit.cover)
+                      : null
+                  ),
+                  child: _selectedImage == null
+                      ? const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_a_photo, size: 40, color: Colors.grey),
+                            Text("Soru Görseli Ekle (İsteğe Bağlı)", style: TextStyle(color: Colors.grey)),
+                          ],
+                        )
+                      : null,
+                ),
+              ),
+              if (_selectedImage != null)
+                TextButton.icon(
+                  onPressed: () => setState(() => _selectedImage = null),
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  label: const Text("Resmi Kaldır", style: TextStyle(color: Colors.red)),
+                ),
+              const SizedBox(height: 20),
+
               TextFormField(
                 controller: _questionCtrl,
+                maxLines: 2,
                 decoration: const InputDecoration(labelText: 'Soru Metni', border: OutlineInputBorder()),
                 validator: (v) => v!.isEmpty ? 'Boş bırakma' : null,
               ),
@@ -283,24 +290,50 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
                 );
               }),
               const SizedBox(height: 20),
+              
               ElevatedButton(
-                onPressed: _saveQuestion,
-                child: const Text('Tek Soru Kaydet'),
+                onPressed: _isUploading ? null : _saveQuestion,
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                child: _isUploading 
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : const Text('Soruyu ve Resmi Kaydet', style: TextStyle(fontSize: 16)),
               ),
+              
               const SizedBox(height: 30),
               const Divider(thickness: 2),
               const SizedBox(height: 10),
               
+              // --- HAZIR LİSTE BUTONU (Artık Çalışıyor) ---
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green, 
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.all(16),
                 ),
-                onPressed: _bulkUpload,
+                onPressed: _isUploading ? null : _bulkUpload, // Fonksiyon bağlandı
                 icon: const Icon(Icons.cloud_upload),
                 label: const Text('HAZIR LİSTEYİ YÜKLE (10 Soru)'),
               ),
+
+              const SizedBox(height: 10),
+
+              // --- TÜM SORULARI DÜZENLEME BUTONU ---
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                  side: const BorderSide(color: Colors.blue, width: 2),
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context, 
+                    MaterialPageRoute(builder: (_) => const AdminQuestionsListScreen())
+                  );
+                },
+                icon: const Icon(Icons.list_alt, color: Colors.blue),
+                label: const Text('TÜM SORULARI GÖR & DÜZENLE', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+              ),
+              
+              const SizedBox(height: 40),
             ],
           ),
         ),

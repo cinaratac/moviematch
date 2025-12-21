@@ -12,6 +12,7 @@ import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; 
+import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // Resim önbelleği için
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -52,6 +53,11 @@ class _CustomDrawerState extends State<CustomDrawer> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final uid = user?.uid;
+    const List<String> adminUids = [
+      "RfpPtaZfaKYueG9b2dd2ASScqOO2", // Mevcut Admin
+      "ZkXr7PmQ4WV0iRIVR7uUUwfNS8N2",         // Eklemek istediğin diğer UID
+      "mNCWixSnJSa6tE1hZs4iZwn3Du43",         // Başka bir admin UID
+    ];
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // OPTİMİZASYON: Blur yerine daha opak ve düz renk kullanımı
@@ -193,7 +199,10 @@ class _CustomDrawerState extends State<CustomDrawer> {
                       Divider(height: 1, color: separatorColor),
                       const SizedBox(height: 16),
                       
-                      if (uid == "RfpPtaZfaKYueG9b2dd2ASScqOO2") 
+                 
+
+                      // Eğer giriş yapan kullanıcı (uid) bu listede varsa paneli göster
+                      if (uid != null && adminUids.contains(uid)) 
                         _buildIOSMenuItem(
                           context,
                           icon: CupertinoIcons.lock_shield_fill,
@@ -208,41 +217,53 @@ class _CustomDrawerState extends State<CustomDrawer> {
                           },
                         ),
 
-                      _buildSectionTitle("UYGULAMA"),
-                      _buildIOSMenuItem(
+                       _buildSectionTitle("UYGULAMA"),
+                        _buildIOSMenuItem(
                         context,
                         icon: CupertinoIcons.settings_solid,
                         title: 'Ayarlar',
                         color: Colors.grey,
                         onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
-                      ),
-                      _buildIOSMenuItem(
+                        ),
+                        _buildIOSMenuItem(
                         context,
                         icon: CupertinoIcons.share_solid,
                         title: 'Davet Et',
                         color: Colors.green,
-                        onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
-                      ),
+                          onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
+                        ),
                       
 
-                      const SizedBox(height: 30),
+                       const SizedBox(height: 30),
                       
                       // ÇIKIŞ BUTONU
-                      Center(
-                        child: TextButton(
-                          onPressed: () async {
-                            await FirebaseAuth.instance.signOut();
-                          },
-                          child: const Text(
-                            "Çıkış Yap",
-                            style: TextStyle(
-                              color: CupertinoColors.destructiveRed,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
+                      // ÇIKIŞ BUTONU
+Center(
+  child: TextButton(
+    onPressed: () async {
+      // 1. Önbellekteki (CachedNetworkImage) tüm resimleri sil
+      await DefaultCacheManager().emptyCache();
+
+      // 2. Shared Preferences (yerel ayarlar) verilerini temizle
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+
+      // 3. En son Firebase oturumunu kapat
+      await FirebaseAuth.instance.signOut();
+      
+      // Opsiyonel: Kullanıcıyı Login sayfasına yönlendir (AuthGate bunu genelde otomatik yapar ama garanti olsun)
+      // Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    },
+    child: const Text(
+      "Çıkış Yap",
+      style: TextStyle(
+        color: CupertinoColors.destructiveRed,
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  ),
+),
                       const SizedBox(height: 20),
                     ],
                   ),

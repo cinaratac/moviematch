@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,6 +7,7 @@ import 'package:fluttergirdi/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // Önbellek temizliği için
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -87,8 +87,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // --- Yardımcı Fonksiyonlar ---
-  
-
 
   Future<void> _resetPassword() async {
     final user = _user;
@@ -197,7 +195,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     style: ElevatedButton.styleFrom(
                       elevation: 0,
                       backgroundColor: Theme.of(context).primaryColor,
-                      // DEĞİŞİKLİK: Metin rengini contrastı garanti eden onPrimary olarak ayarlıyoruz.
                       foregroundColor: Theme.of(context).colorScheme.onPrimary, 
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -239,44 +236,45 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _logout() async {
-  showCupertinoDialog(
-    context: context,
-    builder: (ctx) => CupertinoAlertDialog(
-      title: const Text('Çıkış Yap'),
-      content: const Text('Hesabınızdan çıkış yapmak istediğinize emin misiniz?'),
-      actions: [
-        CupertinoDialogAction(
-          child: const Text('Vazgeç'), 
-          onPressed: () => Navigator.pop(ctx)
-        ),
-        CupertinoDialogAction(
-          isDestructiveAction: true,
-          child: const Text('Çıkış'),
-          onPressed: () async {
-            // 1. Önce diyaloğu kapat
-            Navigator.pop(ctx); 
-            
-            // 2. Firebase'den çıkış yap
-            await FirebaseAuth.instance.signOut();
-            
-            // 3. KRİTİK ADIM: Tüm sayfaları kapat ve en başa (Login'e) dön
-            if (mounted) {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            }
-          },
-        ),
-      ],
-    ),
-  );
-}
+    showCupertinoDialog(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('Çıkış Yap'),
+        content: const Text('Hesabınızdan çıkış yapmak istediğinize emin misiniz?'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Vazgeç'), 
+            onPressed: () => Navigator.pop(ctx)
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            child: const Text('Çıkış'),
+            onPressed: () async {
+              // 1. Önce diyaloğu kapat
+              Navigator.pop(ctx); 
+              
+              // --- DÜZELTME BAŞLANGICI ---
+              // 2. Önbellekteki (resimler vb.) her şeyi temizle
+              await DefaultCacheManager().emptyCache();
 
- 
-
-  // lib/screens/settings_page.dart içinde _deleteAccount fonksiyonunu bununla değiştirin:
-
-
-
-// ... SettingsPage sınıfının içine ...
+              // 3. Yerel ayarları (Shared Prefs) temizle
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              // --- DÜZELTME BİTİŞİ ---
+              
+              // 4. Firebase'den çıkış yap
+              await FirebaseAuth.instance.signOut();
+              
+              // 5. KRİTİK ADIM: Tüm sayfaları kapat ve en başa (Login'e) dön
+              if (mounted) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -302,23 +300,18 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     ) ?? false;
-
+  
     if (!confirm) return;
 
     try {
       // 1. Kullanıcının hangi yöntemle girdiğini bul (Google mı, Şifre mi?)
-      // providerData listesinde 'google.com' varsa Google kullanıcısıdır.
       bool isGoogleUser = user.providerData.any((info) => info.providerId == 'google.com');
 
       if (isGoogleUser) {
-        // --- GOOGLE İLE RE-AUTHENTICATE (YENİDEN DOĞRULAMA) ---
-        // Kullanıcıdan tekrar Google hesabını seçmesini iste
+        // --- GOOGLE İLE RE-AUTHENTICATE ---
         final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
         
-        if (googleUser == null) {
-          // Kullanıcı Google panelini kapattı, işlemi iptal et
-          return;
-        }
+        if (googleUser == null) return; // İptal etti
 
         final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
         final AuthCredential credential = GoogleAuthProvider.credential(
@@ -326,12 +319,10 @@ class _SettingsPageState extends State<SettingsPage> {
           idToken: googleAuth.idToken,
         );
 
-        // Firebase'e "Bak bu kullanıcı gerçekten o kişi" diye kanıtla
         await user.reauthenticateWithCredential(credential);
         
       } else {
         // --- E-POSTA/ŞİFRE İLE RE-AUTHENTICATE ---
-        // Şifresini girmesi için bir diyalog aç
         String? password = await _showPasswordDialog();
         if (password == null) return; // İptal etti
 
@@ -343,16 +334,20 @@ class _SettingsPageState extends State<SettingsPage> {
         await user.reauthenticateWithCredential(credential);
       }
 
-      // 2. Önce Firestore Verilerini Temizle (Opsiyonel ama önerilir)
-      // Auth silindikten sonra veritabanı kuralları (Rules) erişimi engelleyebilir, o yüzden önce veriyi sil.
+      // 2. Önce Firestore Verilerini Temizle
       await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
       
-      // Varsa diğer koleksiyonlardaki verileri de burada silebilirsiniz.
-      
-      // 3. Auth Hesabını Sil
+      // --- DÜZELTME BAŞLANGICI ---
+      // 3. Cihazdaki Önbelleği ve Verileri Temizle
+      await DefaultCacheManager().emptyCache();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      // --- DÜZELTME BİTİŞİ ---
+
+      // 4. Auth Hesabını Sil
       await user.delete();
 
-      // 4. Çıkış Yap ve Login Ekranına At
+      // 5. Çıkış Yap ve Login Ekranına At
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -365,7 +360,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
     } on FirebaseAuthException catch (e) {
       if (mounted) {
-        // Eğer re-auth başarısız olursa (örn: yanlış şifre veya Google iptal)
         String errorMsg = "Bir hata oluştu.";
         if (e.code == 'wrong-password') errorMsg = "Girdiğiniz şifre yanlış.";
         if (e.code == 'requires-recent-login') errorMsg = "Güvenlik gereği tekrar giriş yapmalısınız.";
@@ -427,12 +421,10 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
         actions: [
-          // --- EKLENEN KISIM: LİSANSLAR BUTONU ---
           CupertinoDialogAction(
             child: const Text('Lisanslar'),
             onPressed: () {
-              Navigator.pop(ctx); // Önce diyaloğu kapat
-              // Flutter'ın yerleşik lisans sayfasını aç
+              Navigator.pop(ctx); 
               showLicensePage(
                 context: context,
                 applicationName: 'CineMatch',
@@ -442,7 +434,6 @@ class _SettingsPageState extends State<SettingsPage> {
               );
             },
           ),
-          // ----------------------------------------
           CupertinoDialogAction(
             child: const Text('Tamam'), 
             onPressed: () => Navigator.pop(ctx)
@@ -554,7 +545,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
               ),
-              SizedBox(height: 10,),
+              const SizedBox(height: 10,),
               // BÖLÜM 4: OTURUM
               _SettingsSection(
                 sectionColor: sectionColor,
@@ -567,7 +558,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ],
               ),
-              SizedBox(height: 5,),
+              const SizedBox(height: 5,),
               // BÖLÜM 5: TEHLİKELİ BÖLGE
               _SettingsSection(
                 footer: "Hesabınızı silmek geri alınamaz bir işlemdir.",
@@ -660,7 +651,6 @@ class _SettingsSection extends StatelessWidget {
   }
 }
 
-
 class _SettingsTile extends StatelessWidget {
   final IconData? icon;
   final Color? iconColor;
@@ -702,7 +692,7 @@ class _SettingsTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: (iconColor ?? Colors.blue).withValues(alpha: 0.15), // DÜZELTİLDİ: withValues
+                  color: (iconColor ?? Colors.blue).withValues(alpha: 0.15), 
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, size: 20, color: iconColor ?? Colors.blue),
@@ -727,7 +717,7 @@ class _SettingsTile extends StatelessWidget {
                 scale: 0.8,
                 child: CupertinoSwitch(
                   value: switchValue,
-                  activeTrackColor: Theme.of(context).primaryColor, // DÜZELTİLDİ: activeTrackColor
+                  activeTrackColor: Theme.of(context).primaryColor, 
                   onChanged: onSwitchChanged,
                 ),
               )
@@ -772,6 +762,7 @@ class _ThemeOption extends StatelessWidget {
     );
   }
 }
+
 // TMDB Atıf Widget'ı
 Widget _buildTmdbAttribution() {
   return Column(

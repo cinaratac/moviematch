@@ -814,7 +814,6 @@ class _LikerUserTile extends StatelessWidget {
         if (data == null) return const SizedBox.shrink();
 
         final displayName = data['displayName'] ?? 'Kullanıcı';
-        final handle = data['username'] ?? '';
         final photoURL = data['photoURL'] as String?;
         
         // YENİ: Letterboxd verisini alıyoruz
