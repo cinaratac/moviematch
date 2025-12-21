@@ -160,7 +160,8 @@ class FeedService {
           actorId: me,
           actorName: user?.displayName,
           actorPhotoURL: user?.photoURL,
-          deterministicId: '${postId}_${me}_like',
+          deterministicId: '${postId}_likes',
+          isGrouped: true,
         );
       } catch (_) {}
     }
@@ -199,7 +200,8 @@ class FeedService {
         actorName: user?.displayName,
         actorPhotoURL: user?.photoURL,
         preview: preview,
-        deterministicId: null,
+        deterministicId: '${postId}_comments',
+        isGrouped: true,
       );
     } catch (_) {}
   }
@@ -213,19 +215,35 @@ class FeedService {
     String? actorPhotoURL,
     String? preview,
     String? deterministicId,
+    bool isGrouped = false, // YENİ PARAMETRE
   }) async {
     final col = _fs.collection('users').doc(toUid).collection('notifications');
+    
+    // Eğer ID verilmemişse rastgele oluştur
     final ref = (deterministicId == null) ? col.doc() : col.doc(deterministicId);
-    await ref.set({
+
+    final data = {
       'type': type,
-      'actorId': actorId,
-      'postId': postId,
-      if (preview != null && preview.isNotEmpty) 'preview': preview,
-      'createdAt': FieldValue.serverTimestamp(),
-      'read': false,
+      'actorId': actorId,     // Son işlem yapan kişi
       'actorName': actorName ?? '',
       'actorPhotoURL': actorPhotoURL ?? '',
-    }, SetOptions(merge: true));
+      'postId': postId,
+      'createdAt': FieldValue.serverTimestamp(), // Tarihi güncelle (üste çıksın)
+      'read': false, // Tekrar okunmamış yap
+    };
+
+    if (preview != null && preview.isNotEmpty) {
+      data['preview'] = preview;
+    }
+
+    // YENİ: Gruplama varsa sayacı artır, yoksa 1 yap
+    if (isGrouped) {
+      data['count'] = FieldValue.increment(1);
+    } else {
+      data['count'] = 1;
+    }
+
+    await ref.set(data, SetOptions(merge: true));
   }
 
   Future<void> notifyFollow({required String toUid}) async {

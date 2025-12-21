@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>fluttergirdi</string>
+	<string>CineMatch</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -55,8 +55,7 @@
 	<true/>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Yeni mesajlar için bildirim gönderebilmek istiyoruz.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-<string>Profil fotoğrafı seçmek için galeriye erişim izni gereklidir.</string>
+	
 <key>NSCameraUsageDescription</key>
 <string>Profil fotoğrafı çekmek için kameraya erişim izni gereklidir.</string>
 </dict>

@@ -20,15 +20,15 @@ class TriviaLeaderboardScreen extends StatelessWidget {
         centerTitle: true,
         leading: const BackButton(color: Colors.white),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
+      body: FutureBuilder<QuerySnapshot>(
+        future: FirebaseFirestore.instance
             .collection('weekly_leaderboard')
             .doc(weekId)
             .collection('scores')
             .orderBy('score', descending: true)
             .orderBy('timestamp', descending: false)
             .limit(50)
-            .snapshots(),
+            .get(),
         builder: (context, snapshot) {
           if (snapshot.hasError) return const Center(child: Text("Hata oluştu", style: TextStyle(color: Colors.white)));
           if (snapshot.connectionState == ConnectionState.waiting) {

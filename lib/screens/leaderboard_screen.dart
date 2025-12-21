@@ -142,13 +142,13 @@ class _TriviaRankingTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // ARTIK HAFTALIK ID YERİNE GENEL 'users' TABLOSUNA BAKIYORUZ
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
+    return FutureBuilder<QuerySnapshot>(
+      future: FirebaseFirestore.instance
           .collection('users')
-          .orderBy('totalTriviaScore', descending: true) // Toplam puana göre sırala
-          .where('totalTriviaScore', isGreaterThan: 0)   // Sadece puanı olanları getir
-          .limit(50)
-          .snapshots(),
+      .orderBy('totalTriviaScore', descending: true)
+      .where('totalTriviaScore', isGreaterThan: 0)
+      .limit(50)
+      .get(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());

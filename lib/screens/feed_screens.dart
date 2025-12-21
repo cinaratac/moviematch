@@ -111,7 +111,7 @@ class _FeedPageState extends State<FeedPage> {
                     children: [
                       Icon(Icons.search, size: 20, color: cs.onSurfaceVariant),
                       const SizedBox(width: 5),
-                      Text('Kullanıcı Ara', style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+                      Text('Kullanıcı Veya Film Ara', style: theme.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
                     ],
                   ),
                 ),

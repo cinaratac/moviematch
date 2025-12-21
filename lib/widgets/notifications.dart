@@ -109,23 +109,11 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         .orderBy('createdAt', descending: true)
         .limit(100);
     
-    // Sheet açıldığında okunmamışları okundu yap
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _markAllReadOnOpen();
-    });
+   
+   
   }
 
-  Future<void> _markAllReadOnOpen() async {
-    try {
-      final batch = FirebaseFirestore.instance.batch();
-      final qs = await _q.where('read', isEqualTo: false).get();
-      if (qs.docs.isEmpty) return;
-      for (final d in qs.docs) {
-        batch.update(d.reference, {'read': true});
-      }
-      await batch.commit();
-    } catch (_) {}
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -147,6 +135,18 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const Spacer(),
+                  TextButton(
+        onPressed: () async {
+          // Sadece kullanıcı basarsa bu maliyetli işlem yapılır
+          final batch = FirebaseFirestore.instance.batch();
+          final qs = await _q.where('read', isEqualTo: false).get();
+          for (final d in qs.docs) {
+            batch.update(d.reference, {'read': true});
+          }
+          await batch.commit();
+        },
+        child: const Text("Tümünü Oku", style: TextStyle(fontSize: 12)),
+      ),
                   IconButton(
                     tooltip: 'Kapat',
                     onPressed: () => Navigator.pop(context),
@@ -185,6 +185,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                       final m = docs[i].data();
                       final type = (m['type'] ?? '').toString();
                       final actorId = (m['actorId'] ?? '').toString();
+                      final count = (m['count'] as num?)?.toInt() ?? 1;
                       final createdAt = (m['createdAt'] as Timestamp?);
                       final read = (m['read'] ?? false) == true;
 
@@ -193,7 +194,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           : _timeAgoShort(createdAt.toDate());
 
                       final title = _titleFor(type);
-                      final subtitle = _subtitleFor(type);
+                     final subtitle = _subtitleFor(type, count);
 
                       return FutureBuilder<_Actor>(
                         future: _getActor(actorId, m),
@@ -312,15 +313,19 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
     }
   }
 
-  String _subtitleFor(String type) {
+  String _subtitleFor(String type, int count) {
+    // Eğer sayı 1'den büyükse özel mesaj döndür
+    final suffix = count > 1 ? ' ve ${count - 1} diğer kişi' : '';
+
     switch (type) {
       case 'like':
-        return 'gönderinizi beğendi';
+        return '$suffix gönderinizi beğendi';
       case 'comment':
-        return 'gönderinize yorum yaptı';
+        return '$suffix gönderinize yorum yaptı';
       case 'follow':
         return 'sizi takip etmeye başladı';
-        case 'club_request': return 'kulübünüze katılmak istiyor';
+      case 'club_request': 
+        return 'kulübünüze katılmak istiyor';
       default:
         return 'bir etkinlikte bulundu';
     }

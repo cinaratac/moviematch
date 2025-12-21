@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Önbellek için eklendi
+import 'package:shared_preferences/shared_preferences.dart'; // Önbellek için
 import 'package:cloud_functions/cloud_functions.dart';
 // İlgili importlar
 import '../screens/public_profile_screen.dart';
@@ -45,15 +45,14 @@ class _SearchPageState extends State<SearchPage> with SingleTickerProviderStateM
     super.dispose();
   }
 
- 
-void _onSearchChanged(String val) {
-  if (_debounce?.isActive ?? false) _debounce!.cancel();
-  _debounce = Timer(const Duration(milliseconds: 960), () { // 500'den 750'ye çıkarıldı
-    setState(() {
-      _searchText = val.trim();
+  void _onSearchChanged(String val) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 960), () { 
+      setState(() {
+        _searchText = val.trim();
+      });
     });
-  });
-}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +102,6 @@ void _onSearchChanged(String val) {
                   textAlignVertical: TextAlignVertical.center,
                   decoration: InputDecoration(
                     hintText: _tabController.index == 0 ? 'Film, dizi veya tür ara...' : 'Kullanıcı adı veya isim ara...',
-                    
                     hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[400]),
                     prefixIcon: Icon(Icons.search, color: primaryGreen),
                     suffixIcon: _searchController.text.isNotEmpty
@@ -122,7 +120,6 @@ void _onSearchChanged(String val) {
                 ),
               ),
             ],
-            
           ),
         ),
         bottom: PreferredSize(
@@ -188,7 +185,7 @@ void _onSearchChanged(String val) {
 }
 
 // -----------------------------------------------------------------------------
-// FİLM ARAMA SEKME İÇERİĞİ
+// FİLM ARAMA SEKME İÇERİĞİ (GÜNCELLENDİ: SAYFALAMA EKLENDİ)
 // -----------------------------------------------------------------------------
 class _MovieSearchTab extends StatefulWidget {
   final String searchText;
@@ -202,19 +199,45 @@ class _MovieSearchTab extends StatefulWidget {
 class _MovieSearchTabState extends State<_MovieSearchTab> {
   List<dynamic> _movies = [];
   List<Map<String, dynamic>> _recentMovies = []; // Önbellekteki filmler
+  
+  // -- Pagination State --
   bool _isLoading = false;
+  bool _isLoadingMore = false; // Alttan yükleme durumu
+  bool _hasMore = true;        // Daha fazla sayfa var mı?
+  int _currentPage = 1;        // Şu anki sayfa
   String? _error;
+
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _loadRecents();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    // Listenin sonuna 200 piksel kala yeni veriyi çek
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 &&
+        !_isLoadingMore && 
+        !_isLoading &&
+        _hasMore &&
+        widget.searchText.isNotEmpty) { // Sadece arama yapılıyorken
+      _loadMoreMovies();
+    }
   }
 
   @override
   void didUpdateWidget(covariant _MovieSearchTab oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.searchText != oldWidget.searchText) {
+      // Arama metni değişirse her şeyi sıfırla ve yeniden ara
       _searchMovies(widget.searchText);
     }
   }
@@ -256,116 +279,196 @@ class _MovieSearchTabState extends State<_MovieSearchTab> {
     });
     await sp.setStringList('recent_movies_v1', _recentMovies.map((e) => jsonEncode(e)).toList());
   }
-  // ------------------------------------
-
-  Future<void> _searchMovies(String query) async {
-  if (query.isEmpty) {
-    if (mounted) setState(() { _movies = []; _error = null; _isLoading = false; });
-    return;
-  }
-
-  setState(() { _isLoading = true; _error = null; });
-
-  try {
-    // YENİ YÖNTEM: Cloud Function Çağrısı
+  
+  // --- API YARDIMCI FONKSİYONU ---
+  Future<List<dynamic>> _fetchMoviesFromApi(String query, int page) async {
     final result = await FirebaseFunctions.instance
         .httpsCallable('searchMovies')
-        .call({'query': query});
-
-    final data = result.data as Map<String, dynamic>;
+        .call({'query': query, 'page': page});
     
-    if (mounted) {
-      setState(() {
-        _movies = (data['results'] as List?) ?? [];
-        _isLoading = false;
-      });
-    }
-  } catch (e) {
-    if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
+    final data = result.data as Map<String, dynamic>;
+    // "Fixed-length list" hatasını önlemek için List.from kullanıyoruz
+    return List.from((data['results'] as List?) ?? []);
   }
-}
+
+  // --- İLK ARAMA ---
+  Future<void> _searchMovies(String query) async {
+    if (query.isEmpty) {
+      if (mounted) {
+        setState(() { 
+          _movies = []; 
+          _error = null; 
+          _isLoading = false;
+          _hasMore = true;
+          _currentPage = 1; 
+        });
+      }
+      return;
+    }
+
+    setState(() { 
+      _isLoading = true; 
+      _error = null; 
+      _movies = [];
+      _currentPage = 1;
+      _hasMore = true;
+    });
+
+    try {
+      final results = await _fetchMoviesFromApi(query, 1);
+      
+      if (mounted) {
+        setState(() {
+          _movies = results;
+          _isLoading = false;
+          if (results.isEmpty) _hasMore = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
+    }
+  }
+
+  // --- DAHA FAZLA YÜKLE ---
+  Future<void> _loadMoreMovies() async {
+    if (_isLoadingMore) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final nextPage = _currentPage + 1;
+      final results = await _fetchMoviesFromApi(widget.searchText, nextPage);
+
+      if (mounted) {
+        if (results.isEmpty) {
+          setState(() => _hasMore = false);
+        } else {
+          setState(() {
+            _movies.addAll(results); // Listeye ekle
+            _currentPage = nextPage;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Yükleme hatası: $e")));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingMore = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     
-    if (_isLoading) return const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32)));
+    // İlk yükleme (ve sayfa boşken) loading göster
+    if (_isLoading && _movies.isEmpty) return const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32)));
     
     // Arama yoksa ve geçmiş varsa geçmişi göster
     if (widget.searchText.isEmpty) {
       if (_recentMovies.isNotEmpty) {
         return _buildRecentList();
       }
-      
+      // Geçmiş de yoksa boş durmasın, kategori önerisi vs. eklenebilir ama şu anlık boş.
     }
 
     if (_error != null) return Center(child: Text("Hata: $_error"));
-    if (_movies.isEmpty) return const Center(child: Text("Film bulunamadı.", style: TextStyle(color: Colors.grey)));
+    
+    // Arama yapılmış ama sonuç yok
+    if (_movies.isEmpty && !_isLoading && widget.searchText.isNotEmpty) {
+      return const Center(child: Text("Film bulunamadı.", style: TextStyle(color: Colors.grey)));
+    }
 
     // ARAMA SONUÇLARI
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3, 
-        childAspectRatio: 0.67, 
-        crossAxisSpacing: 12, 
-        mainAxisSpacing: 12
-      ),
-      itemCount: _movies.length,
-      itemBuilder: (context, index) {
-        final movie = _movies[index];
-        final posterPath = movie['poster_path'];
-        final posterUrl = (posterPath is String && posterPath.isNotEmpty) 
-            ? 'https://image.tmdb.org/t/p/w500$posterPath' : '';
-        final title = movie['title'] ?? '';
+    return Column(
+      children: [
+        Expanded(
+          child: GridView.builder(
+            controller: _scrollController, // Scroll Controller Eklendi
+            padding: const EdgeInsets.all(16),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3, 
+              childAspectRatio: 0.67, 
+              crossAxisSpacing: 12, 
+              mainAxisSpacing: 12
+            ),
+            itemCount: _movies.length,
+            itemBuilder: (context, index) {
+              final movie = _movies[index];
+              final posterPath = movie['poster_path'];
+              final posterUrl = (posterPath is String && posterPath.isNotEmpty) 
+                  ? 'https://image.tmdb.org/t/p/w500$posterPath' : '';
+              final title = movie['title'] ?? '';
 
-        return InkWell(
-          onTap: () {
-            // Tıklandığında önce kaydet, sonra git
-            _addRecent(movie);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => MovieDetailScreen(
-                  tmdbId: movie['id'],
-                  title: title,
-                  posterUrl: posterUrl.isNotEmpty ? posterUrl : null,
-                ),
-              ),
-            );
-          },
-          borderRadius: BorderRadius.circular(12),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                PosterImage(posterUrl: posterUrl, title: title, fit: BoxFit.cover),
-                Positioned(
-                  left: 0, right: 0, bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter, 
-                        end: Alignment.topCenter, 
-                        colors: [Colors.black87, Colors.transparent]
-                      )
+              return InkWell(
+                onTap: () {
+                  // Tıklandığında önce kaydet, sonra git
+                  _addRecent(movie);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MovieDetailScreen(
+                        tmdbId: movie['id'],
+                        title: title,
+                        posterUrl: posterUrl.isNotEmpty ? posterUrl : null,
+                      ),
                     ),
-                    child: Text(
-                      title, 
-                      maxLines: 2, 
-                      overflow: TextOverflow.ellipsis, 
-                      textAlign: TextAlign.center, 
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)
-                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      PosterImage(posterUrl: posterUrl, title: title, fit: BoxFit.cover),
+                      Positioned(
+                        left: 0, right: 0, bottom: 0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter, 
+                              end: Alignment.topCenter, 
+                              colors: [Colors.black87, Colors.transparent]
+                            )
+                          ),
+                          child: Text(
+                            title, 
+                            maxLines: 2, 
+                            overflow: TextOverflow.ellipsis, 
+                            textAlign: TextAlign.center, 
+                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              );
+            },
+          ),
+        ),
+        // Alt Kısımda Yükleniyor Göstergesi
+        if (_isLoadingMore)
+          const Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Center(
+              child: SizedBox(
+                width: 24, 
+                height: 24, 
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2E7D32))
+              ),
             ),
           ),
-        );
-      },
+      ],
     );
   }
 
@@ -376,7 +479,6 @@ class _MovieSearchTabState extends State<_MovieSearchTab> {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
@@ -398,9 +500,7 @@ class _MovieSearchTabState extends State<_MovieSearchTab> {
                   setState(() => _recentMovies.clear());
                 },
                 child: Text("Temizle", style: TextStyle(fontSize: 14, color: primaryGreen)),
-                
               )
-              
             ],
           ),
         ),
@@ -447,12 +547,10 @@ class _MovieSearchTabState extends State<_MovieSearchTab> {
       ],
     );
   }
-
-  
 }
 
 // -----------------------------------------------------------------------------
-// KULLANICI ARAMA SEKME İÇERİĞİ
+// KULLANICI ARAMA SEKME İÇERİĞİ (DEĞİŞMEDİ)
 // -----------------------------------------------------------------------------
 class _UserSearchTab extends StatefulWidget {
   final String searchText;

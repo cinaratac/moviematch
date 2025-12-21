@@ -686,8 +686,8 @@ Future<_CardData> _loadCardData(
         if (tmdbQuery != null) tmdbQuery else Future.value(null),
       ]);
 
-      final docIdSnap = results[0] as QuerySnapshot<Map<String, dynamic>>?;
-      final tmdbSnap = results[1] as QuerySnapshot<Map<String, dynamic>>?;
+      final docIdSnap = results[0];
+      final tmdbSnap = results[1];
 
       void processDocs(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
         for (final d in docs) {

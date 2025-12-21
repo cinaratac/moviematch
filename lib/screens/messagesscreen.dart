@@ -365,8 +365,15 @@ class ChatListTile extends StatelessWidget {
     this.cachedUserData, 
   });
   
+  // ChatListTile sınıfının içindeki _buildTile metodunu bununla değiştirin:
   Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime, {bool isDeleted = false}) {
-    if (isDeleted) return const SizedBox.shrink(); // Silinmişse (Fallback) gösterme
+    if (isDeleted) return const SizedBox.shrink(); 
+
+    // YENİ KISIM: Okunmamış mesaj sayısını doğrudan dökümandan alıyoruz
+    // Ekstra maliyet yok!
+    final data = chatDoc.data();
+    final unreadMap = (data['unreadCounts'] as Map?) ?? {};
+    final int count = (unreadMap[currentUid] as num?)?.toInt() ?? 0;
 
     return ListTile(
         onTap: () {
@@ -407,7 +414,21 @@ class ChatListTile extends StatelessWidget {
                     ),
             ],
         ),
-        trailing: _UnreadCountBadge(chatId: chatDoc.id, uid: currentUid),
+        // ESKİ HALİ: trailing: _UnreadCountBadge(...) idi.
+        // YENİ HALİ: Doğrudan Container gösteriyoruz.
+        trailing: count > 0 
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                count.toString(), 
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)
+              ),
+            )
+          : null,
     );
   }
 
@@ -642,30 +663,7 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
   }
 }
 
-class _UnreadCountBadge extends StatelessWidget {
-  final String chatId;
-  final String uid;
-  const _UnreadCountBadge({required this.chatId, required this.uid});
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<int>(
-      stream: ChatService.instance.unreadCountForChat(chatId, uid),
-      initialData: 0,
-      builder: (context, snapshot) {
-        final count = snapshot.data ?? 0;
-        if (count <= 0) return const SizedBox.shrink();
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(count.toString(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-        );
-      },
-    );
-  }
-} 
+
 
 class _TrashFab extends StatelessWidget {
   final String currentUid;

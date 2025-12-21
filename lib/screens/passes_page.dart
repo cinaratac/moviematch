@@ -667,41 +667,6 @@ class _SkeletonContent extends StatelessWidget {
 
 // --- Data Logic (PosterData & Null Safety) ---
 
-Future<List<_PosterData>> _fetchPosterDataByDocIds(List<String> ids) async {
-  if (ids.isEmpty) return const <_PosterData>[];
-  final postersData = <_PosterData>[];
-  const chunk = 10;
-  final targetIds = ids.take(chunk).toList(); 
-  final fs = FirebaseFirestore.instance;
-
-  try {
-    QuerySnapshot qs;
-    qs = await fs.collection('catalog_films').where(FieldPath.documentId, whereIn: targetIds).get();
-    
-    if (qs.docs.isEmpty) {
-      qs = await fs.collection('catalog_films').where('key', whereIn: targetIds).get();
-    }
-
-    for (final d in qs.docs) {
-      // Null Safety Cast
-      final data = d.data();
-      final mapData = data as Map<String, dynamic>?; 
-      
-      final p = (mapData?['poster'] ?? mapData?['posterUrl'] ?? '').toString();
-      final title = (mapData?['title'] ?? mapData?['titleTr'] ?? mapData?['originalTitle'] ?? '') as String?;
-      final tmdbId = mapData?['tmdbId'] as int?;
-
-      if (p.isNotEmpty) {
-        postersData.add(_PosterData(
-          posterUrl: p,
-          title: title,
-          tmdbId: tmdbId,
-        ));
-      }
-    }
-  } catch (_) {}
-  return postersData;
-}
 
 
 // lib/screens/passes_page.dart dosyasının en altındaki _loadCardData fonksiyonunu bununla değiştirin:
@@ -785,8 +750,8 @@ Future<_CardData> _loadCardData(
         if (tmdbQuery != null) tmdbQuery else Future.value(null),
       ]);
 
-      final docIdSnap = results[0] as QuerySnapshot<Map<String, dynamic>>?;
-      final tmdbSnap = results[1] as QuerySnapshot<Map<String, dynamic>>?;
+      final docIdSnap = results[0];
+      final tmdbSnap = results[1];
 
       void processDocs(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
         for (final d in docs) {

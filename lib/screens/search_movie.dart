@@ -21,24 +21,21 @@ extension ShelfTargetXLocal on ShelfTarget {
   }
 }
 
-// BU FONKSİYONU DEĞİŞTİRİYORUZ
-Future<List<dynamic>> _tmdbSearchMovies(String query) async {
+
+Future<List<dynamic>> _tmdbSearchMovies(String query, {int page = 1}) async {
   final q = query.trim();
   if (q.isEmpty) return [];
 
-  // ARTIK TOKEN YOK, SUNUCUYA SORUYORUZ
   try {
     final result = await FirebaseFunctions.instance
-        .httpsCallable('searchMovies') // Backend'deki fonksiyon adı
-        .call({'query': q});
+        .httpsCallable('searchMovies')
+        .call({'query': q, 'page': page});
     
-    // Backend { results: [...] } formatında dönüyor
     final data = result.data as Map<String, dynamic>;
-    return (data['results'] as List?) ?? [];
+    // DEĞİŞİKLİK BURADA: List.from(...) ekledik
+    return List.from((data['results'] as List?) ?? []); 
   } catch (e) {
-   
-    // Hata durumunda boş liste dönebilir veya hatayı yukarı fırlatabilirsiniz
-    throw Exception("Arama sırasında hata oluştu: $e");
+    throw Exception("Arama hatası: $e");
   }
 }
 
@@ -69,12 +66,32 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
   bool _isLoading = false;
   String? _error;
   Timer? _debounce;
+  final ScrollController _scrollController = ScrollController();
+  int _currentPage = 1;
+  bool _hasMore = true; // Daha fazla film var mı?
+  bool _isLoadingMore = false;
+  @override
+  
+  void initState() {
+    super.initState();
+    // Scroll dinleyicisini ekle
+    _scrollController.addListener(_onScroll);
+  }
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+  void _onScroll() {
+    // Listenin sonuna yaklaşıldıysa ve yükleme yapılmıyorsa
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200 &&
+        !_isLoadingMore && 
+        _hasMore) {
+      _loadMoreMovies();
+    }
   }
 
   String get _hintText {
@@ -87,23 +104,65 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
        case ShelfTarget.watchlist: return 'İzlemek istediğin filmi ara...';
      }
    }
+ Future<void> _loadMoreMovies() async {
+  // Eğer zaten yükleniyorsa tekrar tetikleme
+  if (_isLoadingMore) return;
 
+  setState(() {
+    _isLoadingMore = true;
+  });
+
+  try {
+    final nextPage = _currentPage + 1;
+    print("Sayfa $nextPage yükleniyor..."); // KONSOL LOGU 1
+
+    final results = await _tmdbSearchMovies(_searchController.text, page: nextPage);
+
+    print("Gelen film sayısı: ${results.length}"); // KONSOL LOGU 2
+
+    if (results.isEmpty) {
+      setState(() => _hasMore = false);
+    } else {
+      setState(() {
+        _movies.addAll(results);
+        _currentPage = nextPage;
+      });
+    }
+  } catch (e) {
+    // BURASI ÇOK ÖNEMLİ: Hatayı görün!
+    print("Yükleme hatası: $e"); 
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Hata oluştu: $e')),
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isLoadingMore = false;
+      });
+    }
+  }
+}
   Future<void> _searchMovies(String query) async {
     if (query.isEmpty) {
-      setState(() { _movies = []; _error = null; });
+      setState(() {
+        _movies = [];
+        _currentPage = 1;
+        _hasMore = true;
+        _error = null; 
+      });
       return;
     }
     setState(() { _isLoading = true; _error = null; });
     try {
-      // YENİ FONKSİYONU ÇAĞIRIYOR
       final results = await _tmdbSearchMovies(query);
-      setState(() => _movies = results);
+      
+      setState(() => _movies = List.from(results)); 
     } catch (e) {
       setState(() => _error = 'Hata: $e');
     } finally {
       setState(() => _isLoading = false);
     }
-  }
+}
 
   String _slugify(String s) {
     var slug = s.toLowerCase();
@@ -309,17 +368,36 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
   }
   
   Widget _buildBody() {
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(16.0), child: Text(_error!, textAlign: TextAlign.center)));
-    if (_movies.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.movie, size: 80, color: Colors.grey.withOpacity(0.3)), const SizedBox(height: 16), Text('Aradığınız filmi yukarı yazın.', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Colors.grey))]));
-    
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, childAspectRatio: 0.67, crossAxisSpacing: 12, mainAxisSpacing: 12),
-      itemCount: _movies.length,
-      itemBuilder: (context, index) => _buildGridItem(_movies[index]),
-    );
-  }
+  if (_isLoading) return const Center(child: CircularProgressIndicator());
+  if (_error != null) return Center(child: Text(_error!));
+  if (_movies.isEmpty) return const Center(child: Text('Aradığınız filmi yukarı yazın.'));
+
+  return Column(
+    children: [
+      Expanded(
+        child: GridView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.all(16),
+          // Grid ayarları aynen kalıyor
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3, 
+            childAspectRatio: 0.67, 
+            crossAxisSpacing: 12, 
+            mainAxisSpacing: 12
+          ),
+          itemCount: _movies.length,
+          itemBuilder: (context, index) => _buildGridItem(_movies[index]),
+        ),
+      ),
+      // Eğer alttan yükleme yapılıyorsa Loading göster
+      if (_isLoadingMore)
+        const Padding(
+          padding: EdgeInsets.all(8.0),
+          child: CircularProgressIndicator(),
+        ),
+    ],
+  );
+}
 
   Widget _buildGridItem(dynamic movie) {
       // ... (Grid Item kodu aynı kalıyor) ...

@@ -46,24 +46,34 @@ exports.callTMDB = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request) =>
 });
 
 // ==================================================================
-// 2. SEARCH MOVIES (Eski fonksiyonu tutmak istersen - Opsiyonel)
+// 2. SEARCH MOVIES (GÜNCELLENMİŞ VERSİYON)
 // ==================================================================
-// Not: Artık callTMDB olduğu için bu fonksiyon şart değil ama
-// search_movie.dart içinde hala bunu çağıran kod varsa kalsın.
 exports.searchMovies = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request) => {
+    // 1. Güvenlik kontrolü
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'Giriş yapmalısın.');
     }
+
+    // 2. Flutter'dan gelen verileri (query ve page) alıyoruz
     const query = request.data.query;
+    // Eğer page parametresi gönderilmezse varsayılan olarak 1 kabul et
+    const page = request.data.page || 1; 
+    
     const token = process.env.TMDB_ACCESS_TOKEN;
 
     try {
         const response = await axios.get(`https://api.themoviedb.org/3/search/movie`, {
-            params: { query: query, language: 'tr-TR', page: '1', include_adult: 'false' },
+            params: { 
+                query: query, 
+                language: 'tr-TR', 
+                page: page.toString(), // 3. Burası artık dinamik! (Eskiden '1' yazıyordu)
+                include_adult: 'false' 
+            },
             headers: { Authorization: `Bearer ${token}` }
         });
         return response.data;
     } catch (error) {
+        console.error("Search hatası:", error);
         throw new HttpsError('internal', 'Arama hatası.');
     }
 });
