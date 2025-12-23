@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/auth/register_page.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart'; // YEŞİL KARAKTER İÇİN EKLENDİ
 import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore eklendi
+import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:fluttergirdi/auth/google_register_page.dart';
 import 'package:fluttergirdi/widgets/background_3d_posters.dart';
@@ -161,192 +162,200 @@ Future<void> _signInWithGoogle() async {
     return Scaffold(
       // Klavye açıldığında tasarımın bozulmaması için resizeToAvoidBottomInset false yapılabilir
       // veya SingleChildScrollView zaten bunu halleder.
-      body: Stack(
+      body: Column(
         children: [
-          // 1. KATMAN: Hareketli 3D Posterler (En Arkada)
-          Positioned.fill(
-            child: const Background3DPosters(),
-          ),
-
-          // 2. KATMAN: Yarı Saydam Gradyan Perde
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [bgGradientStart, bgGradientEnd],
+          const SafeArea(
+          bottom: false, 
+          child: OfflineBanner()
+        ),
+          Stack(
+            children: [
+              // 1. KATMAN: Hareketli 3D Posterler (En Arkada)
+              Positioned.fill(
+                child: const Background3DPosters(),
+              ),
+          
+              // 2. KATMAN: Yarı Saydam Gradyan Perde
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [bgGradientStart, bgGradientEnd],
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-
-          // 3. KATMAN: Mevcut Login Formu (SafeArea ve sonrası aynen kalır)
-          SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    
-                     // --- YEŞİL KARAKTER ALANI ---
-                  Hero(
-                    tag: 'app_logo',
-                    child: Container(
-                      height: 140, 
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: primaryGreen.withOpacity(0.15),
-                            blurRadius: 30,
-                            spreadRadius: 5,
-                            offset: const Offset(0, 10),
-                          )
-                        ],
-                      ),
-                      child: const GreenEyesCharacter(size: 130),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  // --- HOŞ GELDİNİZ METNİ ---
-                  Text(
-                    'Tekrar Hoş Geldiniz!',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: primaryGreen,
-                      letterSpacing: -0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Devam etmek için giriş yapın',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-
-                  // --- E-POSTA ALANI ---
-                  _buildTextField(
-                    controller: _emailController,
-                    hintText: 'E-posta Adresi',
-                    icon: Icons.email_outlined,
-                    primaryColor: primaryGreen,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // --- ŞİFRE ALANI ---
-                  _buildTextField(
-                    controller: _passwordController,
-                    hintText: 'Şifre',
-                    icon: Icons.lock_outline,
-                    isPassword: true,
-                    isVisible: _isPasswordVisible,
-                    onVisibilityToggle: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
-                    primaryColor: primaryGreen,
-                  ),
-                  
-                  // --- ŞİFREMİ UNUTTUM ---
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _resetPassword,
-                      style: TextButton.styleFrom(
-                        foregroundColor: primaryGreen,
-                        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-                      ),
-                      child: const Text('Şifremi Unuttum?'),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // --- GİRİŞ YAP BUTONU ---
-                  SizedBox(
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _login,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
-                        elevation: 4,
-                        shadowColor: primaryGreen.withOpacity(0.4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+          
+              // 3. KATMAN: Mevcut Login Formu (SafeArea ve sonrası aynen kalır)
+              SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        
+                         // --- YEŞİL KARAKTER ALANI ---
+                      Hero(
+                        tag: 'app_logo',
+                        child: Container(
+                          height: 140, 
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: primaryGreen.withOpacity(0.15),
+                                blurRadius: 30,
+                                spreadRadius: 5,
+                                offset: const Offset(0, 10),
+                              )
+                            ],
+                          ),
+                          child: const GreenEyesCharacter(size: 130),
                         ),
                       ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 24,
-                              width: 24,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                            )
-                          : const Text(
-                              'Giriş Yap',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 56,
-                    child: OutlinedButton.icon(
-                      onPressed: (_isLoading || _isGoogleLoading) ? null : _signInWithGoogle,
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Colors.grey),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        backgroundColor: Colors.white,
-                      ),
-                      icon: _isGoogleLoading 
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Image.asset('assets/images/google_logo.png', height: 24, width: 24, errorBuilder: (c,o,s) => const Icon(Icons.login)), 
-                      label: Text(
-                        _isGoogleLoading ? 'Bağlanılıyor...' : 'Google ile Bağlan',
-                        style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 24),
-
-                  // --- KAYIT OL ALANI ---
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
+                      const SizedBox(height: 24),
+                      
+                      // --- HOŞ GELDİNİZ METNİ ---
                       Text(
-                        'Hesabın yok mu?',
-                        style: TextStyle(color: Colors.grey[600]),
+                        'Tekrar Hoş Geldiniz!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: primaryGreen,
+                          letterSpacing: -0.5,
+                        ),
                       ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const RegisterPage()),
-                          );
-                        },
-                        child: Text(
-                          'Kayıt Ol',
-                          style: TextStyle(
-                            color: primaryGreen,
-                            fontWeight: FontWeight.bold,
+                      const SizedBox(height: 8),
+                      Text(
+                        'Devam etmek için giriş yapın',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 48),
+          
+                      // --- E-POSTA ALANI ---
+                      _buildTextField(
+                        controller: _emailController,
+                        hintText: 'E-posta Adresi',
+                        icon: Icons.email_outlined,
+                        primaryColor: primaryGreen,
+                      ),
+                      const SizedBox(height: 16),
+          
+                      // --- ŞİFRE ALANI ---
+                      _buildTextField(
+                        controller: _passwordController,
+                        hintText: 'Şifre',
+                        icon: Icons.lock_outline,
+                        isPassword: true,
+                        isVisible: _isPasswordVisible,
+                        onVisibilityToggle: () => setState(() => _isPasswordVisible = !_isPasswordVisible),
+                        primaryColor: primaryGreen,
+                      ),
+                      
+                      // --- ŞİFREMİ UNUTTUM ---
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _resetPassword,
+                          style: TextButton.styleFrom(
+                            foregroundColor: primaryGreen,
+                            padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                          ),
+                          child: const Text('Şifremi Unuttum?'),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+          
+                      // --- GİRİŞ YAP BUTONU ---
+                      SizedBox(
+                        height: 56,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _login,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryGreen,
+                            foregroundColor: Colors.white,
+                            elevation: 4,
+                            shadowColor: primaryGreen.withOpacity(0.4),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                )
+                              : const Text(
+                                  'Giriş Yap',
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        height: 56,
+                        child: OutlinedButton.icon(
+                          onPressed: (_isLoading || _isGoogleLoading) ? null : _signInWithGoogle,
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.grey),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            backgroundColor: Colors.white,
+                          ),
+                          icon: _isGoogleLoading 
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : Image.asset('assets/images/google_logo.png', height: 24, width: 24, errorBuilder: (c,o,s) => const Icon(Icons.login)), 
+                          label: Text(
+                            _isGoogleLoading ? 'Bağlanılıyor...' : 'Google ile Bağlan',
+                            style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.w600),
                           ),
                         ),
                       ),
-                    ],
+                      
+                      const SizedBox(height: 24),
+          
+                      // --- KAYIT OL ALANI ---
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Hesabın yok mu?',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const RegisterPage()),
+                              );
+                            },
+                            child: Text(
+                              'Kayıt Ol',
+                              style: TextStyle(
+                                color: primaryGreen,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      ],
+                    ),
                   ),
-                  
-                  ],
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),
