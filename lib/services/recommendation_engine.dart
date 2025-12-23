@@ -1,9 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; // debugPrint için
-import 'package:cloud_functions/cloud_functions.dart'; // YENİ
-// import '../secrets.dart'; // SİLİN
+import 'package:flutter/foundation.dart';
+import 'package:cloud_functions/cloud_functions.dart'; 
+import 'dart:math';
 
-// ... (MovieRecommendation ve UserTasteProfile sınıfları AYNEN kalacak) ...
 class MovieRecommendation {
   final int tmdbId;
   final String title;
@@ -80,7 +79,7 @@ class RecommendationEngine {
   static final RecommendationEngine instance = RecommendationEngine._();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  // String _tmdbBearer = Secrets.tmdbAccessToken; // ARTIK YOK
+  final Random _rng = Random(); 
 
   // Cache süresi (7 Gün)
   static const Duration _cacheDuration = Duration(days: 7);
@@ -114,25 +113,30 @@ class RecommendationEngine {
            final recsData = data['recommendations'] as List?;
            if (recsData != null && recsData.isNotEmpty) {
              final list = recsData.map((e) => MovieRecommendation.fromMap(e)).toList();
-             _memoryCache = list;
-             _lastFetchTime = cachedAt;
-             return list;
+             
+             // KALİTE KONTROLÜ: Liste 10'dan kısaysa (eski hatalı veri) yeniden çek
+             if (list.length >= 10) {
+               _memoryCache = list;
+               _lastFetchTime = cachedAt;
+               return list;
+             }
            }
         }
+        
         final recs = data['recommendations'] as List?;
         if (recs != null) {
           for (var r in recs) ignoreIds.add(r['tmdbId']);
         }
       }
     } catch (e) {
-      debugPrint("");
+      debugPrint("Cache check error: $e");
     }
 
     // 3. Profil Analizi
     final profile = await _fetchUserProfile(uid);
     final rawRecommendations = <MovieRecommendation>[];
 
-    // 4. API İstekleri (Backend Üzerinden)
+    // 4. API İstekleri
     await Future.wait([
       _getGenreBasedRecommendations(profile, rawRecommendations),
       _getDirectorBasedRecommendations(profile, rawRecommendations),
@@ -156,8 +160,8 @@ class RecommendationEngine {
       }
     }
 
-    // 6. YEDEK PLAN: Liste boşsa Trendleri Çek
-    if (uniqueMap.length < 10) {
+    // 6. YEDEK PLAN
+    if (uniqueMap.length < 15) {
       final trending = <MovieRecommendation>[];
       await _getTrendingRecommendations(trending);
       for (final tr in trending) {
@@ -168,6 +172,7 @@ class RecommendationEngine {
     }
 
     var mergedList = uniqueMap.values.toList();
+    // Filtreleme
     final filtered = _filterKnownMovies(mergedList, profile, ignoreIds: ignoreIds);
     filtered.sort((a, b) => b.matchScore.compareTo(a.matchScore));
     final top30 = filtered.take(30).toList();
@@ -183,7 +188,7 @@ class RecommendationEngine {
         _memoryCache = top30;
         _lastFetchTime = DateTime.now();
       } catch (e) {
-        debugPrint("");
+        debugPrint("Firebase write error: $e");
       }
     }
 
@@ -212,6 +217,10 @@ class RecommendationEngine {
       if (recommendationsData == null) return null;
 
       final list = recommendationsData.map((e) => MovieRecommendation.fromMap(e)).toList();
+      
+      // Kalite kontrolü
+      if (list.length < 10) return null;
+
       _memoryCache = list;
       _lastFetchTime = cachedAt ?? DateTime.now();
       return list;
@@ -255,6 +264,7 @@ class RecommendationEngine {
         favoriteActors: List<String>.from(data['favActors'] ?? []),
         lovedMovieTmdbIds: resolvedIds,
         lovedMovieTitles: resolvedTitles,
+        dislikedMovieTmdbIds: List<int>.from(data['dislikedMovieIds'] ?? []), 
         age: data['age'] as int?,
       );
     } catch (e) {
@@ -262,20 +272,27 @@ class RecommendationEngine {
     }
   }
 
-  // --- API Fetcher Helper (ARTIK CLOUD FUNCTIONS İLE) ---
+  // --- API Fetcher Helper (DÜZELTİLDİ: Liste İçeriği Cast Edildi) ---
   
   Future<void> _fetchAndAddRecommendations(String path, List<MovieRecommendation> list, String reason) async {
     try {
-      // YENİ: Backend çağrısı
+      final int randomPage = _rng.nextInt(3) + 1;
+
       final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
         'endpoint': path,
-        'params': {'language': 'tr-TR', 'page': '1'}
+        'params': {'language': 'tr-TR', 'page': '$randomPage'}
       });
 
-      final data = result.data as Map<String, dynamic>;
+      // Ana Datayı Çevir
+      final data = Map<String, dynamic>.from(result.data as Map); 
       final results = data['results'] as List;
       
-      for (final movie in results.take(5)) {
+      for (final rawMovie in results.take(15)) {
+        // --- KRİTİK DÜZELTME BURADA ---
+        // Liste içindeki her elemanı da Map<String, dynamic> yapıyoruz
+        final movie = Map<String, dynamic>.from(rawMovie as Map);
+        // ------------------------------
+
         final vote = (movie['vote_average'] ?? 0.0).toDouble();
         final score = 50.0 + (vote * 4.5);
         list.add(_createRecommendation(
@@ -285,11 +302,11 @@ class RecommendationEngine {
         ));
       }
     } catch (e) {
-      debugPrint("");
+      debugPrint("API Error ($path): $e");
     }
   }
 
-  // --- Kaynak Fonksiyonları ---
+  // --- Kaynak Fonksiyonları (DÜZELTİLDİ: Liste İçeriği Cast Edildi) ---
 
   Future<void> _getGenreBasedRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
     if (profile.favoriteGenres.isEmpty) return;
@@ -298,20 +315,31 @@ class RecommendationEngine {
       final id = genreMap[g.toLowerCase().trim()];
       if (id != null) {
         try {
-          // Cloud Function ile discover/movie çağrısı
+          final int randomPage = _rng.nextInt(10) + 1;
+
           final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
             'endpoint': '/3/discover/movie',
             'params': {
               'with_genres': id.toString(), 
               'sort_by': 'popularity.desc', 
+              'page': '$randomPage',
               'language': 'tr-TR'
             }
           });
           
-          final res = (result.data as Map<String, dynamic>)['results'] as List;
-          for(var m in res.take(5)) {
+          final data = Map<String, dynamic>.from(result.data as Map);
+          final res = data['results'] as List;
+          
+          for(var rawM in res.take(10)) {
+            // --- DÜZELTME ---
+            final m = Map<String, dynamic>.from(rawM as Map);
+            // ----------------
             final vote = (m['vote_average'] ?? 0.0).toDouble();
-            recommendations.add(_createRecommendation(m, matchScore: (50.0 + (vote * 5.0)).clamp(0.0, 95.0), matchReason: 'Tür: $g'));
+            recommendations.add(_createRecommendation(
+              m, 
+              matchScore: (50.0 + (vote * 5.0)).clamp(0.0, 95.0), 
+              matchReason: 'Tür: $g'
+            ));
           }
         } catch(_){}
       }
@@ -337,7 +365,10 @@ class RecommendationEngine {
         'endpoint': '/3/search/person',
         'params': {'query': name, 'language': 'tr-TR'}
       });
-      final sRes = (sResult.data as Map<String, dynamic>)['results'] as List;
+      
+      final sData = Map<String, dynamic>.from(sResult.data as Map);
+      final sRes = sData['results'] as List;
+
       if (sRes.isEmpty) return;
       
       final personId = sRes.first['id'];
@@ -348,7 +379,8 @@ class RecommendationEngine {
         'params': {'language': 'tr-TR'}
       });
 
-      final cData = cResult.data as Map<String, dynamic>;
+      final cData = Map<String, dynamic>.from(cResult.data as Map);
+
       var credits = (dept == 'Directing' ? cData['crew'] : cData['cast']) as List;
       
       if (dept == 'Directing') {
@@ -357,7 +389,13 @@ class RecommendationEngine {
       
       credits.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
       
-      for (final movie in credits.take(4)) {
+      var topCandidates = credits.take(20).toList();
+      topCandidates.shuffle(_rng);
+
+      for (final rawMovie in topCandidates.take(5)) {
+         // --- DÜZELTME ---
+         final movie = Map<String, dynamic>.from(rawMovie as Map);
+         // ----------------
          final vote = (movie['vote_average'] ?? 0.0).toDouble();
          list.add(_createRecommendation(
            movie,
@@ -381,7 +419,9 @@ class RecommendationEngine {
           'params': {'query': title, 'language': 'tr-TR'}
         });
         
-        final res = (sResult.data as Map<String, dynamic>)['results'] as List;
+        final data = Map<String, dynamic>.from(sResult.data as Map);
+        final res = data['results'] as List;
+
         if (res.isNotEmpty) {
           final id = res.first['id'];
           await _fetchAndAddRecommendations('/3/movie/$id/recommendations', recommendations, 'Benzer: $title');
@@ -416,6 +456,7 @@ class RecommendationEngine {
     return list.where((rec) {
       if (knownIds.contains(rec.tmdbId)) return false;
       if (knownTitles.contains(rec.title.toLowerCase())) return false;
+      if (profile.dislikedMovieTmdbIds.contains(rec.tmdbId)) return false;
       return true;
     }).toList();
   }
