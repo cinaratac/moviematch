@@ -225,8 +225,6 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   padding: const EdgeInsets.only(bottom: 20),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
-                    // DÜZELTME 1: Her yoruma benzersiz bir Key veriyoruz.
-                    // Böylece Flutter bunları birbirine karıştırmaz.
                     return _CommentTile(
                       key: ValueKey(docs[index].id), 
                       postId: widget.postId,
@@ -241,7 +239,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
           // Input Alanı
           Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), 
+            // --- GÜNCELLEME BURADA YAPILDI ---
+            // Eğer klavye açıksa (bottomInset > 0) normal boşluk bırak.
+            // Eğer klavye kapalıysa alt tarafa 24 birim (veya dilediğiniz kadar) ekstra boşluk ver.
+            padding: EdgeInsets.fromLTRB(16, 8, 16, bottomInset > 0 ? 8 : 40), 
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
               border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
@@ -365,7 +366,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
   }
 }
 
-// --- FİLM WIDGET'I (TIKLANINCA DETAY'A GİDER) ---
+// ... Dosyanın geri kalanı aynı şekilde devam eder (_AttachedMovieWidget, _CommentTile vb.) ...
 class _AttachedMovieWidget extends StatelessWidget {
   final Map<String, dynamic> movie;
   const _AttachedMovieWidget({required this.movie});

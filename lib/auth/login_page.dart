@@ -5,6 +5,7 @@ import 'package:fluttergirdi/widgets/green_characters.dart'; // YEŞİL KARAKTER
 import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore eklendi
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:fluttergirdi/auth/google_register_page.dart';
+import 'package:fluttergirdi/widgets/background_3d_posters.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -145,40 +146,59 @@ Future<void> _signInWithGoogle() async {
     }
   }
 
+
+
+
   @override
   Widget build(BuildContext context) {
     // Yeşil Tema Renkleri
-    final primaryGreen = const Color(0xFF2E7D32); // Koyu Yeşil
-    final bgGradientStart = const Color(0xFFE8F5E9); 
-    final bgGradientEnd = Colors.white;
+    final primaryGreen = const Color(0xFF2E7D32);
+    // Arka plan gradyan renkleri (Opacity eklenmiş haliyle)
+    // Posterlerin görünmesi için opaklığı (withOpacity) ayarladık.
+    final bgGradientStart = const Color(0xFFE8F5E9).withOpacity(0.75); 
+    final bgGradientEnd = Colors.white.withOpacity(0.85);
 
     return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [bgGradientStart, bgGradientEnd],
+      // Klavye açıldığında tasarımın bozulmaması için resizeToAvoidBottomInset false yapılabilir
+      // veya SingleChildScrollView zaten bunu halleder.
+      body: Stack(
+        children: [
+          // 1. KATMAN: Hareketli 3D Posterler (En Arkada)
+          Positioned.fill(
+            child: const Background3DPosters(),
           ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // --- YEŞİL KARAKTER ALANI ---
-                  // Eski 'app_icon.png' yerine interaktif karakteri koyduk
+
+          // 2. KATMAN: Yarı Saydam Gradyan Perde
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [bgGradientStart, bgGradientEnd],
+                ),
+              ),
+            ),
+          ),
+
+          // 3. KATMAN: Mevcut Login Formu (SafeArea ve sonrası aynen kalır)
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    
+                     // --- YEŞİL KARAKTER ALANI ---
                   Hero(
                     tag: 'app_logo',
                     child: Container(
-                      height: 140, // Biraz büyüttük ki karakter net görünsün
+                      height: 140, 
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        // Karakterin arkasına hafif bir gölge/parlama efekti
                         boxShadow: [
                           BoxShadow(
                             color: primaryGreen.withOpacity(0.15),
@@ -188,7 +208,6 @@ Future<void> _signInWithGoogle() async {
                           )
                         ],
                       ),
-                      // BURASI GÜNCELLENDİ:
                       child: const GreenEyesCharacter(size: 130),
                     ),
                   ),
@@ -288,7 +307,7 @@ Future<void> _signInWithGoogle() async {
                       ),
                       icon: _isGoogleLoading 
                         ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Image.asset('assets/images/google_logo.png', height: 24, width: 24, errorBuilder: (c,o,s) => const Icon(Icons.login)), // Google logosu yoksa icon gösterir
+                        : Image.asset('assets/images/google_logo.png', height: 24, width: 24, errorBuilder: (c,o,s) => const Icon(Icons.login)), 
                       label: Text(
                         _isGoogleLoading ? 'Bağlanılıyor...' : 'Google ile Bağlan',
                         style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.w600),
@@ -323,11 +342,13 @@ Future<void> _signInWithGoogle() async {
                       ),
                     ],
                   ),
-                ],
+                  
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

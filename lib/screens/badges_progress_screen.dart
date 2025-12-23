@@ -401,9 +401,11 @@ class _BadgeDetailSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // İlerleme tamamlandı mı kontrolü
     final isCompleted = progress >= 1.0;
 
     return Container(
+      // ... (Dekorasyon kodları aynı kalacak)
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
@@ -412,6 +414,7 @@ class _BadgeDetailSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // ... (Üst kısımdaki ikon, başlık, açıklama ve ilerleme çubuğu kodları aynı kalacak)
           Container(
             width: 40, height: 4,
             decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
@@ -482,19 +485,31 @@ class _BadgeDetailSheet extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: () {
-                    final text = "CineMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨";
+                    // --- PAYLAŞILACAK METNİ DE GÜNCELLEDİK ---
+                    // Eğer kazanıldıysa "Kazandım", kazanılmadıysa "Kazanmak Üzereyim" yazsın.
+                    final text = isCompleted 
+                        ? "CineMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨"
+                        : "CineMatch uygulamasında '${badge.name}' rozetini kazanmak üzereyim! 🚀";
+                    
                     try {
-                       Share.share(text); 
+                        Share.share(text); 
                     } catch (e) {
-                       ScaffoldMessenger.of(context).showSnackBar(
-                         const SnackBar(content: Text('Paylaşım özelliği şu an kullanılamıyor.')),
-                       );
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Paylaşım özelliği şu an kullanılamıyor.')),
+                        );
                     }
                   },
                   icon: const Icon(Icons.share),
-                  label: const Text('Paylaş'),
+                  // --- BUTON METNİ BURADA GÜNCELLENDİ ---
+                  label: Text(
+                    'Rozeti Paylaş',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Sığması için fontu biraz küçültebiliriz
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8), // Padding'i ayarladık
                     backgroundColor: badge.color,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

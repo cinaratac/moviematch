@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/gestures.dart'; // Tıklanabilir metin için
-import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart'; // PDF görüntüleyici
-import '../services/text_filter_service.dart';
+import 'package:flutter/gestures.dart'; 
+import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
+import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
+import 'package:fluttergirdi/services/text_filter_service.dart';
+// Yeni arka plan widget'ını import ediyoruz (Paket adınız fluttergirdi varsayılmıştır)
+import 'package:fluttergirdi/widgets/background_3d_posters.dart'; 
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -15,25 +17,30 @@ class RegisterPage extends StatefulWidget {
 
 class _RegisterPageState extends State<RegisterPage> {
   final _form = GlobalKey<FormState>();
+  
+  // Controller'lar
   final _username = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+  
+  // Şifre gizlilik durumları
   bool _obscure1 = true;
   bool _obscure2 = true;
   bool _loading = false;
 
-  // --- İZİN DEĞİŞKENLERİ ---
-  bool _agreedToTerms = false; // Zorunlu sözleşme onayı
-  bool _allowMail = false;     // İsteğe bağlı iletişim izni (Zorunlu değil)
+  // İzin değişkenleri
+  bool _agreedToTerms = false;
+  bool _allowMail = false;
 
+  // Karakter göz takibi için offset
   double _eyeOffsetX = 0;
   double _eyeOffsetY = 0;
 
+  // --- KAYIT FONKSİYONU ---
   Future<void> _submit() async {
     if (!_form.currentState!.validate()) return;
 
-    // --- ZORUNLU SÖZLEŞME KONTROLÜ ---
     if (!_agreedToTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -51,6 +58,7 @@ class _RegisterPageState extends State<RegisterPage> {
       final pass = _password.text.trim();
       final uname = _username.text.trim();
       
+      // Küfür filtresi kontrolü
       if (TextFilterService.hasProfanity(uname)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -61,26 +69,26 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
-      // 1) Kullanıcıyı Firebase Auth üzerinde oluştur
+      // 1) Firebase Auth ile kullanıcı oluşturma
       await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: pass,
       );
 
-      // 2) Kullanıcı adını (displayName) güncelle
+      // 2) Kullanıcı adını güncelleme
       final user = FirebaseAuth.instance.currentUser;
       try {
         await user?.updateDisplayName(uname);
       } catch (_) {}
 
-      // 3) Firestore İşlemleri
+      // 3) Firestore'a kaydetme
       try {
         final uid = FirebaseAuth.instance.currentUser?.uid;
         if (uid != null) {
           final db = FirebaseFirestore.instance;
           final batch = db.batch();
 
-          // A) Ana Kullanıcı Kaydı
+          // Ana Kullanıcı Kaydı
           final userRef = db.collection('users').doc(uid);
           batch.set(userRef, {
             'displayName': uname,
@@ -93,7 +101,7 @@ class _RegisterPageState extends State<RegisterPage> {
             'createdAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
 
-          // B) Mail İzni
+          // Pazarlama İzni (Varsa)
           if (_allowMail) {
             final mailListRef = db.collection('marketing_emails').doc(uid);
             batch.set(mailListRef, {
@@ -107,10 +115,10 @@ class _RegisterPageState extends State<RegisterPage> {
           await batch.commit();
         }
       } catch (e) {
-        debugPrint('');
+        debugPrint('Firestore Error: $e');
       }
 
-      // 4) Yönlendirme
+      // 4) Başarılı ise Onboarding'e yönlendir
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const OnboardingLetterboxd()),
@@ -139,7 +147,7 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  // --- PDF PENCERESİ ---
+  // --- SÖZLEŞME MODAL ---
   void _showTermsDialog() {
     showModalBottomSheet(
       context: context,
@@ -231,302 +239,321 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    // --- LOGIN PAGE İLE ORTAK TEMA RENKLERİ ---
+    // Tema Renkleri
     final primaryGreen = const Color(0xFF2E7D32); // Koyu Yeşil
-    final bgGradientStart = const Color(0xFFE8F5E9); 
-    final bgGradientEnd = Colors.white;
+    
+    // Arka plan gradyanı (yarı saydam yaparak posterlerin görünmesini sağlıyoruz)
+    // 0.90 ve 0.95 opacity, yazıların okunabilirliği ile arka plan görünürlüğü arasında iyi bir denge kurar.
+    final bgGradientStart = const Color(0xFFE8F5E9).withOpacity(0.75); 
+    final bgGradientEnd = Colors.white.withOpacity(0.85);
 
     return Scaffold(
-      // AppBar yerine Container gradient kullanıyoruz
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [bgGradientStart, bgGradientEnd],
+      // Klavye açıldığında tasarımın sıkışmasını engellemek için resizeToAvoidBottomInset false yapabiliriz
+      // Ancak SingleChildScrollView olduğu için true kalsa da çalışır.
+      resizeToAvoidBottomInset: true, 
+      body: Stack(
+        children: [
+          // 1. KATMAN: Netflix Tarzı Akan Poster Duvarı (En Arkada)
+          const Positioned.fill(
+            child: Background3DPosters(),
           ),
-        ),
-        child: SafeArea(
-          child: GestureDetector(
-            onTap: () {
-              FocusScope.of(context).unfocus();
-              setState(() {
-                _eyeOffsetX = 0;
-                _eyeOffsetY = 0;
-              });
-            },
-            behavior: HitTestBehavior.translucent,
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Form(
-                  key: _form,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Geri Butonu (Sol Üst)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: IconButton(
-                          icon: Icon(Icons.arrow_back, color: primaryGreen),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ),
-                      
-                      // --- YEŞİL KARAKTER (ForestFace) ---
-                      Center(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: primaryGreen.withOpacity(0.15),
-                                blurRadius: 30,
-                                spreadRadius: 5,
-                                offset: const Offset(0, 10),
-                              )
-                            ],
-                          ),
-                          child: _ForestFace(offsetX: _eyeOffsetX, offsetY: _eyeOffsetY),
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 24),
-                      
-                      // --- BAŞLIKLAR ---
-                      Text(
-                        'Hesap Oluştur',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: primaryGreen,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Profilini filmlerle doldur, kişisel listelerini oluştur, kulüplere katıl ve insanlarla tanış.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      const SizedBox(height: 32),
-                      
-                      // --- KULLANICI ADI ---
-                      _buildStyledTextFormField(
-                        controller: _username,
-                        hintText: 'Kullanıcı Adı',
-                        icon: Icons.alternate_email,
-                        primaryColor: primaryGreen,
-                        onTap: () => setState(() {
-                          _eyeOffsetX = -6;
-                          _eyeOffsetY = 4;
-                        }),
-                        validator: (v) {
-                          final value = (v ?? '').trim();
-                          if (value.isEmpty) return 'Kullanıcı adı zorunlu';
-                          final re = RegExp(r'^[a-zA-Z0-9._-]{3,20}$');
-                          if (!re.hasMatch(value)) {
-                            return 'Geçersiz karakter veya uzunluk';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // --- E-POSTA ---
-                      _buildStyledTextFormField(
-                        controller: _email,
-                        hintText: 'E-posta Adresi',
-                        icon: Icons.email_outlined,
-                        primaryColor: primaryGreen,
-                        keyboardType: TextInputType.emailAddress,
-                        onTap: () => setState(() {
-                          _eyeOffsetX = -8;
-                          _eyeOffsetY = 6;
-                        }),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Zorunlu alan';
-                          if (!v.contains('@')) return 'Geçerli bir e-posta gir';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // --- ŞİFRE ---
-                      _buildStyledTextFormField(
-                        controller: _password,
-                        hintText: 'Şifre',
-                        icon: Icons.lock_outline,
-                        primaryColor: primaryGreen,
-                        isPassword: true,
-                        isVisible: !_obscure1,
-                        onVisibilityToggle: () => setState(() => _obscure1 = !_obscure1),
-                        onTap: () => setState(() {
-                          _eyeOffsetX = 0;
-                          _eyeOffsetY = 10;
-                        }),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Zorunlu alan';
-                          if (v.length < 6) return 'En az 6 karakter olmalı';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // --- ŞİFRE TEKRAR ---
-                      _buildStyledTextFormField(
-                        controller: _confirm,
-                        hintText: 'Şifre (Tekrar)',
-                        icon: Icons.lock_reset_outlined,
-                        primaryColor: primaryGreen,
-                        isPassword: true,
-                        isVisible: !_obscure2,
-                        onVisibilityToggle: () => setState(() => _obscure2 = !_obscure2),
-                        onTap: () => setState(() {
-                          _eyeOffsetX = 0;
-                          _eyeOffsetY = 10;
-                        }),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Zorunlu alan';
-                          if (v != _password.text) return 'Şifreler uyuşmuyor';
-                          return null;
-                        },
-                      ),
-                      
-                      const SizedBox(height: 24),
 
-                      // --- 1. KULLANICI SÖZLEŞMESİ ---
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: Checkbox(
-                              value: _agreedToTerms,
-                              activeColor: primaryGreen,
-                              onChanged: (v) => setState(() => _agreedToTerms = v ?? false),
-                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: RichText(
-                              text: TextSpan(
-                                text: 'Kaydol butonuna basarak ',
-                                style: TextStyle(color: Colors.black87, fontSize: 13),
-                                children: [
-                                  TextSpan(
-                                    text: 'Kullanıcı Sözleşmesini',
-                                    style: TextStyle(
-                                      color: primaryGreen,
-                                      fontWeight: FontWeight.bold,
-                                      decoration: TextDecoration.underline,
-                                    ),
-                                    recognizer: TapGestureRecognizer()
-                                      ..onTap = _showTermsDialog,
-                                  ),
-                                  const TextSpan(text: ' okuduğumu ve kabul ettiğimi onaylıyorum.'),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+          // 2. KATMAN: Yarı Saydam Gradyan Perde
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [bgGradientStart, bgGradientEnd],
+                ),
+              ),
+            ),
+          ),
 
-                      const SizedBox(height: 12),
-
-                      // --- 2. E-POSTA İZNİ ---
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: Checkbox(
-                              value: _allowMail,
-                              activeColor: primaryGreen,
-                              onChanged: (v) => setState(() => _allowMail = v ?? false),
-                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setState(() => _allowMail = !_allowMail),
-                              child: Text(
-                                'Cinematch hakkındaki yeniliklerden e-posta yoluyla haberdar olmak istiyorum.',
-                                style: TextStyle(color: Colors.grey[700], fontSize: 13),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      // --- KAYDOL BUTONU ---
-                      SizedBox(
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: _loading ? null : _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primaryGreen,
-                            foregroundColor: Colors.white,
-                            elevation: 4,
-                            shadowColor: primaryGreen.withOpacity(0.4),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: _loading
-                              ? const SizedBox(
-                                  height: 24,
-                                  width: 24,
-                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                )
-                              : const Text(
-                                  'Kaydol',
-                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                ),
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 24),
-                      
-                      // --- ZATEN HESABIN VAR MI? ---
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'Zaten hesabın var mı?',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                          TextButton(
+          // 3. KATMAN: Form İçeriği (En Önde)
+          SafeArea(
+            child: GestureDetector(
+              onTap: () {
+                FocusScope.of(context).unfocus();
+                setState(() {
+                  _eyeOffsetX = 0;
+                  _eyeOffsetY = 0;
+                });
+              },
+              behavior: HitTestBehavior.translucent,
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Form(
+                    key: _form,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Geri Butonu (Sol Üst)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            icon: Icon(Icons.arrow_back, color: primaryGreen),
                             onPressed: () => Navigator.pop(context),
-                            child: Text(
-                              'Giriş Yap',
-                              style: TextStyle(
-                                color: primaryGreen,
-                                fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        
+                        // --- YEŞİL KARAKTER (ForestFace) ---
+                        Center(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: primaryGreen.withOpacity(0.15),
+                                  blurRadius: 30,
+                                  spreadRadius: 5,
+                                  offset: const Offset(0, 10),
+                                )
+                              ],
+                            ),
+                            child: _ForestFace(offsetX: _eyeOffsetX, offsetY: _eyeOffsetY),
+                          ),
+                        ),
+                        
+                        const SizedBox(height: 24),
+                        
+                        // --- BAŞLIKLAR ---
+                        Text(
+                          'Hesap Oluştur',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: primaryGreen,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Profilini filmlerle doldur, kişisel listelerini oluştur, kulüplere katıl ve insanlarla tanış.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                        
+                        // --- KULLANICI ADI ---
+                        _buildStyledTextFormField(
+                          controller: _username,
+                          hintText: 'Kullanıcı Adı',
+                          icon: Icons.alternate_email,
+                          primaryColor: primaryGreen,
+                          onTap: () => setState(() {
+                            _eyeOffsetX = -6;
+                            _eyeOffsetY = 4;
+                          }),
+                          validator: (v) {
+                            final value = (v ?? '').trim();
+                            if (value.isEmpty) return 'Kullanıcı adı zorunlu';
+                            final re = RegExp(r'^[a-zA-Z0-9._-]{3,20}$');
+                            if (!re.hasMatch(value)) {
+                              return 'Geçersiz karakter veya uzunluk';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // --- E-POSTA ---
+                        _buildStyledTextFormField(
+                          controller: _email,
+                          hintText: 'E-posta Adresi',
+                          icon: Icons.email_outlined,
+                          primaryColor: primaryGreen,
+                          keyboardType: TextInputType.emailAddress,
+                          onTap: () => setState(() {
+                            _eyeOffsetX = -8;
+                            _eyeOffsetY = 6;
+                          }),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Zorunlu alan';
+                            if (!v.contains('@')) return 'Geçerli bir e-posta gir';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // --- ŞİFRE ---
+                        _buildStyledTextFormField(
+                          controller: _password,
+                          hintText: 'Şifre',
+                          icon: Icons.lock_outline,
+                          primaryColor: primaryGreen,
+                          isPassword: true,
+                          isVisible: !_obscure1,
+                          onVisibilityToggle: () => setState(() => _obscure1 = !_obscure1),
+                          onTap: () => setState(() {
+                            _eyeOffsetX = 0;
+                            _eyeOffsetY = 10;
+                          }),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Zorunlu alan';
+                            if (v.length < 6) return 'En az 6 karakter olmalı';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // --- ŞİFRE TEKRAR ---
+                        _buildStyledTextFormField(
+                          controller: _confirm,
+                          hintText: 'Şifre (Tekrar)',
+                          icon: Icons.lock_reset_outlined,
+                          primaryColor: primaryGreen,
+                          isPassword: true,
+                          isVisible: !_obscure2,
+                          onVisibilityToggle: () => setState(() => _obscure2 = !_obscure2),
+                          onTap: () => setState(() {
+                            _eyeOffsetX = 0;
+                            _eyeOffsetY = 10;
+                          }),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Zorunlu alan';
+                            if (v != _password.text) return 'Şifreler uyuşmuyor';
+                            return null;
+                          },
+                        ),
+                        
+                        const SizedBox(height: 24),
+
+                        // --- 1. KULLANICI SÖZLEŞMESİ ---
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: Checkbox(
+                                value: _agreedToTerms,
+                                activeColor: primaryGreen,
+                                onChanged: (v) => setState(() => _agreedToTerms = v ?? false),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: RichText(
+                                text: TextSpan(
+                                  text: 'Kaydol butonuna basarak ',
+                                  style: const TextStyle(color: Colors.black87, fontSize: 13),
+                                  children: [
+                                    TextSpan(
+                                      text: 'Kullanıcı Sözleşmesini',
+                                      style: TextStyle(
+                                        color: primaryGreen,
+                                        fontWeight: FontWeight.bold,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                      recognizer: TapGestureRecognizer()
+                                        ..onTap = _showTermsDialog,
+                                    ),
+                                    const TextSpan(text: ' okuduğumu ve kabul ettiğimi onaylıyorum.'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // --- 2. E-POSTA İZNİ ---
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: Checkbox(
+                                value: _allowMail,
+                                activeColor: primaryGreen,
+                                onChanged: (v) => setState(() => _allowMail = v ?? false),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(() => _allowMail = !_allowMail),
+                                child: Text(
+                                  'Cinematch hakkındaki yeniliklerden e-posta yoluyla haberdar olmak istiyorum.',
+                                  style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 32),
+
+                        // --- KAYDOL BUTONU ---
+                        SizedBox(
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: _loading ? null : _submit,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primaryGreen,
+                              foregroundColor: Colors.white,
+                              elevation: 4,
+                              shadowColor: primaryGreen.withOpacity(0.4),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: _loading
+                                ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                  )
+                                : const Text(
+                                    'Kaydol',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                    ],
+                        ),
+                        
+                        const SizedBox(height: 24),
+                        
+                        // --- ZATEN HESABIN VAR MI? ---
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Zaten hesabın var mı?',
+                              style: TextStyle(color: Colors.grey[600]),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: Text(
+                                'Giriş Yap',
+                                style: TextStyle(
+                                  color: primaryGreen,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -597,6 +624,7 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 }
 
+// --- KARAKTER (ForestFace) ---
 class _ForestFace extends StatelessWidget {
   final double offsetX;
   final double offsetY;
