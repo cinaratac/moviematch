@@ -83,16 +83,27 @@ class RecommendationEngine {
 
   // Cache süresi (7 Gün)
   static const Duration _cacheDuration = Duration(days: 7);
+  
+  // --- DÜZELTME BURADA ---
+  // Sadece listeyi değil, bu listenin KİME AİT OLDUĞUNU da tutmalıyız.
   List<MovieRecommendation>? _memoryCache;
+  String? _cachedUid; // Cache'in sahibi kim?
   DateTime? _lastFetchTime;
+  // -----------------------
 
   DocumentReference _getRecRef(String uid) {
     return _db.collection('users').doc(uid).collection('recommendations').doc('feed');
   }
 
   Future<List<MovieRecommendation>> generateRecommendations(String uid, {bool forceRefresh = false}) async {
-    // 1. RAM Cache Kontrolü
-    if (!forceRefresh && _memoryCache != null && _memoryCache!.isNotEmpty && _lastFetchTime != null) {
+    // 1. RAM Cache Kontrolü (GÜVENLİ)
+    // Cache dolu mu VE Sahibi şu anki kullanıcı mı?
+    if (!forceRefresh && 
+        _memoryCache != null && 
+        _memoryCache!.isNotEmpty && 
+        _cachedUid == uid && // <-- KİMLİK KONTROLÜ
+        _lastFetchTime != null) {
+      
       if (DateTime.now().difference(_lastFetchTime!) < _cacheDuration) {
         return _memoryCache!;
       }
@@ -114,9 +125,10 @@ class RecommendationEngine {
            if (recsData != null && recsData.isNotEmpty) {
              final list = recsData.map((e) => MovieRecommendation.fromMap(e)).toList();
              
-             // KALİTE KONTROLÜ: Liste 10'dan kısaysa (eski hatalı veri) yeniden çek
+             // KALİTE KONTROLÜ
              if (list.length >= 10) {
                _memoryCache = list;
+               _cachedUid = uid; // <-- Sahibini kaydet
                _lastFetchTime = cachedAt;
                return list;
              }
@@ -160,7 +172,7 @@ class RecommendationEngine {
       }
     }
 
-    // 6. YEDEK PLAN
+    // 6. YEDEK PLAN (Trendler)
     if (uniqueMap.length < 15) {
       final trending = <MovieRecommendation>[];
       await _getTrendingRecommendations(trending);
@@ -186,6 +198,7 @@ class RecommendationEngine {
           'count': top30.length,
         });
         _memoryCache = top30;
+        _cachedUid = uid; // <-- Sahibini kaydet
         _lastFetchTime = DateTime.now();
       } catch (e) {
         debugPrint("Firebase write error: $e");
@@ -199,11 +212,14 @@ class RecommendationEngine {
 
   void clearMemoryCache() {
     _memoryCache = null;
+    _cachedUid = null;
     _lastFetchTime = null;
   }
 
   Future<List<MovieRecommendation>?> getCachedRecommendations(String uid) async {
-    if (_memoryCache != null && _memoryCache!.isNotEmpty) return _memoryCache;
+    // RAM Cache kontrolünde UID eşleşmesi şart
+    if (_memoryCache != null && _memoryCache!.isNotEmpty && _cachedUid == uid) return _memoryCache;
+    
     try {
       final snapshot = await _getRecRef(uid).get();
       if (!snapshot.exists) return null;
@@ -218,10 +234,10 @@ class RecommendationEngine {
 
       final list = recommendationsData.map((e) => MovieRecommendation.fromMap(e)).toList();
       
-      // Kalite kontrolü
       if (list.length < 10) return null;
 
       _memoryCache = list;
+      _cachedUid = uid; // <-- Sahibini kaydet
       _lastFetchTime = cachedAt ?? DateTime.now();
       return list;
     } catch (e) {
@@ -272,7 +288,7 @@ class RecommendationEngine {
     }
   }
 
-  // --- API Fetcher Helper (DÜZELTİLDİ: Liste İçeriği Cast Edildi) ---
+  // --- API Fetcher Helper (Type Cast Düzeltmeli) ---
   
   Future<void> _fetchAndAddRecommendations(String path, List<MovieRecommendation> list, String reason) async {
     try {
@@ -283,16 +299,11 @@ class RecommendationEngine {
         'params': {'language': 'tr-TR', 'page': '$randomPage'}
       });
 
-      // Ana Datayı Çevir
       final data = Map<String, dynamic>.from(result.data as Map); 
       final results = data['results'] as List;
       
       for (final rawMovie in results.take(15)) {
-        // --- KRİTİK DÜZELTME BURADA ---
-        // Liste içindeki her elemanı da Map<String, dynamic> yapıyoruz
         final movie = Map<String, dynamic>.from(rawMovie as Map);
-        // ------------------------------
-
         final vote = (movie['vote_average'] ?? 0.0).toDouble();
         final score = 50.0 + (vote * 4.5);
         list.add(_createRecommendation(
@@ -306,7 +317,7 @@ class RecommendationEngine {
     }
   }
 
-  // --- Kaynak Fonksiyonları (DÜZELTİLDİ: Liste İçeriği Cast Edildi) ---
+  // --- Kaynak Fonksiyonları ---
 
   Future<void> _getGenreBasedRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
     if (profile.favoriteGenres.isEmpty) return;
@@ -331,9 +342,7 @@ class RecommendationEngine {
           final res = data['results'] as List;
           
           for(var rawM in res.take(10)) {
-            // --- DÜZELTME ---
             final m = Map<String, dynamic>.from(rawM as Map);
-            // ----------------
             final vote = (m['vote_average'] ?? 0.0).toDouble();
             recommendations.add(_createRecommendation(
               m, 
@@ -360,7 +369,6 @@ class RecommendationEngine {
 
   Future<void> _fetchPersonCredits(String name, String dept, List<MovieRecommendation> list, String roleLabel) async {
     try {
-      // 1. Kişiyi Ara
       final sResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
         'endpoint': '/3/search/person',
         'params': {'query': name, 'language': 'tr-TR'}
@@ -373,14 +381,12 @@ class RecommendationEngine {
       
       final personId = sRes.first['id'];
 
-      // 2. Kredilerini Çek
       final cResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
         'endpoint': '/3/person/$personId/movie_credits',
         'params': {'language': 'tr-TR'}
       });
 
       final cData = Map<String, dynamic>.from(cResult.data as Map);
-
       var credits = (dept == 'Directing' ? cData['crew'] : cData['cast']) as List;
       
       if (dept == 'Directing') {
@@ -393,9 +399,7 @@ class RecommendationEngine {
       topCandidates.shuffle(_rng);
 
       for (final rawMovie in topCandidates.take(5)) {
-         // --- DÜZELTME ---
          final movie = Map<String, dynamic>.from(rawMovie as Map);
-         // ----------------
          final vote = (movie['vote_average'] ?? 0.0).toDouble();
          list.add(_createRecommendation(
            movie,
@@ -407,11 +411,9 @@ class RecommendationEngine {
   }
 
   Future<void> _getSimilarMovieRecommendations(UserTasteProfile profile, List<MovieRecommendation> recommendations) async {
-    // ID ile
     for (var id in profile.lovedMovieTmdbIds.take(3)) {
       await _fetchAndAddRecommendations('/3/movie/$id/recommendations', recommendations, 'Benzer');
     }
-    // İsim ile (ID Bulup)
     for (var title in profile.lovedMovieTitles.take(3)) {
       try {
         final sResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({

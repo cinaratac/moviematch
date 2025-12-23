@@ -58,6 +58,14 @@
           }
         },
         {
+          "client_id": "266660427246-s7jp6nb5ot5vf44ba5rhh24bvng8jkd0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.kozmosoft.cinematch",
+            "certificate_hash": "1da1bf1885b618d592b60ca4c106b2fa65b13c21"
+          }
+        },
+        {
           "client_id": "266660427246-k3lmulk15j7knljhvupo8s6kodeio42i.apps.googleusercontent.com",
           "client_type": 3
         }
