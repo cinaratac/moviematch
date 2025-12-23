@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/club_card.dart';
 import 'package:fluttergirdi/screens/create_club_screen.dart'; 
+import 'package:fluttergirdi/widgets/messages_skeleton.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -244,7 +245,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
               stream: _chatsStream,
               builder: (context, s) {
                 if (s.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return const MessagesSkeleton();
                 }
                 
                 var docs = s.data?.docs.toList() ?? [];

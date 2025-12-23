@@ -33,7 +33,68 @@ class _AdminTriviaScreenState extends State<AdminTriviaScreen> {
 
   // --- HAZIR JSON VERİSİ ---
   final String _jsonRawData = '''
-  
+[
+  {
+    "question": "Titanic filminde Rose'un üzerine çıktığı o meşhur tahta kapıya Jack sığabilir miydi?",
+    "options": ["Hayır, batardı", "Evet, sığardı (Kanıtlandı)", "Jack yüzmeyi seviyordu", "Kapı değil o, piyano kapağı"],
+    "correctIndex": 1,
+    "difficulty": "kolay"
+  },
+  {
+    "question": "G.O.R.A filminde Komutan Logar'a sürekli yapılan o meşhur uyarı nedir?",
+    "options": ["Komutanım, yemek hazır", "Komutan Logar, bir cisim yaklaşıyor", "Dikkat etsene be!", "Alev topu geliyor"],
+    "correctIndex": 1,
+    "difficulty": "kolay"
+  },
+  {
+    "question": "Terminator 2 filminde Arnold Schwarzenegger'in geri döneceğini söylediği o ikonik replik?",
+    "options": ["I will come again", "I'll be back", "See you later alligator", "Bye bye baby"],
+    "correctIndex": 1,
+    "difficulty": "kolay"
+  },
+  {
+    "question": "Yüzüklerin Efendisi'nde Boromir'in (Sean Bean) internette 'meme' olan meşhur repliği nedir?",
+    "options": ["You shall not pass!", "One does not simply walk into Mordor", "My precious!", "Run you fools"],
+    "correctIndex": 1,
+    "difficulty": "orta"
+  },
+  {
+    "question": "Harry Potter filminde Dumbledore'un kitapta 'sakin' sorduğu ama filmde bağırarak söylediği o cümle?",
+    "options": ["Harry, adını kadehe sen mi attın?!", "Voldemort döndü mü?!", "Slytherin kazandı mı?!", "Asanı düşürdün mü?!"],
+    "correctIndex": 0,
+    "difficulty": "orta"
+  },
+  {
+    "question": "John Wick'in yüzlerce kişiyi öldürerek intikam almasının (seriyi başlatan) asıl sebebi neydi?",
+    "options": ["Arabasının çizilmesi", "Köpeğinin öldürülmesi", "Kahvesinin dökülmesi", "Evine yanlış pizza gelmesi"],
+    "correctIndex": 1,
+    "difficulty": "kolay"
+  },
+  {
+    "question": "Fight Club (Dövüş Kulübü) filminin 1. kuralı nedir?",
+    "options": ["Asla kaybetme", "Dövüş Kulübü hakkında konuşma", "Gömleksiz dövüşülmez", "Herkes sırayla dövüşür"],
+    "correctIndex": 1,
+    "difficulty": "kolay"
+  },
+  {
+    "question": "Avengers: Endgame filminde Thor'un göbekli, pasaklı ve depresif haline verilen resmi isim nedir?",
+    "options": ["Fat Thor", "Lebowski Thor", "Bro Thor", "Sad Thor"],
+    "correctIndex": 2,
+    "difficulty": "orta"
+  },
+  {
+    "question": "Matrix filminde Neo'ya sunulan hapların renkleri hangileridir?",
+    "options": ["Mor ve Turuncu", "Siyah ve Beyaz", "Kırmızı ve Mavi", "Yeşil ve Sarı"],
+    "correctIndex": 2,
+    "difficulty": "kolay"
+  },
+  {
+    "question": "Hangi filmde Tom Hanks bir voleybol topuna yüz çizip ona 'Wilson' diye seslenir?",
+    "options": ["Cast Away (Yeni Hayat)", "Forrest Gump", "Truman Show", "Lost"],
+    "correctIndex": 0,
+    "difficulty": "kolay"
+  }
+]
     
   ''';
 

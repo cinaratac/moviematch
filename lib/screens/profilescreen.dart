@@ -783,7 +783,49 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
                             Container(
                               margin: const EdgeInsets.symmetric(horizontal: 4),
                               
-                              child: IconButton(tooltip: 'Düzenle', icon: Icon(Icons.edit_outlined, color: isDark ?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfilePage(initialUserData: _lastUserData))); }),
+                              child: IconButton(
+      tooltip: 'Düzenle',
+      icon: Icon(
+        Icons.edit_outlined,
+        color: isDark ? const Color.fromARGB(255, 255, 255, 255) : const Color.fromARGB(255, 0, 0, 0),
+      ),
+      // --- BURAYI GÜNCELLEYİN ---
+      onPressed: () async {
+        // 1. Edit sayfasına git ve sonucu bekle
+        final bool? result = await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EditProfilePage(initialUserData: _lastUserData),
+          ),
+        );
+
+        // 2. Eğer 'true' döndüyse (kayıt yapıldıysa)
+        if (result == true && mounted) {
+          // A) Önce mevcut ekranı bir yenile (loading gösterebilir veya bekleyebilirsin)
+          setState(() {});
+
+          // B) Firestore'dan güncel veriyi MANUEL olarak hemen çek (Stream'i bekleme)
+          final uid = FirebaseAuth.instance.currentUser?.uid;
+          if (uid != null) {
+            try {
+              final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+              if (doc.exists && mounted) {
+                final data = doc.data()!;
+                // C) Değişkenleri güncelle ki ekran hemen değişsin
+                setState(() {
+                  _lastUserData = data;
+                  // Header'da kullanılan değişkeni güncelle
+                  _appUsername = (data['displayName'] ?? data['username'] ?? '').toString();
+                  // Varsa diğer alanlar da güncellenebilir
+                  _lbUsername = (data['letterboxdUsername'] ?? '').toString();
+                });
+              }
+            } catch (_) {
+              // Hata olursa zaten stream (listener) arkadan gelip düzeltecektir.
+            }
+          }
+        }
+      },
+                              )
                             ),
                             Container(
                               margin: const EdgeInsets.only(right: 12, left: 4),

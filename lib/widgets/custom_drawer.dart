@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart'; // iOS widgetları
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,7 +12,7 @@ import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; 
-import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // Resim önbelleği için
+import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -23,18 +23,40 @@ class CustomDrawer extends StatefulWidget {
 
 class _CustomDrawerState extends State<CustomDrawer> {
   String? _lastSeenAnnouncementId;
+  bool _isAdmin = false;
+  String? _currentUid;
+
+  // Admin listesini static yaparak her build işleminde yeniden oluşturulmasını engelliyoruz.
+  static const List<String> _adminUids = [
+    "RfpPtaZfaKYueG9b2dd2ASScqOO2", 
+    "ZkXr7PmQ4WV0iRIVR7uUUwfNS8N2",
+    "mNCWixSnJSa6tE1hZs4iZwn3Du43",
+  ];
 
   @override
   void initState() {
     super.initState();
-    _loadLastSeenId();
+    _initializeDrawerData();
   }
 
-  Future<void> _loadLastSeenId() async {
+  // Tüm ağır yükleme işlemlerini burada tek seferde yapıyoruz
+  Future<void> _initializeDrawerData() async {
+    // 1. Kullanıcı ve Admin Kontrolü
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _currentUid = user.uid;
+      // Listede arama yapmak yerine direkt kontrol, state'e kaydetme
+      if (_adminUids.contains(user.uid)) {
+        _isAdmin = true;
+      }
+    }
+
+    // 2. Shared Preferences (Asenkron olduğu için UI'ı bloklamaz)
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
         _lastSeenAnnouncementId = prefs.getString('last_seen_announcement_id');
+        // _currentUid ve _isAdmin zaten yukarıda set edildi, setState bunu UI'a yansıtır.
       });
     }
   }
@@ -51,225 +73,208 @@ class _CustomDrawerState extends State<CustomDrawer> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final uid = user?.uid;
-    const List<String> adminUids = [
-      "RfpPtaZfaKYueG9b2dd2ASScqOO2", // Mevcut Admin
-      "ZkXr7PmQ4WV0iRIVR7uUUwfNS8N2",         // Eklemek istediğin diğer UID
-      "mNCWixSnJSa6tE1hZs4iZwn3Du43",         // Başka bir admin UID
-    ];
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // OPTİMİZASYON: Blur yerine daha opak ve düz renk kullanımı
-    // Blur efekti (BackdropFilter) animasyon sırasında FPS düşüşüne sebep olur.
+    // Renkleri önceden belirle
     final Color drawerBgColor = isDark 
-        ? const Color(0xFF1C1C1E).withValues(alpha: 0.98) // Neredeyse opak siyah
-        : const Color(0xFFF2F2F7).withValues(alpha: 0.98); // Neredeyse opak beyaz
+        ? const Color(0xFF1C1C1E).withOpacity(0.98) 
+        : const Color(0xFFF2F2F7).withOpacity(0.98);
 
     final Color separatorColor = isDark 
-        ? Colors.white.withValues(alpha: 0.1) 
-        : Colors.black.withValues(alpha: 0.05);
+        ? Colors.white.withOpacity(0.1) 
+        : Colors.black.withOpacity(0.05);
 
     return Drawer(
       backgroundColor: Colors.transparent, 
       elevation: 0,
-      width: MediaQuery.of(context).size.width * 0.80, // Genişliği biraz düşürdük (Performans ve estetik için)
+      width: MediaQuery.of(context).size.width * 0.80,
       child: Container(
+        // Performans için ClipRRect'i kaldırdık, Container decoration ile köşe veriyoruz.
         decoration: BoxDecoration(
           color: drawerBgColor,
-          borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)), // Köşe yumuşatma
+          borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 15,
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10, // Blur miktarını biraz düşürdük (Performans)
               offset: const Offset(5, 0),
             )
           ]
         ),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
-          child: SafeArea(
-            child: Column(
-              children: [
-                // PROFİL ALANI
-                _buildProfileHeader(uid, isDark),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // PROFİL ALANI
+              _buildProfileHeader(_currentUid, isDark),
 
-                const SizedBox(height: 10),
+              const SizedBox(height: 10),
 
-                // MENÜ LİSTESİ
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: [
-                      _buildSectionTitle("KEŞFET"),
-                      _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.chart_bar_alt_fill,
-                        title: 'Liderlik Tablosu',
-                        color: Colors.orange,
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
-                      ),
-                      _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.person_3_fill,
-                        title: 'Kulüpler',
-                        color: Colors.blue,
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text("Kulüpler")), body: const ClubsTab()))),
-                      ),
-                      _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.star_fill,
-                        title: 'Rozetler',
-                        color: Colors.purple,
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
-                      ),
-                      
-                      const SizedBox(height: 8),
+              // MENÜ LİSTESİ
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: [
+                    _buildSectionTitle("KEŞFET"),
+                    _buildIOSMenuItem(
+                      context,
+                      icon: CupertinoIcons.chart_bar_alt_fill,
+                      title: 'Liderlik Tablosu',
+                      color: Colors.orange,
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+                    ),
+                    _buildIOSMenuItem(
+                      context,
+                      icon: CupertinoIcons.person_3_fill,
+                      title: 'Kulüpler',
+                      color: Colors.blue,
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text("Kulüpler")), body: const ClubsTab()))),
+                    ),
+                    _buildIOSMenuItem(
+                      context,
+                      icon: CupertinoIcons.star_fill,
+                      title: 'Rozetler',
+                      color: Colors.purple,
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
+                    ),
+                    
+                    const SizedBox(height: 8),
 
-                      // --- YARIŞMA BUTONU ---
-                      Material(
-                        color: Colors.transparent,
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Icon(Icons.quiz_rounded, color: Colors.amber, size: 20),
+                    // --- YARIŞMA BUTONU ---
+                    Material(
+                      color: Colors.transparent,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          title: const Text(
-                            'Sinema Yarışması',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                          ),
-                          subtitle: Text(
-                            'Bilgini test et, rozet kazan!',
-                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
-                          ),
-                          trailing: Icon(Icons.arrow_forward_ios_rounded, size: 14, color: isDark ? Colors.white24 : Colors.black12),
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const TriviaWelcomeScreen(),
-                              ),
-                            );
-                          },
+                          child: const Icon(Icons.quiz_rounded, color: Colors.amber, size: 20),
                         ),
+                        title: const Text(
+                          'Sinema Yarışması',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        subtitle: Text(
+                          'Bilgini test et, rozet kazan!',
+                          style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
+                        ),
+                        trailing: Icon(Icons.arrow_forward_ios_rounded, size: 14, color: isDark ? Colors.white24 : Colors.black12),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const TriviaWelcomeScreen(),
+                            ),
+                          );
+                        },
                       ),
-                      
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8.0),
-                        child: Divider(indent: 16, endIndent: 16, height: 1),
-                      ),
-                      
-                      // YENİLİKLER
-                      StreamBuilder<DocumentSnapshot>(
-                        stream: FirebaseFirestore.instance.collection('system').doc('announcement').snapshots(),
-                        builder: (context, snapshot) {
-                          bool hasNew = false;
-                          String? currentId;
-                          if (snapshot.hasData && snapshot.data!.exists) {
-                            final data = snapshot.data!.data() as Map<String, dynamic>;
-                            if (data['isActive'] == true) {
-                              currentId = data['id'];
-                              if (currentId != null && currentId != _lastSeenAnnouncementId) {
-                                hasNew = true;
-                              }
+                    ),
+                    
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Divider(indent: 16, endIndent: 16, height: 1, color: separatorColor),
+                    ),
+                    
+                    // YENİLİKLER
+                    StreamBuilder<DocumentSnapshot>(
+                      stream: FirebaseFirestore.instance.collection('system').doc('announcement').snapshots(),
+                      builder: (context, snapshot) {
+                        bool hasNew = false;
+                        String? currentId;
+                        if (snapshot.hasData && snapshot.data!.exists) {
+                          final data = snapshot.data!.data() as Map<String, dynamic>;
+                          if (data['isActive'] == true) {
+                            currentId = data['id'];
+                            if (currentId != null && currentId != _lastSeenAnnouncementId) {
+                              hasNew = true;
                             }
                           }
-                          return _buildIOSMenuItem(
-                            context,
-                            icon: CupertinoIcons.news_solid,
-                            title: 'Yenilikler',
-                            color: Colors.redAccent,
-                            hasBadge: hasNew,
-                            onTap: () {
-                              if (currentId != null) _markAnnouncementAsSeen(currentId);
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
-                            },
+                        }
+                        return _buildIOSMenuItem(
+                          context,
+                          icon: CupertinoIcons.news_solid,
+                          title: 'Yenilikler',
+                          color: Colors.redAccent,
+                          hasBadge: hasNew,
+                          onTap: () {
+                            if (currentId != null) _markAnnouncementAsSeen(currentId);
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
+                          },
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 16),
+                    Divider(height: 1, color: separatorColor),
+                    const SizedBox(height: 16),
+                    
+                    // ADMIN PANELİ (Optimized Check)
+                    // Artık contains kontrolü yapmıyoruz, init state'de hesaplanan boolean'a bakıyoruz.
+                    if (_isAdmin) 
+                      _buildIOSMenuItem(
+                        context,
+                        icon: CupertinoIcons.lock_shield_fill,
+                        title: 'Admin Paneli (Gizli)',
+                        color: Colors.red.shade900,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context, 
+                            MaterialPageRoute(builder: (_) => const AdminTriviaScreen())
                           );
                         },
                       ),
 
-                      const SizedBox(height: 16),
-                      Divider(height: 1, color: separatorColor),
-                      const SizedBox(height: 16),
-                      
-                 
+                     _buildSectionTitle("UYGULAMA"),
+                      _buildIOSMenuItem(
+                      context,
+                      icon: CupertinoIcons.settings_solid,
+                      title: 'Ayarlar',
+                      color: Colors.grey,
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
+                      ),
+                      _buildIOSMenuItem(
+                      context,
+                      icon: CupertinoIcons.share_solid,
+                      title: 'Davet Et',
+                      color: Colors.green,
+                        onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
+                      ),
+                    
 
-                      // Eğer giriş yapan kullanıcı (uid) bu listede varsa paneli göster
-                      if (uid != null && adminUids.contains(uid)) 
-                        _buildIOSMenuItem(
-                          context,
-                          icon: CupertinoIcons.lock_shield_fill,
-                          title: 'Admin Paneli (Gizli)',
-                          color: Colors.red.shade900,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(
-                              context, 
-                              MaterialPageRoute(builder: (_) => const AdminTriviaScreen())
-                            );
-                          },
+                     const SizedBox(height: 30),
+                    
+                    // ÇIKIŞ BUTONU
+                    Center(
+                      child: TextButton(
+                        onPressed: () async {
+                          // 1. Önbellek temizliği
+                          await DefaultCacheManager().emptyCache();
+                          // 2. Shared Preferences temizliği
+                          final prefs = await SharedPreferences.getInstance();
+                          await prefs.clear();
+                          // 3. Çıkış
+                          await FirebaseAuth.instance.signOut();
+                        },
+                        child: const Text(
+                          "Çıkış Yap",
+                          style: TextStyle(
+                            color: CupertinoColors.destructiveRed,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-
-                       _buildSectionTitle("UYGULAMA"),
-                        _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.settings_solid,
-                        title: 'Ayarlar',
-                        color: Colors.grey,
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
-                        ),
-                        _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.share_solid,
-                        title: 'Davet Et',
-                        color: Colors.green,
-                          onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
-                        ),
-                      
-
-                       const SizedBox(height: 30),
-                      
-                      // ÇIKIŞ BUTONU
-                      // ÇIKIŞ BUTONU
-Center(
-  child: TextButton(
-    onPressed: () async {
-      // 1. Önbellekteki (CachedNetworkImage) tüm resimleri sil
-      await DefaultCacheManager().emptyCache();
-
-      // 2. Shared Preferences (yerel ayarlar) verilerini temizle
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
-
-      // 3. En son Firebase oturumunu kapat
-      await FirebaseAuth.instance.signOut();
-      
-      // Opsiyonel: Kullanıcıyı Login sayfasına yönlendir (AuthGate bunu genelde otomatik yapar ama garanti olsun)
-      // Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-    },
-    child: const Text(
-      "Çıkış Yap",
-      style: TextStyle(
-        color: CupertinoColors.destructiveRed,
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-      ),
-    ),
-  ),
-),
-                      const SizedBox(height: 20),
-                    ],
-                  ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -280,9 +285,14 @@ Center(
   Widget _buildProfileHeader(String? uid, bool isDark) {
     if (uid == null) return const SizedBox.shrink();
 
+    // StreamBuilder yerine FutureBuilder kullanmak Drawer açılışını hızlandırabilir
+    // Ancak verilerin canlı kalması için Stream'i koruduk, sadece Container'ı sadeleştirdik.
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, snapshot) {
+        // Data yokken boş container dön, layout kaymasını önle
+        if (!snapshot.hasData) return const SizedBox(height: 100); 
+
         final data = snapshot.data?.data() as Map<String, dynamic>?;
         final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
         final email = FirebaseAuth.instance.currentUser?.email ?? '';
@@ -294,22 +304,24 @@ Center(
             TabService.instance.changeTab(3); 
           },
           child: Container(
+            color: Colors.transparent, // Tıklama alanı için
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             child: Row(
               children: [
+                // Basit gölge ve avatar
                 Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 5)),
+                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 5, offset: const Offset(0, 2)),
                     ],
                   ),
                   child: CircleAvatar(
-                    radius: 32, // Boyut biraz optimize edildi
+                    radius: 30, 
                     backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
                     backgroundImage: photo != null ? NetworkImage(photo) : null,
                     child: photo == null 
-                      ? Icon(CupertinoIcons.person_fill, size: 32, color: isDark ? Colors.white54 : Colors.grey) 
+                      ? Icon(CupertinoIcons.person_fill, size: 30, color: isDark ? Colors.white54 : Colors.grey) 
                       : null,
                   ),
                 ),
@@ -319,11 +331,19 @@ Center(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black, letterSpacing: -0.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(
+                        name, 
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black, letterSpacing: -0.5), 
+                        maxLines: 1, 
+                        overflow: TextOverflow.ellipsis
+                      ),
                       const SizedBox(height: 4),
-                      Text(email, style: TextStyle(fontSize: 13, color: isDark ? Colors.white54 : Colors.black54), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 6),
-                      
+                      Text(
+                        email, 
+                        style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54), 
+                        maxLines: 1, 
+                        overflow: TextOverflow.ellipsis
+                      ),
                     ],
                   ),
                 ),
@@ -345,7 +365,7 @@ Center(
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: Colors.grey.withValues(alpha: 0.8),
+          color: Colors.grey.withOpacity(0.8),
           letterSpacing: 1.0,
         ),
       ),
@@ -368,10 +388,10 @@ Center(
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        splashColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-        highlightColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+        splashColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+        highlightColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), // Padding azaltıldı
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
               Container(
@@ -379,15 +399,16 @@ Center(
                 decoration: BoxDecoration(
                   color: color,
                   borderRadius: BorderRadius.circular(8),
+                  // Gölgeyi hafiflettik
                   boxShadow: [
                     BoxShadow(
-                      color: color.withValues(alpha: 0.3),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
+                      color: color.withOpacity(0.3),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
                     ),
                   ],
                 ),
-                child: Icon(icon, size: 16, color: Colors.white), // İkon boyutu optimize edildi
+                child: Icon(icon, size: 16, color: Colors.white), 
               ),
               const SizedBox(width: 16),
               
@@ -395,7 +416,7 @@ Center(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15, // Font boyutu optimize edildi
+                    fontSize: 15, 
                     fontWeight: FontWeight.w500,
                     color: isDark ? Colors.white : Colors.black87,
                     letterSpacing: -0.3,
@@ -421,12 +442,9 @@ Center(
       ),
     );
   }
-
-  
-
-
 }
 
+// ... AnnouncementsScreen sınıfı aynı kalabilir ...
 class AnnouncementsScreen extends StatelessWidget {
   const AnnouncementsScreen({super.key});
 
@@ -472,7 +490,7 @@ class AnnouncementsScreen extends StatelessWidget {
                   color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4)),
+                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
                   ],
                 ),
                 child: Column(

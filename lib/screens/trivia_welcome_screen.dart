@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/date_helper.dart';
 import 'trivia_quiz_screen.dart';
-import 'trivia_leaderboard_screen.dart'; // Birazdan oluşturacağız
+import 'trivia_leaderboard_screen.dart';
 
 class TriviaWelcomeScreen extends StatefulWidget {
   const TriviaWelcomeScreen({super.key});
@@ -15,6 +15,7 @@ class TriviaWelcomeScreen extends StatefulWidget {
 class _TriviaWelcomeScreenState extends State<TriviaWelcomeScreen> {
   bool _checkingStatus = true;
   bool _alreadyPlayed = false;
+  bool _isQuizReady = false; // YENİ: Soru sayısı kontrolü için
   int _myScore = 0;
 
   @override
@@ -28,23 +29,49 @@ class _TriviaWelcomeScreenState extends State<TriviaWelcomeScreen> {
     if (user == null) return;
 
     final weekId = DateHelper.getCurrentWeekId();
+    final db = FirebaseFirestore.instance;
 
-    // Kullanıcının bu haftaki skorunu kontrol et
-    final doc = await FirebaseFirestore.instance
-        .collection('weekly_leaderboard')
-        .doc(weekId)
-        .collection('scores')
-        .doc(user.uid)
-        .get();
+    try {
+      // Paralel Sorgular (Daha hızlı açılış için)
+      // 1. Kullanıcının oynayıp oynamadığını kontrol et
+      final scoreFuture = db
+          .collection('weekly_leaderboard')
+          .doc(weekId)
+          .collection('scores')
+          .doc(user.uid)
+          .get();
 
-    if (mounted) {
-      setState(() {
-        _alreadyPlayed = doc.exists;
-        if (doc.exists) {
-          _myScore = doc.data()?['score'] ?? 0;
-        }
-        _checkingStatus = false;
-      });
+      // 2. Bu haftaya ait AKTİF soru sayısını say (Aggregation Query - Maliyeti düşüktür)
+      final countFuture = db
+          .collection('trivia_questions')
+          .where('weekId', isEqualTo: weekId)
+          .where('isActive', isEqualTo: true)
+          .count()
+          .get();
+
+      final results = await Future.wait([scoreFuture, countFuture]);
+
+      final scoreDoc = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final countSnapshot = results[1] as AggregateQuerySnapshot;
+
+      if (mounted) {
+        setState(() {
+          // Oynama durumu
+          _alreadyPlayed = scoreDoc.exists;
+          if (scoreDoc.exists) {
+            _myScore = scoreDoc.data()?['score'] ?? 0;
+          }
+
+          // Soru sayısı kontrolü (Tam 10 soru olmalı)
+          final questionCount = countSnapshot.count;
+          _isQuizReady = questionCount == 10; 
+          
+          _checkingStatus = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Hata: $e");
+      if (mounted) setState(() => _checkingStatus = false);
     }
   }
 
@@ -78,27 +105,32 @@ class _TriviaWelcomeScreenState extends State<TriviaWelcomeScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // İkon
+                  // --- DURUMA GÖRE İKON ---
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withOpacity(0.2),
+                      color: (_isQuizReady || _alreadyPlayed) 
+                          ? Colors.amber.withOpacity(0.2) 
+                          : Colors.grey.withOpacity(0.2),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.emoji_events_rounded, size: 80, color: Colors.amber),
+                    child: Icon(
+                      (_isQuizReady || _alreadyPlayed) ? Icons.emoji_events_rounded : Icons.construction, 
+                      size: 80, 
+                      color: (_isQuizReady || _alreadyPlayed) ? Colors.amber : Colors.grey
+                    ),
                   ),
                   const SizedBox(height: 32),
                   
-                  // Başlık
-                  const Text(
-                    "Haftalık Sinema Yarışması",
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-
+                  // --- DURUMA GÖRE BAŞLIK VE İÇERİK ---
                   if (_alreadyPlayed) ...[
-                    // ZATEN OYNADIYSA
+                    // DURUM 1: ZATEN OYNADI
+                    const Text(
+                      "Haftalık Yarışma",
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
                     Text(
                       "Bu haftaki hakkını kullandın!\nPuanın: $_myScore",
                       style: const TextStyle(fontSize: 18, color: Colors.white70),
@@ -114,8 +146,38 @@ class _TriviaWelcomeScreenState extends State<TriviaWelcomeScreen> {
                       icon: const Icon(Icons.leaderboard),
                       label: const Text("Liderlik Tablosu"),
                     ),
+
+                  ] else if (!_isQuizReady) ...[
+                    // DURUM 2: SORULAR HAZIR DEĞİL (YENİ EKLENEN KISIM)
+                    const Text(
+                      "Hazırlıklar Sürüyor!",
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      "Bu haftanın sinema soruları editörlerimiz tarafından hazırlanıyor.\n\nLütfen daha sonra tekrar kontrol et.",
+                      style: TextStyle(fontSize: 16, color: Colors.white70, height: 1.5),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.white54),
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text("Geri Dön", style: TextStyle(color: Colors.white)),
+                    ),
+
                   ] else ...[
-                    // HENÜZ OYNAMADIYSA KURALLAR
+                    // DURUM 3: OYNAMADI VE HAZIR (BAŞLA EKRANI)
+                    const Text(
+                      "Haftalık Sinema Yarışması",
+                      style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
                     _buildRuleRow(Icons.refresh, "Yarışma her hafta yenilenir."),
                     _buildRuleRow(Icons.timer, "Her soru için 30 saniyen var."),
                     _buildRuleRow(Icons.quiz, "Toplam 10 soru."),

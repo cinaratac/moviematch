@@ -48,6 +48,7 @@ class ClubService {
       tx.set(chatRef, {
         'isGroup': true,
         'name': name,
+        'imageUrl': imageUrl,
         'ownerId': user.uid,
         'participants': [user.uid],
         'lastMessage': 'Kulüp oluşturuldu 🎉',

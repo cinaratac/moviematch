@@ -181,7 +181,7 @@ class _TriviaQuizScreenState extends State<TriviaQuizScreen> {
                           borderRadius: BorderRadius.circular(16),
                           // CachedNetworkImage kullanımı: Resimler telefona kaydedilir, tekrar internet harcamaz
                           child: CachedNetworkImage(
-                            imageUrl: imageUrl!,
+                            imageUrl: imageUrl,
                             fit: BoxFit.cover,
                             placeholder: (context, url) => const Center(
                               child: CircularProgressIndicator(color: Colors.amber)

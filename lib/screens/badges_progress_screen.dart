@@ -482,7 +482,7 @@ class _BadgeDetailSheet extends StatelessWidget {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: () {
-                    final text = "MovieMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨";
+                    final text = "CineMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨";
                     try {
                        Share.share(text); 
                     } catch (e) {

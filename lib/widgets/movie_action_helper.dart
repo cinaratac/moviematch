@@ -2,24 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart'; 
-import 'package:fluttergirdi/services/chat_service.dart';
-import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
-import 'package:fluttergirdi/widgets/poster_image.dart';
-import 'package:fluttergirdi/models/shelf_target.dart'; 
-import 'package:fluttergirdi/services/feed_service.dart';
-
-// HTTP paketini kaldırabilirsiniz veya kalsın ama kullanmayacağız
-// import 'package:http/http.dart' as http; 
-// import 'dart:convert';
-// import 'package:fluttergirdi/secrets.dart'; // <-- BUNU SİLİN
-
-// YENİ: Cloud Functions ekleyin
 import 'package:cloud_functions/cloud_functions.dart';
 
-import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+import '../services/chat_service.dart';
+import '../services/user_cache_service.dart';
+import '../widgets/compose_post_sheet.dart';
+import '../widgets/poster_image.dart';
+import '../models/shelf_target.dart'; 
+import '../services/feed_service.dart';
+import '../screens/movie_detail_screen.dart';
 
 class MovieActionHelper {
-  // ... (show metodu aynı kalacak) ...
   static void show(
     BuildContext context, {
     required String title,
@@ -27,6 +20,10 @@ class MovieActionHelper {
     String? docId,
     ShelfTarget? target,
     VoidCallback? onItemDeleted,
+    String? overview,
+    double? voteAverage,
+    String? releaseDate,
+    int? tmdbId,
   }) {
     showModalBottomSheet(
       context: context,
@@ -39,18 +36,25 @@ class MovieActionHelper {
         docId: docId,
         target: target,
         onItemDeleted: onItemDeleted,
+        overview: overview,
+        voteAverage: voteAverage,
+        releaseDate: releaseDate,
+        tmdbId: tmdbId,
       ),
     );
   }
 }
 
 class _MovieActionSheet extends StatelessWidget {
-  // ... (Değişkenler ve constructor aynı kalacak) ...
   final String title;
   final String posterUrl;
   final String? docId;
   final ShelfTarget? target;
   final VoidCallback? onItemDeleted;
+  final String? overview;
+  final double? voteAverage;
+  final String? releaseDate;
+  final int? tmdbId;
 
   const _MovieActionSheet({
     required this.title, 
@@ -58,6 +62,10 @@ class _MovieActionSheet extends StatelessWidget {
     this.docId,
     this.target,
     this.onItemDeleted,
+    this.overview,
+    this.voteAverage,
+    this.releaseDate,
+    this.tmdbId,
   });
 
   String? _getFieldForTarget(ShelfTarget t) {
@@ -70,18 +78,17 @@ class _MovieActionSheet extends StatelessWidget {
   }
 
   Future<void> _fetchAndNavigateToDetails(BuildContext context) async {
-    int? tmdbId;
-    if (docId != null) {
+    int? resolvedTmdbId = tmdbId;
+
+    if (resolvedTmdbId == null && docId != null) {
       final doc = await FirebaseFirestore.instance.collection('catalog_films').doc(docId).get();
       if (doc.exists) {
-        tmdbId = doc.data()?['tmdbId'];
+        resolvedTmdbId = doc.data()?['tmdbId'];
       }
     }
 
-    if (tmdbId == null) {
+    if (resolvedTmdbId == null) {
       try {
-        // --- DEĞİŞEN KISIM BAŞLANGIÇ ---
-        // Secrets.tmdbHeaders yerine Cloud Functions kullanıyoruz
         final result = await FirebaseFunctions.instance
             .httpsCallable('callTMDB')
             .call({
@@ -92,34 +99,32 @@ class _MovieActionSheet extends StatelessWidget {
               }
             });
         
-        final data = result.data as Map<String, dynamic>;
+        final data = Map<String, dynamic>.from(result.data as Map);
         final results = data['results'] as List?;
         
         if (results != null && results.isNotEmpty) {
-          tmdbId = results[0]['id'];
-          if (docId != null && tmdbId != null) {
+          resolvedTmdbId = results[0]['id'];
+          if (docId != null && resolvedTmdbId != null) {
             FirebaseFirestore.instance
                 .collection('catalog_films')
                 .doc(docId)
-                .set({'tmdbId': tmdbId}, SetOptions(merge: true));
+                .set({'tmdbId': resolvedTmdbId}, SetOptions(merge: true));
           }
         }
-        // --- DEĞİŞEN KISIM BİTİŞ ---
       } catch (e) {
-        debugPrint("");
+        debugPrint("TMDB Error: $e");
       }
     }
 
     if (!context.mounted) return;
-    
     Navigator.pop(context);
 
-    if (tmdbId != null) {
+    if (resolvedTmdbId != null) {
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => MovieDetailScreen(
-            tmdbId: tmdbId!,
+            tmdbId: resolvedTmdbId!,
             title: title,
             posterUrl: posterUrl,
           ),
@@ -132,11 +137,7 @@ class _MovieActionSheet extends StatelessWidget {
     }
   }
 
-  // ... (Geri kalan _deleteFromProfile, build, _shareOnFeed vb. metodları aynen kalacak) ...
-  // Buradan aşağısında Secrets kullanımı yok, o yüzden değişiklik gerekmez.
-  // Kodu kısaltmak için buraya kopyalamadım, mevcut dosyanızdaki halini koruyun.
   Future<void> _deleteFromProfile(BuildContext context) async {
-    // ... (Aynen kalsın) ...
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || docId == null || target == null) return;
 
@@ -168,9 +169,7 @@ class _MovieActionSheet extends StatelessWidget {
 
       await batch.commit();
 
-      if (onItemDeleted != null) {
-        onItemDeleted!();
-      }
+      if (onItemDeleted != null) onItemDeleted!();
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -182,18 +181,14 @@ class _MovieActionSheet extends StatelessWidget {
         );
       }
     } catch (e) {
-      
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Silinirken bir hata oluştu.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hata oluştu.')));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-      // ... (Aynen kalsın) ...
     final theme = Theme.of(context);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     
@@ -215,7 +210,7 @@ class _MovieActionSheet extends StatelessWidget {
                   child: SizedBox(
                     width: 50,
                     height: 75,
-                    child: PosterImage(posterUrl: posterUrl, title: title, fit: BoxFit.cover),
+                    child: PosterImage(posterUrl: posterUrl, title: title, fit: BoxFit.cover, tmdbId: tmdbId ?? 0),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -269,20 +264,17 @@ class _MovieActionSheet extends StatelessWidget {
   }
 
   void _shareOnFeed(BuildContext context) {
-       // ... (Aynen kalsın) ...
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ComposePostPage(
           maxChars: 280,
           initialMovie: {'title': title, 'poster': posterUrl}, 
-          // --- GÜNCELLENEN KISIM ---
           onSend: ({required text, movie, images, rating, required isSpoiler, tags, reviewTitle}) async {
              final user = FirebaseAuth.instance.currentUser;
              if (user == null) return;
 
              List<String> postImageUrls = [];
              
-             // Çoklu resim yükleme
              if (images != null && images.isNotEmpty) {
                 for (var i = 0; i < images.length; i++) {
                    final image = images[i];
@@ -297,8 +289,8 @@ class _MovieActionSheet extends StatelessWidget {
              await FeedService.instance.createPost(
                text: text,
                movie: movie,
-               photoURL: postImageUrls.isNotEmpty ? postImageUrls.first : null, // Geriye uyumluluk
-               photoURLs: postImageUrls, // Yeni liste desteği
+               photoURL: postImageUrls.isNotEmpty ? postImageUrls.first : null, 
+               photoURLs: postImageUrls,
                displayName: user.displayName,
                handle: user.email?.split('@')[0],
                rating: rating,
@@ -325,152 +317,267 @@ class _MovieActionSheet extends StatelessWidget {
       builder: (ctx) => _InboxPickerSheet(
         movieTitle: title, 
         moviePoster: posterUrl,
-        docId: docId, 
+        tmdbId: tmdbId,
+        overview: overview,
+        docId: docId,
       ),
     );
   }
 }
 
-class _InboxPickerSheet extends StatelessWidget {
-     // ... (Aynen kalsın) ...
+class _InboxPickerSheet extends StatefulWidget {
   final String movieTitle;
   final String moviePoster;
-  final String? docId; 
+  final int? tmdbId;
+  final String? overview;
+  final String? docId;
 
   const _InboxPickerSheet({
     required this.movieTitle, 
     required this.moviePoster,
+    this.tmdbId,
+    this.overview,
     this.docId,
   });
 
   @override
+  State<_InboxPickerSheet> createState() => _InboxPickerSheetState();
+}
+
+class _InboxPickerSheetState extends State<_InboxPickerSheet> {
+  final _searchController = TextEditingController();
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     if (myUid == null) return const SizedBox.shrink();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mesaj Gönder'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.pop(context),
-        ),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('chats')
-            .where('participants', arrayContains: myUid)
-            .orderBy('updatedAt', descending: true)
-            .limit(20)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('Hata: ${snapshot.error}'));
-          }
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(20.0),
-                child: Text('Henüz kimseyle sohbetin yok.'),
-              ),
-            );
-          }
-
-          return ListView.builder(
-            padding: EdgeInsets.only(bottom: bottomPadding + 20),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final chatData = docs[index].data() as Map<String, dynamic>;
-              final chatId = docs[index].id;
-              final participants = List<String>.from(chatData['participants'] ?? []);
-
-              final otherUid = participants.firstWhere(
-                (id) => id != myUid,
-                orElse: () => '',
-              );
-
-              if (otherUid.isEmpty) return const SizedBox.shrink();
-
-              return FutureBuilder<DocumentSnapshot>(
-                future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
-                builder: (context, userSnap) {
-                  if (!userSnap.hasData) {
-                    return const ListTile(
-                      leading: CircleAvatar(child: Icon(Icons.person)),
-                      title: Text('Yükleniyor...'),
-                    );
-                  }
-
-                  final userData = userSnap.data!.data() as Map<String, dynamic>?;
-                  if (userData == null) return const SizedBox.shrink();
-
-                  final name = userData['username'] ?? userData['displayName'] ?? 'Kullanıcı';
-                  final photo = userData['photoURL'];
-
-                  return ListTile(
-                    leading: CircleAvatar(
-                      backgroundImage: photo != null ? NetworkImage(photo) : null,
-                      child: photo == null ? Text(name[0].toUpperCase()) : null,
+      child: Column(
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Container(
+                  width: 32,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: cs.onSurfaceVariant.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Filmi Gönder',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Sohbet veya kişi ara...',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: cs.surfaceContainerHighest.withOpacity(0.5),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
                     ),
-                    title: Text(name),
-                    subtitle: Text(
-                      'Son mesaj: ${chatData['lastMessage'] ?? ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.send, color: Colors.green),
-                    onTap: () => _sendMovieMessage(context, chatId, otherUid, name),
-                  );
-                },
-              );
-            },
-          );
-        },
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                  ),
+                  onChanged: (val) => setState(() => _query = val.toLowerCase()),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          // Liste
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('chats')
+                  .where('participants', arrayContains: myUid)
+                  .orderBy('updatedAt', descending: true)
+                  .limit(30)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(child: Text('Hata: ${snapshot.error}'));
+                }
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return const Center(child: Text("Henüz sohbetin yok."));
+                }
+
+                return ListView.builder(
+                  padding: EdgeInsets.only(bottom: bottomPadding + 20),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final chatData = docs[index].data() as Map<String, dynamic>;
+                    final chatId = docs[index].id;
+                    final participants = List<String>.from(chatData['participants'] ?? []);
+
+                    // --- KRİTİK DÜZELTME BURADA ---
+                    // ClubService 'isGroup: true' ve 'name: ...' kullanıyor
+                    final isClub = (chatData['isGroup'] == true) || (chatData['isClub'] == true);
+                    
+                    if (isClub) {
+                      // KULÜPLER İÇİN MANTIK (Doğru Alanları Kontrol Et)
+                      final displayName = chatData['name'] ?? chatData['clubName'] ?? 'Kulüp';
+                      final photoUrl = chatData['imageUrl'] ?? chatData['clubImage']; // ClubService henüz image koymuyor olabilir, aşağıda düzelteceğiz
+                      
+                      if (_query.isNotEmpty && !displayName.toLowerCase().contains(_query)) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return _buildListItem(
+                        context, 
+                        chatId, 
+                        displayName, 
+                        photoUrl, 
+                        true, // isClub
+                        null // otherUid yok
+                      );
+                    } else {
+                      // KİŞİSEL SOHBET MANTIĞI
+                      final otherUid = participants.firstWhere(
+                        (id) => id != myUid,
+                        orElse: () => '',
+                      );
+                      if (otherUid.isEmpty) return const SizedBox.shrink();
+
+                      // Yeni sistemdeki titles'a bak
+                      final titles = chatData['titles'] as Map?;
+                      final photos = chatData['photos'] as Map?;
+                      
+                      String? cachedName;
+                      String? cachedPhoto;
+
+                      if (titles != null && titles[myUid] != null) {
+                        cachedName = titles[myUid]; // Senin göreceğin isim
+                        cachedPhoto = photos?[myUid];
+                      }
+
+                      // Veri zaten varsa direkt göster (Hızlı)
+                      if (cachedName != null) {
+                         if (_query.isNotEmpty && !cachedName.toLowerCase().contains(_query)) {
+                            return const SizedBox.shrink();
+                         }
+                         return _buildListItem(context, chatId, cachedName, cachedPhoto, false, otherUid);
+                      }
+
+                      // Veri yoksa (Eski Sohbetler) UserCacheService'den çek
+                      return FutureBuilder(
+                        future: UserCacheService.instance.getUser(otherUid),
+                        builder: (context, userSnap) {
+                          final user = userSnap.data;
+                          final displayName = user?.displayName ?? 'Kullanıcı';
+                          final photoUrl = user?.photoURL;
+
+                          if (_query.isNotEmpty && !displayName.toLowerCase().contains(_query)) {
+                            return const SizedBox.shrink();
+                          }
+
+                          return _buildListItem(context, chatId, displayName, photoUrl, false, otherUid);
+                        },
+                      );
+                    }
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildListItem(
+    BuildContext context, 
+    String chatId, 
+    String displayName, 
+    String? photoUrl, 
+    bool isClub,
+    String? otherUid,
+  ) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: cs.primaryContainer,
+        backgroundImage: photoUrl != null && photoUrl.isNotEmpty 
+            ? NetworkImage(photoUrl) 
+            : null,
+        child: (photoUrl == null || photoUrl.isEmpty)
+            ? Icon(isClub ? Icons.groups : Icons.person, color: cs.primary)
+            : null,
+      ),
+      title: Text(displayName),
+      subtitle: Text(
+        isClub ? 'Kulüp Sohbeti' : 'Kişisel Sohbet',
+        style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+      ),
+      trailing: Icon(Icons.send, color: cs.primary),
+      onTap: () {
+         _sendMovieMessage(context, chatId, otherUid, displayName);
+      },
     );
   }
 
   Future<void> _sendMovieMessage(
     BuildContext context, 
     String chatId, 
-    String otherUid, 
-    String otherName
+    String? otherUid, 
+    String chatName,
   ) async {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid == null) return;
 
     try {
-      final text = "🎬 Film önerisi: $movieTitle";
+      final text = "🎬 Film önerisi: ${widget.movieTitle}";
       
       final movieData = {
-        'title': movieTitle,
-        'poster': moviePoster,
-        if (docId != null) 'id': docId, 
+        'title': widget.movieTitle,
+        'poster': widget.moviePoster,
+        if (widget.tmdbId != null) 'tmdbId': widget.tmdbId,
+        if (widget.overview != null) 'overview': widget.overview,
+        if (widget.docId != null) 'id': widget.docId,
       };
       
+      // Kulübe gönderirken otherUid boş gider
       await ChatService.instance.send(
         chatId, 
         myUid, 
         text, 
-        otherUid: otherUid,
+        otherUid: otherUid ?? '', 
         movie: movieData,
       );
 
       if (context.mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context); 
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$otherName kişisine gönderildi.')),
+          SnackBar(content: Text('$chatName grubuna gönderildi.')),
         );
       }
     } catch (e) {
-      
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Hata oluştu: $e')),

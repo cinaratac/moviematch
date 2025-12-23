@@ -424,7 +424,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _origAge = currAge;
       _origLb = currLb;
 
-      if (mounted) Navigator.of(context).pop();
+     if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
