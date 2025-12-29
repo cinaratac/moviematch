@@ -9,102 +9,64 @@ if (admin.apps.length === 0) {
 }
 
 // ==================================================================
-// 0. KULLANICI SİLME TETİKLEYİCİSİ (HER ŞEYİ SİLER)
-// ==================================================================
-// Bu fonksiyon Auth'tan kullanıcı silindiği anda otomatik çalışır.
-exports.deleteUserData = functions.auth.user().onDelete(async (user) => {
-  const uid = user.uid;
-  const db = admin.firestore();
-  const batch = db.batch();
-
-  console.log(`Kullanıcı verileri temizleniyor: ${uid}`);
-
-  try {
-    // 1. Doğrudan döküman ID'si UID olanlar
-    batch.delete(db.collection("users").doc(uid));
-    batch.delete(db.collection("userTasteProfiles").doc(uid));
-    batch.delete(db.collection("marketing_emails").doc(uid));
-    batch.delete(db.collection("account_delete_requests").doc(uid));
-
-    // 2. Koleksiyonlarda 'authorId' veya 'ownerId'si UID olanları bul ve sil
-    const queries = [
-      db.collection("posts").where("authorId", "==", uid),
-      db.collection("userAddedFilms").where("authorId", "==", uid),
-      db.collection("clubs").where("ownerId", "==", uid),
-      db.collection("custom_lists").where("ownerId", "==", uid),
-      db.collection("reports").where("reporterId", "==", uid)
-    ];
-
-    for (const query of queries) {
-      const snapshot = await query.get();
-      snapshot.forEach((doc) => batch.delete(doc.ref));
-    }
-
-    // 3. Eşleşmeler ve Chat (uids dizisi içinde UID geçenler)
-    const arrayQueries = [
-      db.collection("matches").where("uids", "array-contains", uid),
-      db.collection("chats").where("participants", "array-contains", uid),
-      db.collection("likes").where("uids", "array-contains", uid)
-    ];
-
-    for (const q of arrayQueries) {
-      const snap = await q.get();
-      snap.forEach((doc) => batch.delete(doc.ref));
-    }
-
-    // 4. Kullanıcı altındaki sub-collection'ları temizleme (Bildirimler, Tokenlar vb.)
-    // Not: Firestore sub-collection'ları recursive silmek için ayrı bir işlem gerekebilir 
-    // ancak ana döküman silindiği için çoğu zaman yeterli olur.
-    
-    await batch.commit();
-    console.log(`Kullanıcı ${uid} ile ilgili tüm veriler başarıyla silindi.`);
-    return null;
-  } catch (error) {
-    console.error(`Kullanıcı verisi silinirken hata: ${uid}`, error);
-    return null;
-  }
-});
-
-// ==================================================================
-// 1. GENEL TMDB PROXY
+// 1. GENEL TMDB PROXY (Tüm aramalar ve detaylar buradan geçer)
 // ==================================================================
 exports.callTMDB = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request) => {
+    // Güvenlik: Sadece giriş yapmış kullanıcılar
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'Oturum açmanız gerekiyor.');
     }
+
     const { endpoint, params } = request.data;
     const token = process.env.TMDB_ACCESS_TOKEN;
+
     if (!endpoint) {
         throw new HttpsError('invalid-argument', 'Endpoint gerekli.');
     }
+
     try {
         const response = await axios.get(`https://api.themoviedb.org${endpoint}`, {
-            params: { ...params, language: params && params.language ? params.language : 'tr-TR' },
-            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+            params: { 
+                ...params, 
+                // Varsayılan dil ayarı, parametre gelirse onu kullanır
+                language: params && params.language ? params.language : 'tr-TR' 
+            },
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json'
+            }
         });
+
         return response.data;
     } catch (error) {
         console.error("TMDB Proxy Hatası:", endpoint, error.message);
+        // Detaylı hatayı loglayıp kullanıcıya genel hata dönüyoruz
         throw new HttpsError('internal', 'TMDB isteği başarısız oldu.');
     }
 });
 
 // ==================================================================
-// 2. SEARCH MOVIES
+// 2. SEARCH MOVIES (GÜNCELLENMİŞ VERSİYON)
 // ==================================================================
 exports.searchMovies = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request) => {
+    // 1. Güvenlik kontrolü
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'Giriş yapmalısın.');
     }
+
+    // 2. Flutter'dan gelen verileri (query ve page) alıyoruz
     const query = request.data.query;
+    // Eğer page parametresi gönderilmezse varsayılan olarak 1 kabul et
     const page = request.data.page || 1; 
+    
     const token = process.env.TMDB_ACCESS_TOKEN;
+
     try {
         const response = await axios.get(`https://api.themoviedb.org/3/search/movie`, {
             params: { 
                 query: query, 
                 language: 'tr-TR', 
-                page: page.toString(), 
+                page: page.toString(), // 3. Burası artık dinamik! (Eskiden '1' yazıyordu)
                 include_adult: 'false' 
             },
             headers: { Authorization: `Bearer ${token}` }
@@ -117,7 +79,7 @@ exports.searchMovies = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request
 });
 
 // ==================================================================
-// 3. MEVCUT FIRESTORE TRIGGERLARI
+// 3. MEVCUT FIRESTORE TRIGGERLARI (Dokunulmadı)
 // ==================================================================
 
 exports.createNotificationOnLike = functions.firestore

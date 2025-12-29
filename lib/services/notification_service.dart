@@ -3,7 +3,8 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-
+import 'dart:io'; // Dosyanın en üstüne ekleyin
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -80,7 +81,17 @@ class NotificationService {
 
     _inited = true;
   }
-
+  Future<void> requestPermissions() async {
+  if (Platform.isAndroid) {
+    // Android 13+ için bildirim izni
+    final status = await Permission.notification.request();
+    if (status.isGranted) {
+      debugPrint("Bildirim izni verildi.");
+    } else {
+      debugPrint("Bildirim izni reddedildi.");
+    }
+  }
+}
   /// Tüm akışları başlat. Aynı oturumda bir kez çağırman yeterli.
   Future<void> start() async {
     await init();

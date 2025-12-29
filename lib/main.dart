@@ -100,20 +100,22 @@ class _MyAppState extends State<MyApp> {
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: mode,
-          home: StreamBuilder<User?>(
-            stream: FirebaseAuth.instance.authStateChanges(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (snapshot.hasData) {
-                return const HomeShell();
-              }
-              return const LoginPage();
-            },
-          ),
+          // StreamBuilder içindeki mantığı güncelleyin
+                  home: StreamBuilder<User?>(
+                    stream: FirebaseAuth.instance.authStateChanges(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasData && snapshot.data != null) {
+                          // --- KRİTİK EKLEME: Servisleri Burada Başlatın ---
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            NotificationService.I.start();           // Bildirim dinleyicilerini başlatır
+                            NotificationService.I.requestPermissions(); // İzin ister (Android 13+)
+                            // PushTokenService.I.start();          // Token'ı DB'ye kaydeder (Bu servisin start() metodu olduğundan emin olun)
+                          });
+                          return const HomeShell();
+                        }
+                      return const LoginPage();
+                    },
+                  ),
         );
       },
     );
