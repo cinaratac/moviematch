@@ -488,8 +488,8 @@ class _BadgeDetailSheet extends StatelessWidget {
                     // --- PAYLAŞILACAK METNİ DE GÜNCELLEDİK ---
                     // Eğer kazanıldıysa "Kazandım", kazanılmadıysa "Kazanmak Üzereyim" yazsın.
                     final text = isCompleted 
-                        ? "CineMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨"
-                        : "CineMatch uygulamasında '${badge.name}' rozetini kazanmak üzereyim! 🚀";
+                        ? "CineMatch uygulamasında '${badge.name}' rozetini kazandım! 🎬✨ https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch&hl=tr"
+                        : "CineMatch uygulamasında '${badge.name}' rozetini kazanmak üzereyim! 🚀 https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch&hl=tr ";
                     
                     try {
                         Share.share(text); 
