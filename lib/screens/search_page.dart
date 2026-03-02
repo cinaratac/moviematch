@@ -736,54 +736,69 @@ class _UserSearchTabState extends State<_UserSearchTab> {
     );
   }
 
-  Widget _buildUserResultCard(BuildContext context, Map<String, dynamic> data, {required bool isRecent}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final displayName = data['displayName'] ?? 'İsimsiz';
-    final username = data['username'] ?? '';
-    final photoURL = data['photoURL'];
-    final lbUser = data['letterboxdUsername'];
+// lib/screens/search_page.dart içindeki _buildUserResultCard metodunu bu şekilde güncelleyin:
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.04), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(10),
-        leading: GestureDetector(
-          onTap: () {
-             _addRecent(data);
-             Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: data['uid'])));
-          },
-          child: CircleAvatar(
-            radius: 28,
-            backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
-            backgroundImage: (photoURL != null && photoURL.toString().isNotEmpty) ? NetworkImage(photoURL) : null,
-            child: (photoURL == null || photoURL.toString().isEmpty) ? const Icon(Icons.person, color: Colors.grey) : null,
-          ),
-        ),
-        title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('@$username', style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.w500)),
-            if (lbUser != null && lbUser.toString().isNotEmpty) Text('Letterboxd: $lbUser', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-          ],
-        ),
-        // Eğer geçmiş listesiyse Çarpı butonu, değilse ok butonu
-        trailing: isRecent 
-          ? IconButton(
-              icon: const Icon(Icons.close, size: 20),
-              onPressed: () => _removeRecent(data['uid']),
-            )
-          : const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
+Widget _buildUserResultCard(BuildContext context, Map<String, dynamic> data, {required bool isRecent}) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  
+  // Tek isim stratejimiz için username alanını alıyoruz
+  final username = (data['username'] ?? data['displayName'] ?? 'isimsiz').toString();
+  final photoURL = data['photoURL'];
+  final lbUser = data['letterboxdUsername'];
+
+  // @ işaretini temizleyerek ham kullanıcı adını alıyoruz
+  final cleanName = username.replaceAll('@', '');
+
+  return Container(
+    margin: const EdgeInsets.only(bottom: 12),
+    decoration: BoxDecoration(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(isDark ? 0.3 : 0.04), 
+          blurRadius: 10, 
+          offset: const Offset(0, 4)
+        )
+      ],
+    ),
+    child: ListTile(
+      contentPadding: const EdgeInsets.all(10),
+      leading: GestureDetector(
         onTap: () {
-          _addRecent(data);
-          Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: data['uid'])));
+           _addRecent(data);
+           Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: data['uid'])));
         },
+        child: CircleAvatar(
+          radius: 28,
+          backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+          backgroundImage: (photoURL != null && photoURL.toString().isNotEmpty) ? NetworkImage(photoURL) : null,
+          child: (photoURL == null || photoURL.toString().isEmpty) ? const Icon(Icons.person, color: Colors.grey) : null,
+        ),
       ),
-    );
-  }
+      // ÜST KISIM: Sadece temiz Kullanıcı Adı
+      title: Text(
+        cleanName, 
+        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)
+      ),
+      // ALT KISIM: Sadece varsa Letterboxd adı
+      subtitle: (lbUser != null && lbUser.toString().isNotEmpty)
+          ? Text(
+              'Letterboxd: ${lbUser.toString().replaceAll('@', '')}', 
+              style: TextStyle(fontSize: 12, color: Colors.grey[600])
+            )
+          : null, // Letterboxd yoksa alt başlık tamamen boş kalır
+      trailing: isRecent 
+        ? IconButton(
+            icon: const Icon(Icons.close, size: 20),
+            onPressed: () => _removeRecent(data['uid']),
+          )
+        : const Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey),
+      onTap: () {
+        _addRecent(data);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: data['uid'])));
+      },
+    ),
+  );
+}
 }

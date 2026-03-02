@@ -279,161 +279,119 @@ class _EditProfilePageState extends State<EditProfilePage> {
     super.dispose();
   }
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+ Future<void> _save() async {
+  if (!_formKey.currentState!.validate()) return;
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
 
-    setState(() => _saving = true);
-    try {
-      String? uploadedPhotoUrl;
-      if (_selectedImage != null) {
-        final storageRef = FirebaseStorage.instance
-            .ref()
-            .child('user_avatars')
-            .child('${user.uid}.jpg');
+  setState(() => _saving = true);
+  try {
+    String? uploadedPhotoUrl;
+    if (_selectedImage != null) {
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('user_avatars')
+          .child('${user.uid}.jpg');
 
-        await storageRef.putFile(_selectedImage!);
-        uploadedPhotoUrl = await storageRef.getDownloadURL();
-        await user.updatePhotoURL(uploadedPhotoUrl);
-      }
-      final username = _usernameCtrl.text.trim();
-      final bio = _bioCtrl.text.trim();
-      if (TextFilterService.hasProfanity(username)) {
-         ScaffoldMessenger.of(context).showSnackBar(
-           const SnackBar(content: Text('Kullanıcı adı uygunsuz ifadeler içeriyor.')),
-         );
-         return;
-      }
-
-      if (TextFilterService.hasProfanity(bio)) {
-         ScaffoldMessenger.of(context).showSnackBar(
-           const SnackBar(content: Text('Biyografi uygunsuz ifadeler içeriyor.')),
-         );
-         return;
-      }
-      
-      final ageStr = _ageCtrl.text.trim();
-      final age = int.tryParse(ageStr);
-      final newLb = _letterboxdCtrl.text.trim().toLowerCase();
-
-      Map<String, dynamic> payload = {};
-      if (uploadedPhotoUrl != null) {
-        payload['photoURL'] = uploadedPhotoUrl;
-      }
-
-      String? currUsername = username.isEmpty ? null : username;
-      payload['username'] = (currUsername != null) ? currUsername : FieldValue.delete();
-      if (currUsername != null) {
-        payload['username_lc'] = currUsername.toLowerCase();
-      } else {
-        payload['username_lc'] = FieldValue.delete();
-      }
-
-      String? currBio = bio.isEmpty ? null : bio;
-      payload['bio'] = (currBio != null) ? currBio : FieldValue.delete();
-
-      int? currAge = (age != null && age > 0) ? age : null;
-      payload['age'] = (currAge != null) ? currAge : FieldValue.delete();
-
-      payload['favDirectors'] = _favDirectors;
-      payload['favActors'] = _favActors;
-      payload['favGenres'] = _selectedGenres.toList(); // Türleri kaydet
-
-      String? prevLb = _origLb;
-      String? currLb = newLb.isEmpty ? null : newLb;
-      bool lbChanged = prevLb != currLb;
-
-      if (lbChanged) {
-        if (currLb != null) {
-          payload['letterboxdUsername'] = currLb;
-          payload['letterboxdUsername_lc'] = currLb;
-          payload['lbUsername'] = currLb;
-          
-          payload['favoritesKeys'] = FieldValue.delete();
-          payload['fiveStarKeys'] = FieldValue.delete();
-          payload['dislikedKeys'] = FieldValue.delete();
-          payload['watchlistKeys'] = FieldValue.delete();
-          payload['watchlist'] = FieldValue.delete();
-          payload['favorites'] = FieldValue.delete();
-          
-          await UserProfileService.instance.clearTasteProfile(user.uid);
-        } else {
-          payload['favoritesKeys'] = FieldValue.delete();
-          payload['fiveStarKeys'] = FieldValue.delete();
-          payload['dislikedKeys'] = FieldValue.delete();
-          payload['watchlistKeys'] = FieldValue.delete();
-          payload['watchlist'] = FieldValue.delete(); 
-          payload['favorites'] = FieldValue.delete();
-          payload['letterboxdUsername'] = FieldValue.delete();
-          payload['letterboxdUsername_lc'] = FieldValue.delete();
-          payload['lbUsername'] = FieldValue.delete();
-          await UserProfileService.instance.clearTasteProfile(user.uid);
-        }
-      }
-
-      payload['updatedAt'] = FieldValue.serverTimestamp();
-
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set(payload, SetOptions(merge: true));
-
-      try {
-        final sp = await SharedPreferences.getInstance();
-        if (currLb != null) {
-          await sp.setString('lb_username_${user.uid}', currLb);
-        } else {
-          await sp.remove('lb_username_${user.uid}');
-        }
-      } catch (_) {}
-
-      if (lbChanged && currLb != null) {
-        if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Profil güncellendi. Letterboxd verileri çekiliyor...'), backgroundColor: Color(0xFF2E7D32)),
-            );
-        }
-
-        try {
-          await LetterboxdService.fullSyncOnboarding(
-            uid: user.uid, 
-            lbUsername: currLb
-          );
-           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Letterboxd verileri başarıyla yüklendi!'), backgroundColor: Color(0xFF2E7D32)),
-             );
-           }
-        } catch (e) {
-         
-           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Profil kaydedildi ama Letterboxd verileri çekilemedi.')),
-             );
-           }
-        }
-      } else {
-         if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellendi.'), backgroundColor: Color(0xFF2E7D32)));
-         }
-      }
-
-      _origUsername = currUsername;
-      _origBio = currBio;
-      _origAge = currAge;
-      _origLb = currLb;
-
-     if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Kaydetme hatası: $e')));
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      await storageRef.putFile(_selectedImage!);
+      uploadedPhotoUrl = await storageRef.getDownloadURL();
+      await user.updatePhotoURL(uploadedPhotoUrl);
     }
+
+    // Değişkenleri tanımlıyoruz
+    final username = _usernameCtrl.text.trim();
+    final bio = _bioCtrl.text.trim();
+    final ageStr = _ageCtrl.text.trim();
+    final age = int.tryParse(ageStr);
+    final currLb = _letterboxdCtrl.text.trim().toLowerCase(); // currLb burada tanımlı
+
+    // Küfür Filtresi Kontrolleri (mounted check ekledik)
+    if (TextFilterService.hasProfanity(username)) {
+       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kullanıcı adı uygunsuz.')));
+       setState(() => _saving = false);
+       return;
+    }
+    if (TextFilterService.hasProfanity(bio)) {
+       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Biyografi uygunsuz.')));
+       setState(() => _saving = false);
+       return;
+    }
+
+    // Auth Profilini Güncelle
+    if (username.isNotEmpty) {
+      await user.updateDisplayName(username);
+    }
+
+    Map<String, dynamic> payload = {};
+    if (uploadedPhotoUrl != null) payload['photoURL'] = uploadedPhotoUrl;
+
+    // Tüm isim alanlarını eşitliyoruz
+    if (username.isNotEmpty) {
+      payload['username'] = username;
+      payload['username_lc'] = username.toLowerCase();
+      payload['displayName'] = username;
+      payload['displayName_lc'] = username.toLowerCase();
+      payload['handle'] = username;
+    }
+
+    payload['bio'] = bio.isNotEmpty ? bio : FieldValue.delete();
+    payload['age'] = (age != null && age > 0) ? age : FieldValue.delete();
+    payload['favDirectors'] = _favDirectors;
+    payload['favActors'] = _favActors;
+    payload['favGenres'] = _selectedGenres.toList();
+
+    // Letterboxd Değişim Kontrolü
+    bool lbChanged = _origLb != currLb;
+    if (lbChanged) {
+      payload['letterboxdUsername'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
+      payload['letterboxdUsername_lc'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
+      payload['lbUsername'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
+      // Veri değiştiği için eski zevk profilini temizle
+      await UserProfileService.instance.clearTasteProfile(user.uid);
+    }
+
+    payload['updatedAt'] = FieldValue.serverTimestamp();
+
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .set(payload, SetOptions(merge: true));
+
+    // SharedPreferences Güncelleme
+    final sp = await SharedPreferences.getInstance();
+    if (currLb.isNotEmpty) {
+      await sp.setString('lb_username_${user.uid}', currLb);
+    } else {
+      await sp.remove('lb_username_${user.uid}');
+    }
+
+    // UI Bildirimleri ve Letterboxd Sync
+    if (lbChanged && currLb.isNotEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil ve Letterboxd güncelleniyor...'), backgroundColor: Color(0xFF2E7D32)));
+      }
+      try {
+        await LetterboxdService.fullSyncOnboarding(uid: user.uid, lbUsername: currLb);
+      } catch (_) {}
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellendi.'), backgroundColor: Color(0xFF2E7D32)));
+      }
+    }
+
+    // Orijinal değerleri güncelle (Hata veren kısımlar burasıydı)
+    _origUsername = username.isNotEmpty ? username : null;
+    _origBio = bio.isNotEmpty ? bio : null;
+    _origAge = age;
+    _origLb = currLb.isNotEmpty ? currLb : null;
+
+    if (mounted) Navigator.of(context).pop(true);
+  } catch (e) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+  } finally {
+    if (mounted) setState(() => _saving = false);
   }
+}
 
   @override
   Widget build(BuildContext context) {
