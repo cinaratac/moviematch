@@ -674,14 +674,23 @@ Row(
                 IconButton(
                   icon: Icon(Icons.share_outlined, size: 22, color: cs.onSurfaceVariant),
                   onPressed: () {
-                    final String appLink = 'cinematch://app/post?id=${widget.postId}';
-                    final String content = widget.text.isNotEmpty 
-                        ? widget.text 
-                        : (widget.movieTitle ?? 'Bir gönderi');
+                   final String appLink = 'https://cinematchsocial.web.app/post?id=${widget.postId}';
+                    
+                    // Gönderi metni boşsa film adını, ikisi de boşsa varsayılan metni al
+                    String contentPreview = widget.text;
+                    if (contentPreview.isEmpty) {
+                      contentPreview = widget.movieTitle ?? 'Cinematch\'te bir gönderi paylaştı!';
+                    }
+                    
+                    // Metin çok uzunsa kırp
+                    if (contentPreview.length > 100) {
+                      contentPreview = '${contentPreview.substring(0, 100)}...';
+                    }
+
                     Share.share(
-                      '${widget.displayName} (@${widget.handle.replaceAll('@', '')}) paylaştı:\n\n'
-                      '$content\n\n'
-                      'Uygulamada gör: $appLink'
+                      '${widget.displayName} (@${widget.handle.replaceAll('@', '')}):\n\n'
+                      '"$contentPreview"\n\n'
+                      'Tümünü görmek için tıkla:\n$appLink'
                     );
                   },
                 ),
@@ -804,62 +813,46 @@ class _LikerUserTile extends StatelessWidget {
   final String uid;
   const _LikerUserTile({required this.uid});
 
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox.shrink();
+  // lib/widgets/post_tile.dart içindeki _LikerUserTile build metodu
 
-        final data = snapshot.data!.data() as Map<String, dynamic>?;
-        if (data == null) return const SizedBox.shrink();
+@override
+Widget build(BuildContext context) {
+  return FutureBuilder<DocumentSnapshot>(
+    future: FirebaseFirestore.instance.collection('users').doc(uid).get(),
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const SizedBox.shrink();
 
-        final displayName = data['displayName'] ?? 'Kullanıcı';
-        final photoURL = data['photoURL'] as String?;
-        
-        // YENİ: Letterboxd verisini alıyoruz
-        final lbUsername = data['letterboxdUsername'] as String?;
+      final data = snapshot.data!.data() as Map<String, dynamic>?;
+      if (data == null) return const SizedBox.shrink();
 
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          leading: GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid))),
-            child: CircleAvatar(
-              radius: 24,
-              backgroundColor: Colors.grey[200],
-              backgroundImage: (photoURL != null && photoURL.isNotEmpty) ? NetworkImage(photoURL) : null,
-              child: (photoURL == null || photoURL.isEmpty) ? const Icon(Icons.person, color: Colors.grey) : null,
-            ),
+      // "Tek isim" kuralımız için username alanını alıyoruz
+      final username = (data['username'] ?? data['displayName'] ?? 'Kullanıcı').toString();
+      final photoURL = data['photoURL'] as String?;
+
+      return ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: GestureDetector(
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid))),
+          child: CircleAvatar(
+            radius: 24,
+            backgroundColor: Colors.grey[200],
+            backgroundImage: (photoURL != null && photoURL.isNotEmpty) ? NetworkImage(photoURL) : null,
+            child: (photoURL == null || photoURL.isEmpty) ? const Icon(Icons.person, color: Colors.grey) : null,
           ),
-          title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-          
-          // YENİ: Subtitle artık çok satırlı (Column)
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-           
-              
-              if (lbUsername != null && lbUsername.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2.0),
-                  child: Text(
-                    'Letterboxd: $lbUsername',
-                    style: const TextStyle(
-                      color: Color(0xFF2E7D32), // Hafif yeşil ton (veya gri yapabilirsiniz)
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
-          onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid)));
-          },
-        );
-      },
-    );
-  }
+        ),
+        // Sadece kullanıcı adı görünecek ve @ işareti temizlenecek
+        title: Text(
+          username.replaceAll('@', ''), 
+          style: const TextStyle(fontWeight: FontWeight.bold)
+        ),
+        // Alt başlığı (Letterboxd vb.) tamamen kaldırıyoruz
+        subtitle: null, 
+        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+        onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid)));
+        },
+      );
+    },
+  );
+}
 }

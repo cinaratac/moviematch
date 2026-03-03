@@ -115,10 +115,26 @@ class CustomListDetailScreen extends StatelessWidget {
                     },
                     child: Row(
                       children: [
-                        CircleAvatar(
-                          radius: 10,
-                          backgroundColor: Colors.grey.shade300,
-                          child: const Icon(Icons.person, size: 14, color: Colors.black54),
+                        FutureBuilder<DocumentSnapshot>(
+                          future: FirebaseFirestore.instance.collection('users').doc(list.ownerId).get(),
+                          builder: (context, snapshot) {
+                            String? photoUrl;
+                            if (snapshot.hasData && snapshot.data!.exists) {
+                              final data = snapshot.data!.data() as Map<String, dynamic>?;
+                              photoUrl = data?['photoURL'] as String?;
+                            }
+                            
+                            return CircleAvatar(
+                              radius: 12,
+                              backgroundColor: Colors.grey.shade800,
+                              backgroundImage: (photoUrl != null && photoUrl.isNotEmpty) 
+                                  ? NetworkImage(photoUrl) 
+                                  : null,
+                              child: (photoUrl == null || photoUrl.isEmpty) 
+                                  ? const Icon(Icons.person, size: 16, color: Colors.white70) 
+                                  : null,
+                            );
+                          }
                         ),
                         const SizedBox(width: 6),
                         RichText(

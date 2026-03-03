@@ -842,7 +842,7 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
                               // İçerik
                               Column(
                                 children: [
-                                  SizedBox(height: MediaQuery.of(context).padding.top + kToolbarHeight),
+                                 
                                   _profileHeaderSection(context: context, user: user, followers: _followersCount, following: _followingCount, lbUsername: _lbUsername, shownName: _shownName),
                                   const SizedBox(height: 35),
                                   // Tab Bar

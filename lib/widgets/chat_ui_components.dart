@@ -6,6 +6,7 @@ import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/club_sheets.dart';
+import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
 // --- HAFTANIN FİLMİ BANNERI ---
 class FeaturedMovieBannerWidget extends StatelessWidget {
@@ -150,6 +151,7 @@ class MessageRow extends StatelessWidget {
 }
 
 // --- MESAJ BALONU (STANDART) ---
+// --- MESAJ BALONU (STANDART) ---
 class MessageBubble extends StatelessWidget {
   final String text;
   final dynamic movie;
@@ -182,10 +184,22 @@ class MessageBubble extends StatelessWidget {
     String posterUrl = '';
     String movieTitle = '';
     bool hasMovie = false;
+    int? parsedMovieId;
+
     if (movie is Map) {
       final mm = Map<String, dynamic>.from(movie);
-      posterUrl = (mm['poster'] ?? '').toString();
-      movieTitle = (mm['title'] ?? '').toString();
+      posterUrl = (mm['poster'] ?? mm['posterUrl'] ?? '').toString();
+      movieTitle = (mm['title'] ?? mm['name'] ?? '').toString();
+      
+      // Veritabanından gelen film objesi içindeki ID'yi olası tüm anahtarlarla arıyoruz
+      final possibleKeys = ['id', 'tmdbId', 'movieId', 'movie_id'];
+      for (String key in possibleKeys) {
+        if (mm[key] != null) {
+          parsedMovieId = int.tryParse(mm[key].toString());
+          if (parsedMovieId != null) break; // Geçerli bir ID bulduysak döngüden çık
+        }
+      }
+      
       hasMovie = true;
     }
 
@@ -241,30 +255,59 @@ class MessageBubble extends StatelessWidget {
                     color: Colors.black26,
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (posterUrl.isNotEmpty)
-                        AspectRatio(
-                          aspectRatio: 2 / 3,
-                          child: PosterImage(posterUrl: posterUrl, title: movieTitle, fit: BoxFit.cover),
-                        )
-                      else
-                        Container(
-                          height: 120, width: double.infinity, color: Colors.grey.shade900,
-                          child: const Center(child: Icon(Icons.movie, size: 32, color: Colors.white24)),
-                        ),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        color: Colors.black38,
-                        child: Text(
-                          movieTitle,
-                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                        ),
+                  // BURAYA MATERIAL VE INKWELL EKLENDİ (TIKLAMA VE ANİMASYON İÇİN)
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        if (parsedMovieId != null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => MovieDetailScreen(
+                                tmdbId: parsedMovieId!,
+                                title: movieTitle.isNotEmpty ? movieTitle : null,
+                                posterUrl: posterUrl.isNotEmpty ? posterUrl : null,
+                              ),
+                            ),
+                          );
+                        } else {
+                          // BURAYI GÜNCELLEDİK: $mm yerine $movie kullanıyoruz
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('ID Bulunamadı! Gelen Veri: $movie'), 
+                              backgroundColor: Colors.red,
+                              duration: const Duration(seconds: 5),
+                            ),
+                          );
+                        }
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (posterUrl.isNotEmpty)
+                            AspectRatio(
+                              aspectRatio: 2 / 3,
+                              child: PosterImage(posterUrl: posterUrl, title: movieTitle, fit: BoxFit.cover),
+                            )
+                          else
+                            Container(
+                              height: 120, width: double.infinity, color: Colors.grey.shade900,
+                              child: const Center(child: Icon(Icons.movie, size: 32, color: Colors.white24)),
+                            ),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(8),
+                            color: Colors.black38,
+                            child: Text(
+                              movieTitle,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
 

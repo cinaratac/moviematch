@@ -5,29 +5,46 @@ import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
+import 'package:fluttergirdi/screens/lists_screen.dart';
 
 class DiscoveryListsWidget extends StatelessWidget {
   const DiscoveryListsWidget({super.key});
 
-  @override
+ @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Başlık
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                "Keşfet: Listeler",
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+        // GÜNCELLEME: Başlık kısmı InkWell ile sarıldı ve tıklama özelliği eklendi
+        InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ListsScreen(),
               ),
-              const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-            ],
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Keşfet: Listeler",
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                Row(
+                  children: [
+                    
+                    const SizedBox(width: 4),
+                    Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         

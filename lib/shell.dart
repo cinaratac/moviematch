@@ -99,10 +99,29 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold( 
-      extendBody: true,
-      body: IndexedStack(index: _index, children: _pages),
-      bottomNavigationBar: _buildBottomBar(context),
+    // PopScope: Telefonun fiziksel geri tuşunu dinler ve kontrol eder
+    return PopScope(
+      // Sadece Feed sekmesindeyken (index == 0) uygulamadan çıkışa izin ver
+      canPop: _index == 0, 
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        // Eğer sistem zaten geri gittiyse (uygulamadan çıktıysa) hiçbir şey yapma
+        if (didPop) {
+          return;
+        }
+        
+        // Eğer Feed (Ana) ekranda değilsek, çıkmak yerine Feed ekranına dön
+        if (_index != 0) {
+          setState(() {
+            _index = 0;
+          });
+          TabService.instance.changeTab(0); 
+        }
+      },
+      child: Scaffold( 
+        extendBody: true,
+        body: IndexedStack(index: _index, children: _pages),
+        bottomNavigationBar: _buildBottomBar(context),
+      ),
     );
   }
 

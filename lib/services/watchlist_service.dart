@@ -18,9 +18,11 @@ class WatchlistService {
       
       final title = (m['title'] ?? m['name'] ?? '').toString();
       final poster = (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '').toString();
+      // YENİ: ID'yi de ayıklıyoruz
+      final id = (m['id'] ?? m['tmdbId'] ?? '').toString();
       
       if (title.isNotEmpty) {
-        res.add({'title': title, 'poster': poster});
+        res.add({'title': title, 'poster': poster, 'id': id});
       }
     }
   }
@@ -64,10 +66,11 @@ class WatchlistService {
             if (e is Map) {
               final title = (e['title'] ?? e['name'] ?? '').toString();
               final poster = (e['poster'] ?? e['posterUrl'] ?? e['image'] ?? '').toString();
-              if (title.isNotEmpty) res.add({'title': title, 'poster': poster});
+              final id = (e['id'] ?? e['tmdbId'] ?? '').toString(); // YENİ
+              if (title.isNotEmpty) res.add({'title': title, 'poster': poster, 'id': id});
             } else if (e is String) {
               final title = e.trim();
-              if (title.isNotEmpty) res.add({'title': title, 'poster': ''});
+              if (title.isNotEmpty) res.add({'title': title, 'poster': '', 'id': ''});
             }
           }
         }
@@ -108,6 +111,7 @@ class WatchlistService {
         return {
           'title': (m['title'] ?? '').toString(),
           'poster': (m['poster'] ?? '').toString(),
+          'id': (m['id'] ?? m['tmdbId'] ?? '').toString(), // YENİ
         };
       }).toList();
       
@@ -144,6 +148,7 @@ class WatchlistService {
           WatchlistMovie(
             title: t,
             posterUrl: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+            id: (m['id'] ?? '').toString(), // YENİ EKLENDİ
           ),
         );
       }
@@ -161,7 +166,7 @@ class WatchlistService {
           if ((it.posterUrl ?? '').isEmpty) {
             final p = mapB[_norm(it.title)] ?? '';
             if (p.isNotEmpty) {
-              out[i] = WatchlistMovie(title: it.title, posterUrl: p);
+              out[i] = WatchlistMovie(title: it.title, posterUrl: p, id: it.id);
             }
           }
         }
@@ -182,6 +187,7 @@ class WatchlistService {
                fallbackList.add(WatchlistMovie(
                   title: t,
                   posterUrl: (m['poster'] ?? m['posterUrl'] ?? '').toString(),
+                  id: (m['id'] ?? '').toString(), // YENİ EKLENDİ
                ));
             }
         }

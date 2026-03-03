@@ -25,6 +25,14 @@
       .btn { background-color: #0fb333 !important; }
       .navbar-logo .logo { color: #41b31f !important; font-weight: bold; }
     </style>
+    <script>
+      window.onload = function() {
+        // Sadece URL'de bir gönderi ID'si varsa Play Store'a yönlendir
+        if (window.location.href.indexOf("id=") > -1) {
+          window.location.href = "https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch&hl=tr";
+        }
+      };
+    </script>
   </head>
   <body>
     <div class="preloader">

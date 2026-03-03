@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -139,28 +140,39 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _openFilmPicker() async {
-    final result = await showModalBottomSheet<Map<String, String>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent, 
-      builder: (ctx) => const FilmPickerSheet(),
+    // 1. FilmPickerSheet yerine SearchMoviePage'i "Seçim Modunda" açıyoruz
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const SearchMoviePage(isSelectionMode: true),
+      ),
     );
 
+    // 2. Kullanıcı film seçmeden geri döndüyse işlemi iptal et
     if (!mounted || result == null) return;
 
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     try {
+      // 3. Mesajı, arama ekranından dönen garantili ID ile gönder
       await _svc.send(
         widget.chatId,
         myUid,
         "", 
         otherUid: widget.otherUid,
-        movie: result,
+        movie: {
+          'title': result['title'],
+          'poster': result['poster'],
+          'id': result['id'].toString(), // TMDB ID'sini garanti altına alıyoruz
+        },
       );
-       // Film gönderince de aşağı kaydır
+      
+      // 4. Film gönderince ekranı aşağı kaydır
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(0.0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        _scrollController.animateTo(
+          0.0, 
+          duration: const Duration(milliseconds: 300), 
+          curve: Curves.easeOut
+        );
       }
     } catch (e) {
       if(mounted) _showError('Film gönderilemedi: $e');

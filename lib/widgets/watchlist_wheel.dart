@@ -5,7 +5,8 @@ import 'package:flutter/material.dart';
 class WatchlistMovie {
   final String title;
   final String? posterUrl;
-  const WatchlistMovie({required this.title, this.posterUrl});
+  final String? id;
+  const WatchlistMovie({required this.title, this.posterUrl,this.id,});
 }
 
 /// A fortune-style wheel for picking a movie from a watchlist.
