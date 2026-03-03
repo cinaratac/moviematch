@@ -433,20 +433,28 @@ class _ProfilePageState extends State<ProfilePage> {
     if (uid == null) return;
     _userSub?.cancel();
     _userSub = FirebaseFirestore.instance.collection('users').doc(uid).snapshots().listen((snap) async {
-          if (!snap.exists) return;
-          final data = snap.data() ?? const {};
+      if (!snap.exists) return;
+      final data = snap.data() ?? const {};
+      
+      // GÜNCELLEME: Veri geldiğinde setState ile TÜM ekranın yenilenmesini sağlıyoruz.
+      if (mounted) {
+        setState(() {
           _lastUserData = Map<String, dynamic>.from(data);
+          
           final lb = (data['letterboxdUsername'] ?? '').toString().trim();
           final appU = (data['displayName'] ?? data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
+          
           if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
-            if (mounted) setState(() => _appUsername = appU);
+            _appUsername = appU;
           }
           if (lb.isNotEmpty && lb != _lbUsername) {
-             if (mounted) setState(() => _lbUsername = lb);
+             _lbUsername = lb;
              _refreshFavorites(); 
           }
-          _checkGuideVisibility();
         });
+      }
+      _checkGuideVisibility();
+    });
   }
 
   Future<void> _refreshFavorites() async {

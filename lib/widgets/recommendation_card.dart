@@ -368,52 +368,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     }
   }
 
-  void _showAddToShelfDialog(BuildContext context, MovieRecommendation rec) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${rec.title} filmini nereye eklemek istersin?',
-                style: Theme.of(context).textTheme.titleMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              ListTile(
-                leading: const Icon(Icons.star, color: Colors.amber),
-                title: const Text('5 Yıldız (Sevdiklerim)'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _addToShelf(ShelfTarget.fiveStar);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.favorite, color: Colors.red),
-                title: const Text('Favorilerim'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _addToShelf(ShelfTarget.favorites);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.bookmark, color: Colors.blue),
-                title: const Text('İzleme Listem'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _addToShelf(ShelfTarget.watchlist);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -655,23 +609,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                   ),
                 ),
 
-                SizedBox(
-                  height: 36,
-                  child: FilledButton.icon(
-                    onPressed: _actionInProgress 
-                      ? null 
-                      : () => _showAddToShelfDialog(context, recommendation),
-                    icon: _actionInProgress 
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) 
-                      : const Icon(Icons.add, size: 18),
-                    label: const Text('Ekle'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: cs.primary,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      visualDensity: VisualDensity.compact, 
-                    ),
-                  ),
-                ),
+               
               ],
             ),
           ),

@@ -2,7 +2,12 @@
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/screens/actors_screen.dart';
+import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
+import 'package:fluttergirdi/widgets/post_tile.dart';
+import 'package:fluttergirdi/services/feed_service.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
 
@@ -38,6 +43,24 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   void initState() {
     super.initState();
     _fetchDetails();
+  }
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    if (diff.inHours < 24) return '${diff.inHours}h';
+    if (diff.inDays < 7) return '${diff.inDays}g';
+    return '${diff.inDays ~/ 365}y';
+  }
+
+  int? _parseTmdbId(Map<String, dynamic> m) {
+    dynamic rawId = (m['movie'] is Map) 
+        ? (m['movie']['tmdbId'] ?? m['movie']['id']) 
+        : m['tmdbId'];
+    if (rawId is int) return rawId;
+    if (rawId is String) return int.tryParse(rawId);
+    if (rawId is double) return rawId.toInt();
+    return null;
   }
 
 
@@ -76,6 +99,62 @@ Future<void> _fetchDetails() async {
   }
 }
 
+  void _navigateToCompose(BuildContext context) {
+    if (_movieData == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ComposePostPage(
+          maxChars: 280,
+          // Film verilerini buradaki yapıya göre gönderiyoruz
+          initialMovie: {
+            'id': widget.tmdbId,
+            'title': _movieData!['title'],
+            'poster': widget.posterUrl,
+          },
+          onSend: ({required text, movie, images, rating, required isSpoiler, tags, reviewTitle}) async {
+            final user = FirebaseAuth.instance.currentUser;
+            if (user == null) return;
+
+            List<String> postImageUrls = [];
+            
+            // 1. Resimleri Firebase Storage'a yükle
+            if (images != null && images.isNotEmpty) {
+              for (var i = 0; i < images.length; i++) {
+                final image = images[i];
+                final String fileName = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+                final ref = FirebaseStorage.instance.ref().child('post_images').child(fileName);
+                await ref.putFile(image);
+                final url = await ref.getDownloadURL();
+                postImageUrls.add(url);
+              }
+            }
+
+            // 2. FeedService üzerinden gönderiyi oluştur
+            await FeedService.instance.createPost(
+              text: text,
+              movie: movie,
+              photoURL: postImageUrls.isNotEmpty ? postImageUrls.first : null,
+              photoURLs: postImageUrls,
+              displayName: user.displayName,
+              handle: user.email?.split('@')[0],
+              rating: rating,
+              isSpoiler: isSpoiler,
+              tags: tags,
+              reviewTitle: reviewTitle,
+            );
+            
+            if (context.mounted) {
+              Navigator.pop(context); // Paylaşım sayfasını kapat
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Gönderiniz Paylaşıldı!'), behavior: SnackBarBehavior.floating)
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
   // --- KATALOG VE LİSTE İŞLEMLERİ ---
 
   Future<String?> _registerMovieToCatalog() async {
@@ -289,9 +368,20 @@ Future<void> _addToStandardList(ShelfTarget target) async {
   }
 
   // --- GETTERS ---
+ /// 1. Yazı olarak isim döndüren metot (Hatanı bu çözecek)
   String get _director {
     final d = _crew.firstWhere((m) => m['job'] == 'Director', orElse: () => null);
     return d != null ? d['name'] : 'Bilinmiyor';
+  }
+
+  // 2. Tıklanma ve detaylar için tüm veriyi döndüren metot
+  Map<String, dynamic>? get _directorData {
+    if (_crew.isEmpty) return null;
+    try {
+      return _crew.firstWhere((m) => m['job'] == 'Director');
+    } catch (e) {
+      return null;
+    }
   }
 
   String get _rating => _movieData != null 
@@ -314,7 +404,7 @@ Future<void> _addToStandardList(ShelfTarget target) async {
     return date.substring(0, 4);
   }
 
-  @override
+ @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = Theme.of(context).scaffoldBackgroundColor;
@@ -334,7 +424,6 @@ Future<void> _addToStandardList(ShelfTarget target) async {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          // YENİ EKLE BUTONU
           IconButton(
             onPressed: _showAddSheet,
             icon: Container(
@@ -348,7 +437,6 @@ Future<void> _addToStandardList(ShelfTarget target) async {
       ),
       body: Stack(
         children: [
-          // 1. ARKA PLAN (Blur Efekti)
           if (widget.posterUrl != null)
             Positioned.fill(
               child: Stack(
@@ -362,131 +450,291 @@ Future<void> _addToStandardList(ShelfTarget target) async {
                 ],
               ),
             ),
-
-          // 2. İÇERİK
           if (_loading)
             const Center(child: CircularProgressIndicator())
           else if (_hasError || _movieData == null)
             Center(child: Text("Detaylar yüklenemedi", style: TextStyle(color: textColor)))
           else
             SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 60, 20, 40),
+              // KRİTİK: Yanlardaki 20 padding'i kaldırdık (Sadece üst ve alt kaldı)
+              padding: EdgeInsets.fromLTRB(0, MediaQuery.of(context).padding.top + 60, 0, 40),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // POSTER & BAŞLIK ALANI
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Poster
-                      Hero(
-                        tag: 'poster_${widget.tmdbId}',
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: CachedNetworkImage(
-                            imageUrl: widget.posterUrl ?? '',
-                            width: 140,
-                            height: 210,
-                            fit: BoxFit.cover,
-                            errorWidget: (_,__,___) => Container(color: Colors.grey, width: 140, height: 210),
+                  // --- 1. POSTER & BAŞLIK (Padding eklendi) ---
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Hero(
+                          tag: 'poster_${widget.tmdbId}',
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: CachedNetworkImage(
+                              imageUrl: widget.posterUrl ?? '',
+                              width: 140, height: 210, fit: BoxFit.cover,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 20),
-                      
-                      // Bilgiler
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _movieData!['title'],
-                              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor, height: 1.2),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                if(_year.isNotEmpty) _buildTag(_year, isDark),
-                                if(_runtime.isNotEmpty) _buildTag(_runtime, isDark),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            // Puan
-                            Row(
-                              children: [
-                                const Icon(Icons.star_rounded, color: Colors.amber, size: 28),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _rating,
-                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: textColor),
-                                ),
-                                Text(
-                                  '/10',
-                                  style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.6), height: 2),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              "Yönetmen:\n$_director",
-                              style: TextStyle(fontSize: 14, color: textColor.withOpacity(0.8), height: 1.4),
-                            ),
-                          ],
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _movieData!['title'],
+                                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: textColor, height: 1.2),
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  if (_year.isNotEmpty) _buildTag(_year, isDark),
+                                  if (_runtime.isNotEmpty) _buildTag(_runtime, isDark),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  const Icon(Icons.star_rounded, color: Colors.amber, size: 28),
+                                  const SizedBox(width: 4),
+                                  Text(_rating, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: textColor)),
+                                ],
+                              ),
+                              GestureDetector(
+  onTap: () {
+    final director = _directorData;
+    if (director != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ActorScreen(
+            actorId: director['id'],
+            actorName: director['name'],
+          ),
+        ),
+      );
+    }
+  },
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        "Yönetmen",
+        style: TextStyle(
+          fontSize: 12, 
+          fontWeight: FontWeight.w500, 
+          color: textColor.withOpacity(0.5),
+          letterSpacing: 0.5,
+        ),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        _director, // Mevcut getter metot isminiz
+        style: TextStyle(
+          fontSize: 15, 
+          fontWeight: FontWeight.w600, 
+          color: textColor,
+          decoration: TextDecoration.underline, // Tıklanabilir olduğunu belli etmek için
+          decorationColor: textColor.withOpacity(0.3),
+        ),
+      ),
+    ],
+  ),
+),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
 
                   const SizedBox(height: 30),
 
-                  // ÖZET
-                  Text("Özet", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
-                  const SizedBox(height: 8),
-                  Text(
-                    _movieData!['overview'] ?? 'Özet bulunamadı.',
-                    style: TextStyle(fontSize: 15, color: textColor.withOpacity(0.8), height: 1.6),
+                  // --- 2. ÖZET (Padding eklendi) ---
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Özet", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+                        const SizedBox(height: 8),
+                        Text(
+                          _movieData!['overview'] ?? 'Özet bulunamadı.',
+                          style: TextStyle(fontSize: 15, color: textColor.withOpacity(0.8), height: 1.6),
+                        ),
+                      ],
+                    ),
                   ),
 
                   const SizedBox(height: 30),
 
-                  // OYUNCULAR
-                  Text("Oyuncular", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+                  // --- 3. OYUNCULAR (Padding eklendi) ---
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text("Oyuncular", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+                  ),
                   const SizedBox(height: 12),
                   SizedBox(
-                    height: 130, // Yüksekliği biraz artırdık ki isimler sığsın
+                    height: 130,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 20), // ListView içi padding
                       itemCount: _cast.length > 10 ? 10 : _cast.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 16),
                       itemBuilder: (context, index) {
-                        final actor = _cast[index];
-                        final photoPath = actor['profile_path'];
-                        return Column(
+  final actor = _cast[index];
+  return GestureDetector(
+    onTap: () {
+      // OYUNCU SAYFASINA GİT
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ActorScreen(
+            actorId: actor['id'],
+            actorName: actor['name'],
+          ),
+        ),
+      );
+    },
+    child: Column(
+      children: [
+        CircleAvatar(
+          radius: 35,
+          backgroundColor: Colors.grey.shade800,
+          backgroundImage: actor['profile_path'] != null 
+              ? NetworkImage('https://image.tmdb.org/t/p/w200${actor['profile_path']}') 
+              : null,
+          child: actor['profile_path'] == null ? const Icon(Icons.person) : null,
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 80,
+          child: Text(
+            actor['name'], 
+            maxLines: 2, 
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.9)),
+          ),
+        ),
+      ],
+    ),
+  );
+},
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // --- 4. GÖNDERİLER BÖLÜMÜ (KENARA SIFIR ARKA PLAN) ---
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('posts')
+                        .where(Filter.or(
+                          Filter('movie.id', isEqualTo: widget.tmdbId.toString()),
+                          Filter('movie.id', isEqualTo: widget.tmdbId),
+                          Filter('movie.tmdbId', isEqualTo: widget.tmdbId),
+                          Filter('movieTmdbId', isEqualTo: widget.tmdbId),
+                        ))
+                        .limit(10)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      final docs = snapshot.data?.docs ?? [];
+                      final hasPosts = docs.isNotEmpty;
+
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 30),
+                        decoration: BoxDecoration(
+                          // POST VARSA: Yanlardaki boşluğu kapatmak için tam tema rengi
+                          color: hasPosts ? bgColor : Colors.transparent,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            CircleAvatar(
-                              radius: 35, // Avatarı biraz büyüttük
-                              backgroundColor: Colors.grey.shade800,
-                              backgroundImage: photoPath != null 
-                                ? NetworkImage('https://image.tmdb.org/t/p/w200$photoPath') 
-                                : null,
-                              child: photoPath == null ? const Icon(Icons.person) : null,
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: 80,
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
                               child: Text(
-                                actor['name'],
-                                maxLines: 2,
-                                textAlign: TextAlign.center,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.9)),
+                                "Bu Film Hakkında Söylenenler", 
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)
                               ),
                             ),
+                            const SizedBox(height: 20),
+
+                            if (snapshot.connectionState == ConnectionState.waiting)
+                              const Center(child: CircularProgressIndicator())
+                            
+                            else if (!hasPosts)
+                              // --- BOŞ DURUM: PAYLAŞIMA YÖNLENDİREN KUTU ---
+                              GestureDetector(
+                                onTap: () => _navigateToCompose(context), // <--- BURASI GÜNCELLENDİ
+                                child: Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                                  padding: const EdgeInsets.all(30),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Icon(Icons.add_comment_rounded, color: textColor.withOpacity(0.4), size: 40),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'Henüz kimse bir şey söylememiş.\nİlk yorumu sen yaparak tartışmayı başlat!',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: textColor.withOpacity(0.7), fontSize: 14, height: 1.5),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                            else
+                              // --- POST LİSTESİ ---
+                              ListView.separated(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                padding: const EdgeInsets.symmetric(horizontal: 20),
+                                itemCount: docs.length,
+                                separatorBuilder: (context, index) => const SizedBox(height: 16),
+                                itemBuilder: (context, index) {
+                                  final d = docs[index];
+                                  final m = d.data() as Map<String, dynamic>;
+                                  return PostTile(
+                                    postId: d.id,
+                                    authorId: (m['authorId'] ?? '').toString(),
+                                    displayName: (m['displayName'] ?? '').toString(),
+                                    handle: (m['handle'] ?? '').toString(),
+                                    photoURL: (m['photoURL'] ?? '').toString(),
+                                    timeLabel: m['createdAt'] == null ? '' : _timeAgo((m['createdAt'] as Timestamp).toDate()),
+                                    text: (m['text'] ?? '').toString(),
+                                    movieTitle: m['movieTitle'] ?? (m['movie'] != null ? m['movie']['title'] : null),
+                                    moviePoster: m['moviePoster'] ?? (m['movie'] != null ? m['movie']['poster'] : null),
+                                    movieTmdbId: _parseTmdbId(m),
+                                    postImage: m['postImage'],
+                                    postImages: List<String>.from(m['photoURLs'] ?? []),
+                                    rating: (m['rating'] as num?)?.toDouble(),
+                                    isSpoiler: m['isSpoiler'] == true,
+                                    tags: List<String>.from(m['tags'] ?? []),
+                                    reviewTitle: m['reviewTitle'] as String?,
+                                    likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+                                    replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+                                    initialIsLiked: false,
+                                    initialIsFollowing: false,
+                                    onToggleLike: (pid, val) => FeedService.instance.toggleLike(postId: pid, like: val),
+                                    onStartChat: (uid) {},
+                                    onFollow: (uid) => FeedService.instance.followUser(uid),
+                                    onReport: (pid) => FeedService.instance.reportPost(pid),
+                                  );
+                                },
+                              ),
                           ],
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

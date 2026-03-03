@@ -93,7 +93,11 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
 
     final title = (m.displayName != null && m.displayName!.isNotEmpty)
         ? m.displayName!
-        : (m.letterboxdUsername != null ? '@${m.letterboxdUsername}' : 'Kullanıcı');
+        : (m.username != null && m.username!.isNotEmpty 
+            ? '@${m.username}' 
+            : (m.letterboxdUsername != null && m.letterboxdUsername!.isNotEmpty 
+                ? '@${m.letterboxdUsername}' 
+                : 'Kullanıcı'));
 
     final hasPhoto = m.photoURL != null && m.photoURL!.isNotEmpty;
     final uid = m.uid;

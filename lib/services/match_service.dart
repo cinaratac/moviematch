@@ -27,6 +27,7 @@ class MatchResult {
   // UI için gerekli profil bilgileri
   final String? displayName;
   final String? letterboxdUsername;
+  final String? username;
   final String? photoURL;
 
   // Helper getters
@@ -41,6 +42,7 @@ class MatchResult {
 
   MatchResult({
     required this.uid,
+    this.username,
     required this.score,
     required this.commonFiveStars,
     required this.commonFavorites,
@@ -184,6 +186,7 @@ class MatchService {
       uid: otherUid,
       score: finalScore,
       commonFiveStars: common5,
+      username: (theirData['username'] ?? '').toString(),
       commonFavorites: commonF,
       commonWatchlist: commonW,
       commonDisliked: commonD,
