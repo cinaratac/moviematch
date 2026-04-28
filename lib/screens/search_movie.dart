@@ -4,7 +4,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 // YENİ: Cloud Functions paketi
 import 'package:cloud_functions/cloud_functions.dart'; 
-
+import '../services/user_profile_service.dart';
 // "import '../secrets.dart';"  <-- BU SATIRI SİLİN, ARTIK GEREK YOK
 import '../models/shelf_target.dart';
 import '../widgets/poster_image.dart'; 
@@ -292,18 +292,15 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                       }, SetOptions(merge: true));
 
                       if (widget.target != null) {
-                        final String field = widget.target!.userArrayField;
-                        await db.collection('users').doc(uid).set({
-                          field: FieldValue.arrayUnion([primaryKey]),
-                          'updatedAt': FieldValue.serverTimestamp(),
-                        }, SetOptions(merge: true));
+                        // 1. Yeni yazdığımız servisi çağır (Hem ekler, hem diğer listeden siler)
+                        final previousList = await UserProfileService.instance.moveMovieToTarget(
+                          uid: uid,
+                          movieId: primaryKey,
+                          target: widget.target!,
+                          posterUrl: posterUrl,
+                        );
                         
-                        if (widget.target == ShelfTarget.fiveStar) {
-                           await db.collection('userTasteProfiles').doc(uid).set({'fiveStars': FieldValue.arrayUnion([primaryKey])}, SetOptions(merge: true));
-                        } else if (widget.target == ShelfTarget.disliked) {
-                           await db.collection('userTasteProfiles').doc(uid).set({'lowRatings': FieldValue.arrayUnion([primaryKey])}, SetOptions(merge: true));
-                        }
-                        
+                        // 2. Anlık UI tepkisi için (Local Cache güncellemesi)
                         final Map<String, String> newLocalItem = {'title': title, 'poster': posterUrl, 'posterUrl': posterUrl};
                         switch (widget.target!) {
                           case ShelfTarget.fiveStar: UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)..add(newLocalItem); break;
@@ -311,12 +308,38 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                           case ShelfTarget.watchlist: UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)..add(newLocalItem); break;
                           case ShelfTarget.disliked: UserShelfCache.disliked = List.from(UserShelfCache.disliked)..add(newLocalItem); break;
                         }
-                      }
 
-                      if (mounted) {
-                        Navigator.of(context).pop(); 
-                        Navigator.of(context).pop(true);
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title listene eklendi (ID: $primaryKey)'), backgroundColor: theme.colorScheme.primary));
+                        // 3. Ekranı kapat ve dinamik uyarıyı göster
+                        if (mounted) {
+                          Navigator.of(context).pop(); 
+                          Navigator.of(context).pop(true);
+
+                          String targetName = '';
+                          switch (widget.target!) {
+                            case ShelfTarget.fiveStar: targetName = 'Sevdiklerim'; break;
+                            case ShelfTarget.disliked: targetName = 'Sevmedim'; break;
+                            case ShelfTarget.favorites: targetName = 'Favoriler'; break;
+                            case ShelfTarget.watchlist: targetName = 'İzlenecekler'; break;
+                          }
+
+                          String message = previousList != null 
+                              ? "'$title', $previousList listesinden çıkarılıp $targetName listesine eklendi."
+                              : "'$title', $targetName listesine eklendi.";
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(message), 
+                              backgroundColor: Colors.green.shade700,
+                              behavior: SnackBarBehavior.floating,
+                            )
+                          );
+                        }
+                      } else {
+                        // Target yoksa (sadece seçim modu için falan gelmişse)
+                        if (mounted) {
+                          Navigator.of(context).pop(); 
+                          Navigator.of(context).pop(true);
+                        }
                       }
                     } catch (e) {
                  

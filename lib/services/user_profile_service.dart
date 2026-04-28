@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/shelf_target.dart';
 
 /// Stores a user's film taste signals that we compute from Letterboxd and in‑app actions.
 /// Keep this model intentionally permissive so we can evolve it without schema migrations.
@@ -680,6 +681,99 @@ class UserProfileService {
       'createdAt': FieldValue.serverTimestamp(),
       'status': 'pending',        // Admin paneli için durum
     });
+  }
+  /// Filmi belirtilen yeni hedefe (target) ekler ve eğer başka bir listede varsa
+  /// oradan siler. UI'da uyarı göstermek için eski listenin adını döndürür.
+  Future<String?> moveMovieToTarget({
+    required String uid,
+    required String movieId,
+    required ShelfTarget target, // movie_action_helper.dart'taki enum
+    String? posterUrl,
+  }) async {
+    final key = movieId.trim().toLowerCase();
+    if (key.isEmpty) return null;
+
+    final userRef = _fs.collection('users').doc(uid);
+    
+    // 1. Kullanıcı verisini Oku (Çoğunlukla Cache'den anında gelir, maliyeti sıfıra yakındır)
+    final snap = await userRef.get(const GetOptions(source: Source.serverAndCache));
+    if (!snap.exists) return null;
+    final data = snap.data() ?? {};
+
+    // Mevcut listeleri çek
+    final fiveStar = List<String>.from(data['fiveStarKeys'] ?? []);
+    final disliked = List<String>.from(data['dislikedKeys'] ?? []);
+    final favorites = List<String>.from(data['favoritesKeys'] ?? []);
+    final watchlist = List<String>.from(data['watchlistKeys'] ?? []);
+
+    String? previousListName;
+    final batch = _fs.batch();
+
+    // 2. Film hangi eski listedeyse tespit et ve o listeden Sil (arrayRemove)
+    if (target != ShelfTarget.fiveStar && fiveStar.contains(key)) {
+      previousListName = 'Sevdiklerim';
+      batch.update(userRef, {'fiveStarKeys': FieldValue.arrayRemove([key])});
+    }
+    if (target != ShelfTarget.disliked && disliked.contains(key)) {
+      previousListName = 'Beğenmediklerim';
+      batch.update(userRef, {'dislikedKeys': FieldValue.arrayRemove([key])});
+    }
+    if (target != ShelfTarget.favorites && favorites.contains(key)) {
+      previousListName = 'Favorilerim';
+      batch.update(userRef, {'favoritesKeys': FieldValue.arrayRemove([key])});
+    }
+    if (target != ShelfTarget.watchlist && watchlist.contains(key)) {
+      previousListName = 'İzleme Listesi';
+      batch.update(userRef, {'watchlistKeys': FieldValue.arrayRemove([key])});
+    }
+
+    // 3. Filmi YENİ listeye Ekle (arrayUnion)
+    String targetField = '';
+    String targetName = '';
+    switch (target) {
+      case ShelfTarget.fiveStar: 
+        targetField = 'fiveStarKeys'; 
+        targetName = 'Sevdiklerim';
+        break;
+      case ShelfTarget.disliked: 
+        targetField = 'dislikedKeys'; 
+        targetName = 'Beğenmediklerim';
+        break;
+      case ShelfTarget.favorites: 
+        targetField = 'favoritesKeys'; 
+        targetName = 'Favorilerim';
+        break;
+      case ShelfTarget.watchlist: 
+        targetField = 'watchlistKeys'; 
+        targetName = 'İzleme Listesi';
+        break;
+    }
+
+    batch.update(userRef, {
+      targetField: FieldValue.arrayUnion([key]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    // 4. Tutarlılık için userTasteProfiles koleksiyonunu da güncelle (Eğer etkileniyorsa)
+    final tasteRef = _fs.collection('userTasteProfiles').doc(uid);
+    if (previousListName == 'Sevdiklerim') {
+      batch.update(tasteRef, {'loved': FieldValue.arrayRemove([key])});
+    } else if (previousListName == 'Beğenmediklerim') {
+      batch.update(tasteRef, {'disliked': FieldValue.arrayRemove([key])});
+    }
+
+    if (target == ShelfTarget.fiveStar) {
+      batch.update(tasteRef, {'loved': FieldValue.arrayUnion([key])});
+      if (posterUrl != null) batch.update(tasteRef, {'posters.$key': posterUrl});
+    } else if (target == ShelfTarget.disliked) {
+      batch.update(tasteRef, {'disliked': FieldValue.arrayUnion([key])});
+      if (posterUrl != null) batch.update(tasteRef, {'posters.$key': posterUrl});
+    }
+
+    // Tüm işlemleri tek seferde (1 Write) veritabanına yaz
+    await batch.commit();
+
+    return previousListName; 
   }
 
 }

@@ -68,6 +68,23 @@ class _RegisterPageState extends State<RegisterPage> {
         );
         return;
       }
+      final existingUser = await FirebaseFirestore.instance
+          .collection('users')
+          .where('displayName_lc', isEqualTo: uname.toLowerCase())
+          .get();
+
+      if (existingUser.docs.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Bu kullanıcı adı zaten alınmış. Lütfen başka bir tane seçin.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() => _loading = false);
+        return;
+      }
 
       // 1) Firebase Auth ile kullanıcı oluşturma
       await FirebaseAuth.instance.createUserWithEmailAndPassword(

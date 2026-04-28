@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // Önbellek temizliği için
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -304,8 +305,9 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!confirm) return;
 
     try {
-      // 1. Kullanıcının hangi yöntemle girdiğini bul (Google mı, Şifre mi?)
+      // 1. Kullanıcının hangi yöntemle girdiğini bul (Google, Apple, Şifre)
       bool isGoogleUser = user.providerData.any((info) => info.providerId == 'google.com');
+      bool isAppleUser = user.providerData.any((info) => info.providerId == 'apple.com'); // YENİ EKLENDİ
 
       if (isGoogleUser) {
         // --- GOOGLE İLE RE-AUTHENTICATE ---
@@ -321,6 +323,23 @@ class _SettingsPageState extends State<SettingsPage> {
 
         await user.reauthenticateWithCredential(credential);
         
+      } else if (isAppleUser) {
+        // --- APPLE İLE RE-AUTHENTICATE (YENİ EKLENDİ) ---
+        final AuthorizationCredentialAppleID appleCredential = await SignInWithApple.getAppleIDCredential(
+          scopes: [
+            AppleIDAuthorizationScopes.email,
+            AppleIDAuthorizationScopes.fullName,
+          ],
+        );
+
+        final OAuthProvider oAuthProvider = OAuthProvider('apple.com');
+        final AuthCredential credential = oAuthProvider.credential(
+          idToken: appleCredential.identityToken,
+          accessToken: appleCredential.authorizationCode,
+        );
+
+        await user.reauthenticateWithCredential(credential);
+
       } else {
         // --- E-POSTA/ŞİFRE İLE RE-AUTHENTICATE ---
         String? password = await _showPasswordDialog();
@@ -337,12 +356,14 @@ class _SettingsPageState extends State<SettingsPage> {
       // 2. Önce Firestore Verilerini Temizle
       await FirebaseFirestore.instance.collection('users').doc(user.uid).delete();
       
-      // --- DÜZELTME BAŞLANGICI ---
+      // Ekstra Not: Eğer 'userTasteProfiles' veya 'marketing_emails' tablolarında 
+      // bu kullanıcıya ait belge varsa onları da burada silmeniz veri gizliliği için çok iyi olur.
+      // Örnek: await FirebaseFirestore.instance.collection('userTasteProfiles').doc(user.uid).delete();
+      
       // 3. Cihazdaki Önbelleği ve Verileri Temizle
       await DefaultCacheManager().emptyCache();
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
-      // --- DÜZELTME BİTİŞİ ---
 
       // 4. Auth Hesabını Sil
       await user.delete();
@@ -358,6 +379,14 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
 
+    } on SignInWithAppleAuthorizationException catch (e) {
+      // YENİ EKLENDİ: Kullanıcı FaceID/TouchID ekranında işlemi iptal ederse hata popup'ı çıkmasın
+      if (e.code == AuthorizationErrorCode.canceled) {
+        return; 
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Apple Hatası: $e"), backgroundColor: Colors.red));
+      }
     } on FirebaseAuthException catch (e) {
       if (mounted) {
         String errorMsg = "Bir hata oluştu.";

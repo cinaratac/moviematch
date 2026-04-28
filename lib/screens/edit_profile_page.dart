@@ -288,16 +288,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
   try {
     String? uploadedPhotoUrl;
     if (_selectedImage != null) {
+      // YENİ EKLENEN: Benzersiz bir isim oluşturmak için zaman damgası alıyoruz
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      
       final storageRef = FirebaseStorage.instance
           .ref()
           .child('user_avatars')
-          .child('${user.uid}.jpg');
+          .child('${user.uid}_$timestamp.jpg'); // İsim artık her seferinde benzersiz!
 
       await storageRef.putFile(_selectedImage!);
       uploadedPhotoUrl = await storageRef.getDownloadURL();
       await user.updatePhotoURL(uploadedPhotoUrl);
     }
-
+    
     // Değişkenleri tanımlıyoruz
     final username = _usernameCtrl.text.trim();
     final bio = _bioCtrl.text.trim();
@@ -315,6 +318,25 @@ class _EditProfilePageState extends State<EditProfilePage> {
        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Biyografi uygunsuz.')));
        setState(() => _saving = false);
        return;
+    }
+    if (_origUsername != null && username.toLowerCase() != _origUsername!.toLowerCase()) {
+      final existingUser = await FirebaseFirestore.instance
+          .collection('users')
+          .where('displayName_lc', isEqualTo: username.toLowerCase())
+          .get();
+
+      if (existingUser.docs.isNotEmpty) {
+         if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(
+               content: Text('Bu kullanıcı adı zaten başka biri tarafından kullanılıyor.'),
+               backgroundColor: Colors.red
+             )
+           );
+         }
+         setState(() => _saving = false);
+         return;
+      }
     }
 
     // Auth Profilini Güncelle

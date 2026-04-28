@@ -16,6 +16,8 @@ import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:fluttergirdi/services/user_profile_service.dart';
+
 class MovieDetailScreen extends StatefulWidget {
   final int tmdbId;
   final String? title;
@@ -162,53 +164,46 @@ Future<void> _fetchDetails() async {
   return await CatalogService().upsertFromTmdb(_movieData!); // ID'yi döndür
 }
 
-// 2. Metot: Listeye ekleme mantığını ve field isimlerini düzeltin
 Future<void> _addToStandardList(ShelfTarget target) async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null || _movieData == null) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _movieData == null) return;
 
-  // Önce kataloğa kaydet ve sistemdeki gerçek ID'yi (primaryKey) al
-  final String? primaryKey = await _registerMovieToCatalog(); 
-  if (primaryKey == null) return;
+    // Önce kataloğa kaydet ve sistemdeki gerçek ID'yi (primaryKey) al
+    final String? primaryKey = await _registerMovieToCatalog(); 
+    if (primaryKey == null) return;
 
-  final db = FirebaseFirestore.instance;
-  final batch = db.batch();
-
-  // Koleksiyon field isimlerini belirle
-  String field = '';
-  switch (target) {
-    case ShelfTarget.fiveStar: field = 'fiveStarKeys'; break;
-    case ShelfTarget.disliked: field = 'dislikedKeys'; break;
-    case ShelfTarget.favorites: field = 'favoritesKeys'; break;
-    case ShelfTarget.watchlist: field = 'watchlistKeys'; break;
-  }
-
-  final userRef = db.collection('users').doc(user.uid);
-  batch.set(userRef, {
-    field: FieldValue.arrayUnion([primaryKey]),
-    'updatedAt': FieldValue.serverTimestamp(),
-  }, SetOptions(merge: true));
-
-  // Taste Profile güncellemeleri (Field isimleri shelf_target.dart ile aynı olmalı)
-  final tasteRef = db.collection('userTasteProfiles').doc(user.uid);
-  if (target == ShelfTarget.fiveStar) {
-    batch.set(tasteRef, {
-      'fiveStars': FieldValue.arrayUnion([primaryKey]), // 'loved' yerine 'fiveStars'
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  } else if (target == ShelfTarget.disliked) {
-    batch.set(tasteRef, {
-      'lowRatings': FieldValue.arrayUnion([primaryKey]), // 'disliked' yerine 'lowRatings'
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  }
-
-    await batch.commit();
+    // 1. Yeni yazdığımız servisi çağır (Hem ekler, hem diğer listeden siler)
+    final previousList = await UserProfileService.instance.moveMovieToTarget(
+      uid: user.uid,
+      movieId: primaryKey,
+      target: target,
+      posterUrl: widget.posterUrl ?? (_movieData!['poster_path'] != null ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}' : null),
+    );
 
     if (mounted) {
       Navigator.pop(context); // Sheet'i kapat
+
+      // 2. Hangi listeye eklendiğinin Türkçe adını belirle
+      String targetName = '';
+      switch (target) {
+        case ShelfTarget.fiveStar: targetName = 'Sevdiklerim'; break;
+        case ShelfTarget.disliked: targetName = 'Sevmedim'; break;
+        case ShelfTarget.favorites: targetName = 'Favoriler'; break;
+        case ShelfTarget.watchlist: targetName = 'İzlenecekler'; break;
+      }
+
+      // 3. Ekranda gösterilecek dinamik mesajı oluştur
+      String message = previousList != null 
+          ? "'${_movieData!['title']}', $previousList listesinden çıkarılıp $targetName listesine eklendi."
+          : "'${_movieData!['title']}', $targetName listesine eklendi.";
+
+      // 4. Snackbar'ı göster
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${_movieData!['title']} listeye eklendi!'), behavior: SnackBarBehavior.floating),
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+        ),
       );
     }
   }

@@ -110,6 +110,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   // Google ile Giriş
+  
   Future<void> _signInWithGoogle() async {
     setState(() => _isGoogleLoading = true);
 
@@ -120,44 +121,21 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      // Firebase'e giriş yap
-      final UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithCredential(credential);
-      final User? user = userCredential.user;
+      // SADECE Firebase'e giriş yapıyoruz.
+      // Firestore kontrolü ve Navigator.push kısımları SİLİNDİ.
+      // Çünkü main.dart içindeki AuthGate bu girişi algılayıp,
+      // eksik bilgi varsa GoogleRegisterPage'e, tamsa Ana sayfaya kendi yönlendirecek.
+      await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (user != null) {
-        // Kullanıcı verisini kontrol et
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-
-        if (mounted) {
-          if (userDoc.exists && userDoc.data()?['termsAccepted'] == true) {
-            // Kayıtlı kullanıcı -> AuthGate zaten HomeShell'e yönlendirir.
-          } else {
-            // Yeni kullanıcı veya kaydı yarım kalan -> Register sayfasına git
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => GoogleRegisterPage(user: user),
-              ),
-            );
-          }
-        }
-      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     } finally {
       if (mounted) setState(() => _isGoogleLoading = false);
@@ -165,6 +143,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   // --- YENİ EKLENEN: Apple ile Giriş ---
+  // Apple ile Giriş
   Future<void> _signInWithApple() async {
     setState(() => _isAppleLoading = true);
 
@@ -184,42 +163,17 @@ class _LoginPageState extends State<LoginPage> {
         accessToken: appleCredential.authorizationCode,
       );
 
-      // Firebase'e giriş yap
-      final UserCredential userCredential = await FirebaseAuth.instance
-          .signInWithCredential(credential);
-      final User? user = userCredential.user;
+      // SADECE Firebase'e giriş yapıyoruz. 
+      // AuthGate yönlendirmeyi otomatik yapacak.
+      await FirebaseAuth.instance.signInWithCredential(credential);
 
-      if (user != null) {
-        // Kullanıcı verisini kontrol et
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-
-        if (mounted) {
-          if (userDoc.exists && userDoc.data()?['termsAccepted'] == true) {
-            // Kayıtlı kullanıcı -> AuthGate zaten HomeShell'e yönlendirir.
-          } else {
-            // Yeni kullanıcı veya kaydı yarım kalan -> Register sayfasına git
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => GoogleRegisterPage(user: user),
-              ),
-            );
-          }
-        }
-      }
     } catch (e) {
       if (mounted) {
-        // Kullanıcı FaceID onaylamaktan vazgeçerse hata mesajı göstermemek için
-        if (e is SignInWithAppleAuthorizationException &&
-            e.code == AuthorizationErrorCode.canceled) {
+        // Kullanıcı FaceID/TouchID onaylamaktan vazgeçerse hata mesajı göstermemek için
+        if (e is SignInWithAppleAuthorizationException && e.code == AuthorizationErrorCode.canceled) {
           return;
         }
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     } finally {
       if (mounted) setState(() => _isAppleLoading = false);
@@ -237,7 +191,7 @@ class _LoginPageState extends State<LoginPage> {
     final isAnyLoading = _isLoading || _isGoogleLoading || _isAppleLoading;
 
     return Scaffold(
-      resizeToAvoidBottomInset: false,
+      resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
           const SafeArea(bottom: false, child: OfflineBanner()),

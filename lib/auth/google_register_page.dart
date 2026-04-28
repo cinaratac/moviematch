@@ -8,7 +8,7 @@ import 'package:fluttergirdi/auth/login_page.dart';
 import '../services/text_filter_service.dart';
 
 class GoogleRegisterPage extends StatefulWidget {
-  final User user; // Google'dan gelen Auth kullanıcı nesnesi
+  final User user; // Firebase Auth'tan gelen kullanıcı nesnesi
 
   const GoogleRegisterPage({super.key, required this.user});
 
@@ -24,11 +24,27 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
   bool _agreedToTerms = false;
   bool _allowMail = false;
 
+  // --- YENİ: Sağlayıcıyı (Google, Apple veya E-posta) Dinamik Tespit Etme ---
+  String get _providerName {
+    if (widget.user.providerData.any((p) => p.providerId == 'apple.com')) return 'Apple';
+    if (widget.user.providerData.any((p) => p.providerId == 'google.com')) return 'Google';
+    return 'E-posta'; // İnterneti kopup kaydı yarım kalanlar için
+  }
+
+  String get _providerId {
+    if (widget.user.providerData.any((p) => p.providerId == 'apple.com')) return 'apple';
+    if (widget.user.providerData.any((p) => p.providerId == 'google.com')) return 'google';
+    return 'email'; 
+  }
+
   @override
   Widget build(BuildContext context) {
     final primaryGreen = const Color(0xFF2E7D32);
     final bgGradientStart = const Color(0xFFE8F5E9);
     final bgGradientEnd = Colors.white;
+
+    // --- YENİ: E-posta null gelme ihtimaline karşı (Apple "E-postamı Gizle" özelliği için) ---
+    final displayEmail = widget.user.email ?? "Gizli E-posta";
 
     return Scaffold(
       body: Container(
@@ -69,7 +85,7 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Google Avatarı veya İkon
+                    // Google/Apple Avatarı veya İkon
                     Center(
                       child: CircleAvatar(
                         radius: 50,
@@ -94,8 +110,10 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                       ),
                     ),
                     const SizedBox(height: 8),
+
+                    // --- YENİ: Dinamik Karşılama Metni ---
                     Text(
-                      'Google hesabınız (${widget.user.email}) ile bağlandınız.\nLütfen bir kullanıcı adı seçin ve sözleşmeyi onaylayın.',
+                      '$_providerName hesabınız ($displayEmail) ile bağlandınız.\nLütfen bir kullanıcı adı seçin ve sözleşmeyi onaylayın.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.grey[600], fontSize: 14),
                     ),
@@ -243,6 +261,25 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
         return;
       }
 
+      // Kullanıcı Adı Benzersizlik Kontrolü
+      final existingUser = await FirebaseFirestore.instance
+          .collection('users')
+          .where('displayName_lc', isEqualTo: uname.toLowerCase())
+          .get();
+
+      if (existingUser.docs.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Bu kullanıcı adı zaten alınmış. Lütfen başka bir tane seçin.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() => _isLoading = false);
+        return;
+      }
+
       // Kullanıcı adını Auth profiline de kaydet
       await widget.user.updateDisplayName(uname);
 
@@ -258,13 +295,13 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
         'displayName': uname,
         'displayName_lc': uname.toLowerCase(),
         'email': email,
-        'photoUrl': widget.user.photoURL, // Google fotosunu alalım
+        'photoUrl': widget.user.photoURL,
         'termsAccepted': true,
         'marketingConsent': _allowMail,
         'termsAcceptedAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
-        'authProvider': 'google',
+        'authProvider': _providerId, // YENİ: 'google' yerine dinamik _providerId kullanılıyor
       }, SetOptions(merge: true));
 
       // Mail izni varsa
@@ -274,7 +311,7 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
           'email': email,
           'displayName': uname,
           'consentedAt': FieldValue.serverTimestamp(),
-          'source': 'google_register',
+          'source': '${_providerId}_register', // YENİ: Kaynak da dinamik oldu
         });
       }
 
