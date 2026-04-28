@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io'; 
 import 'package:image_picker/image_picker.dart'; 
 import 'package:firebase_storage/firebase_storage.dart'; 
+import 'package:cloud_functions/cloud_functions.dart'; // TMDB araması için eklendi
+import 'package:cached_network_image/cached_network_image.dart'; // TMDB resimleri için eklendi
 import '../services/text_filter_service.dart';
 
 class EditProfilePage extends StatefulWidget {
@@ -22,12 +24,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
   final _usernameCtrl = TextEditingController();
   final _letterboxdCtrl = TextEditingController();
   final _bioCtrl = TextEditingController();
-  final _favDirectorCtrl = TextEditingController();
-  final _favActorCtrl = TextEditingController();
   final _ageCtrl = TextEditingController();
 
-  final List<String> _favDirectors = [];
-  final List<String> _favActors = [];
+  // Listeleri dynamic yapıyoruz ki içine hem String (eski) hem de Map (yeni TMDB verisi) alabilsin
+  final List<dynamic> _favDirectors = [];
+  final List<dynamic> _favActors = [];
   final Set<String> _selectedGenres = {}; // Seçilen türler
   
   // Tür Listesinin Açık/Kapalı Durumu
@@ -70,7 +71,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
         });
       }
     } catch (e) {
-  
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Resim seçilemedi.')),
       );
@@ -95,19 +95,17 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _favDirectors.clear();
     final dArr = data['favDirectors'];
     if (dArr is List) {
-      _favDirectors.addAll(dArr.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList());
+      _favDirectors.addAll(dArr);
     }
-    _favDirectorCtrl.text = '';
 
     // Oyuncular
     _favActors.clear();
     final aArr = data['favActors'];
     if (aArr is List) {
-      _favActors.addAll(aArr.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty).toList());
+      _favActors.addAll(aArr);
     }
-    _favActorCtrl.text = '';
 
-    // Türler (Set'e ekliyoruz ki açıldığında seçili gözüksün)
+    // Türler
     _selectedGenres.clear();
     final gArr = data['favGenres'];
     if (gArr is List) {
@@ -222,50 +220,53 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
-  Future<void> _addDirector() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    final raw = _favDirectorCtrl.text.trim();
-    if (raw.isEmpty) return;
-    final exists = _favDirectors.any(
-      (e) => e.toLowerCase() == raw.toLowerCase(),
+  void _removeDirector(dynamic item) {
+    setState(() {
+      _favDirectors.remove(item);
+    });
+  }
+
+  void _removeActor(dynamic item) {
+    setState(() {
+      _favActors.remove(item);
+    });
+  }
+
+  // Listeden öğenin ismini çeken yardımcı fonksiyon
+  String _getItemName(dynamic item) {
+    if (item is Map) return item['name'] ?? '';
+    return item.toString();
+  }
+
+  // TMDB Arama Menüsünü Açan Fonksiyon
+  // TMDB Arama Menüsünü Açan Fonksiyon
+  void _showTMDBPersonSearch(String title, bool isActor) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return _TMDBPersonSearchSheet(
+          title: title,
+          isActorSearch: isActor, // <-- YENİ: Arama ekranına ne aradığımızı söylüyoruz
+          onPersonSelected: (personData) {
+            setState(() {
+              if (isActor) {
+                if (!_favActors.any((item) => (item is Map ? item['id'] : 0) == personData['id'])) {
+                  _favActors.add(personData);
+                }
+              } else {
+                if (!_favDirectors.any((item) => (item is Map ? item['id'] : 0) == personData['id'])) {
+                  _favDirectors.add(personData);
+                }
+              }
+            });
+            Navigator.pop(context); // Seçimden sonra pencereyi kapat
+          },
+        );
+      },
     );
-    if (exists) {
-      _favDirectorCtrl.clear();
-      return;
-    }
-    setState(() {
-      _favDirectors.add(raw);
-      _favDirectorCtrl.clear();
-    });
-  }
-
-  void _removeDirector(String name) {
-    setState(() {
-      _favDirectors.removeWhere((e) => e == name);
-    });
-  }
-
-  Future<void> _addActor() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    final raw = _favActorCtrl.text.trim();
-    if (raw.isEmpty) return;
-    final exists = _favActors.any((e) => e.toLowerCase() == raw.toLowerCase());
-    if (exists) {
-      _favActorCtrl.clear();
-      return;
-    }
-    setState(() {
-      _favActors.add(raw);
-      _favActorCtrl.clear();
-    });
-  }
-
-  void _removeActor(String name) {
-    setState(() {
-      _favActors.removeWhere((e) => e == name);
-    });
   }
 
   @override
@@ -273,165 +274,143 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _usernameCtrl.dispose();
     _bioCtrl.dispose();
     _letterboxdCtrl.dispose();
-    _favDirectorCtrl.dispose();
-    _favActorCtrl.dispose();
     _ageCtrl.dispose();
     super.dispose();
   }
 
- Future<void> _save() async {
-  if (!_formKey.currentState!.validate()) return;
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return;
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-  setState(() => _saving = true);
-  try {
-    String? uploadedPhotoUrl;
-    if (_selectedImage != null) {
-      // YENİ EKLENEN: Benzersiz bir isim oluşturmak için zaman damgası alıyoruz
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
+    setState(() => _saving = true);
+    try {
+      String? uploadedPhotoUrl;
+      if (_selectedImage != null) {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('user_avatars')
+            .child('${user.uid}_$timestamp.jpg');
+
+        await storageRef.putFile(_selectedImage!);
+        uploadedPhotoUrl = await storageRef.getDownloadURL();
+        await user.updatePhotoURL(uploadedPhotoUrl);
+      }
       
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('user_avatars')
-          .child('${user.uid}_$timestamp.jpg'); // İsim artık her seferinde benzersiz!
+      final username = _usernameCtrl.text.trim();
+      final bio = _bioCtrl.text.trim();
+      final ageStr = _ageCtrl.text.trim();
+      final age = int.tryParse(ageStr);
+      final currLb = _letterboxdCtrl.text.trim().toLowerCase();
 
-      await storageRef.putFile(_selectedImage!);
-      uploadedPhotoUrl = await storageRef.getDownloadURL();
-      await user.updatePhotoURL(uploadedPhotoUrl);
-    }
-    
-    // Değişkenleri tanımlıyoruz
-    final username = _usernameCtrl.text.trim();
-    final bio = _bioCtrl.text.trim();
-    final ageStr = _ageCtrl.text.trim();
-    final age = int.tryParse(ageStr);
-    final currLb = _letterboxdCtrl.text.trim().toLowerCase(); // currLb burada tanımlı
-
-    // Küfür Filtresi Kontrolleri (mounted check ekledik)
-    if (TextFilterService.hasProfanity(username)) {
-       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kullanıcı adı uygunsuz.')));
-       setState(() => _saving = false);
-       return;
-    }
-    if (TextFilterService.hasProfanity(bio)) {
-       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Biyografi uygunsuz.')));
-       setState(() => _saving = false);
-       return;
-    }
-    if (_origUsername != null && username.toLowerCase() != _origUsername!.toLowerCase()) {
-      final existingUser = await FirebaseFirestore.instance
-          .collection('users')
-          .where('displayName_lc', isEqualTo: username.toLowerCase())
-          .get();
-
-      if (existingUser.docs.isNotEmpty) {
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-             const SnackBar(
-               content: Text('Bu kullanıcı adı zaten başka biri tarafından kullanılıyor.'),
-               backgroundColor: Colors.red
-             )
-           );
-         }
+      if (TextFilterService.hasProfanity(username)) {
+         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kullanıcı adı uygunsuz.')));
          setState(() => _saving = false);
          return;
       }
-    }
-
-    // Auth Profilini Güncelle
-    if (username.isNotEmpty) {
-      await user.updateDisplayName(username);
-    }
-
-    Map<String, dynamic> payload = {};
-    if (uploadedPhotoUrl != null) payload['photoURL'] = uploadedPhotoUrl;
-
-    // Tüm isim alanlarını eşitliyoruz
-    if (username.isNotEmpty) {
-      payload['username'] = username;
-      payload['username_lc'] = username.toLowerCase();
-      payload['displayName'] = username;
-      payload['displayName_lc'] = username.toLowerCase();
-      payload['handle'] = username;
-    }
-
-    payload['bio'] = bio.isNotEmpty ? bio : FieldValue.delete();
-    payload['age'] = (age != null && age > 0) ? age : FieldValue.delete();
-    payload['favDirectors'] = _favDirectors;
-    payload['favActors'] = _favActors;
-    payload['favGenres'] = _selectedGenres.toList();
-
-    // Letterboxd Değişim Kontrolü
-    bool lbChanged = _origLb != currLb;
-    if (lbChanged) {
-      payload['letterboxdUsername'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
-      payload['letterboxdUsername_lc'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
-      payload['lbUsername'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
-      // Veri değiştiği için eski zevk profilini temizle
-      await UserProfileService.instance.clearTasteProfile(user.uid);
-    }
-
-    payload['updatedAt'] = FieldValue.serverTimestamp();
-
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set(payload, SetOptions(merge: true));
-
-    // SharedPreferences Güncelleme
-    final sp = await SharedPreferences.getInstance();
-    if (currLb.isNotEmpty) {
-      await sp.setString('lb_username_${user.uid}', currLb);
-    } else {
-      await sp.remove('lb_username_${user.uid}');
-    }
-
-    // UI Bildirimleri ve Letterboxd Sync
-    if (lbChanged && currLb.isNotEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil ve Letterboxd güncelleniyor...'), backgroundColor: Color(0xFF2E7D32)));
+      if (TextFilterService.hasProfanity(bio)) {
+         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Biyografi uygunsuz.')));
+         setState(() => _saving = false);
+         return;
       }
-      try {
-        await LetterboxdService.fullSyncOnboarding(uid: user.uid, lbUsername: currLb);
-      } catch (_) {}
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellendi.'), backgroundColor: Color(0xFF2E7D32)));
+      if (_origUsername != null && username.toLowerCase() != _origUsername!.toLowerCase()) {
+        final existingUser = await FirebaseFirestore.instance
+            .collection('users')
+            .where('displayName_lc', isEqualTo: username.toLowerCase())
+            .get();
+
+        if (existingUser.docs.isNotEmpty) {
+           if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+               const SnackBar(
+                 content: Text('Bu kullanıcı adı zaten başka biri tarafından kullanılıyor.'),
+                 backgroundColor: Colors.red
+               )
+             );
+           }
+           setState(() => _saving = false);
+           return;
+        }
       }
+
+      if (username.isNotEmpty) {
+        await user.updateDisplayName(username);
+      }
+
+      Map<String, dynamic> payload = {};
+      if (uploadedPhotoUrl != null) payload['photoURL'] = uploadedPhotoUrl;
+
+      if (username.isNotEmpty) {
+        payload['username'] = username;
+        payload['username_lc'] = username.toLowerCase();
+        payload['displayName'] = username;
+        payload['displayName_lc'] = username.toLowerCase();
+        payload['handle'] = username;
+      }
+
+      payload['bio'] = bio.isNotEmpty ? bio : FieldValue.delete();
+      payload['age'] = (age != null && age > 0) ? age : FieldValue.delete();
+      payload['favDirectors'] = _favDirectors;
+      payload['favActors'] = _favActors;
+      payload['favGenres'] = _selectedGenres.toList();
+
+      bool lbChanged = _origLb != currLb;
+      if (lbChanged) {
+        payload['letterboxdUsername'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
+        payload['letterboxdUsername_lc'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
+        payload['lbUsername'] = currLb.isNotEmpty ? currLb : FieldValue.delete();
+        await UserProfileService.instance.clearTasteProfile(user.uid);
+      }
+
+      payload['updatedAt'] = FieldValue.serverTimestamp();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set(payload, SetOptions(merge: true));
+
+      final sp = await SharedPreferences.getInstance();
+      if (currLb.isNotEmpty) {
+        await sp.setString('lb_username_${user.uid}', currLb);
+      } else {
+        await sp.remove('lb_username_${user.uid}');
+      }
+
+      if (lbChanged && currLb.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil ve Letterboxd güncelleniyor...'), backgroundColor: Color(0xFF2E7D32)));
+        }
+        try {
+          await LetterboxdService.fullSyncOnboarding(uid: user.uid, lbUsername: currLb);
+        } catch (_) {}
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil güncellendi.'), backgroundColor: Color(0xFF2E7D32)));
+        }
+      }
+
+      _origUsername = username.isNotEmpty ? username : null;
+      _origBio = bio.isNotEmpty ? bio : null;
+      _origAge = age;
+      _origLb = currLb.isNotEmpty ? currLb : null;
+
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
-
-    // Orijinal değerleri güncelle (Hata veren kısımlar burasıydı)
-    _origUsername = username.isNotEmpty ? username : null;
-    _origBio = bio.isNotEmpty ? bio : null;
-    _origAge = age;
-    _origLb = currLb.isNotEmpty ? currLb : null;
-
-    if (mounted) Navigator.of(context).pop(true);
-  } catch (e) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
-  } finally {
-    if (mounted) setState(() => _saving = false);
   }
-}
 
   @override
   Widget build(BuildContext context) {
-    // --- TEMA VE RENK AYARLARI ---
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // Renkler
     final primaryGreen = const Color(0xFF2E7D32);
-    
-    // Gradient Arka Planı
     final bgGradientStart = isDark ? const Color(0xFF0D2410) : const Color(0xFFE8F5E9);
     final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
-
-    // Metin ve İkon Renkleri
     final sectionTitleColor = isDark ? const Color(0xFF81C784) : primaryGreen;
     final buttonTextColor = Colors.white;
-
-    // Kutucuk Renkleri (Koyu/Açık Mod)
     final containerColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final borderColor = isDark ? Colors.grey[800]! : Colors.grey.withOpacity(0.3);
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -651,7 +630,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
                 const SizedBox(height: 32),
 
-                // --- SEVDİĞİN TÜRLER (AÇILIR / KAPANIR) ---
+                // --- SEVDİĞİN TÜRLER ---
                 _SectionTitle(title: 'Sevdiğin Türler', color: sectionTitleColor),
                 const SizedBox(height: 12),
                 Container(
@@ -670,7 +649,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Başlık ve Açma/Kapama Butonu
                       InkWell(
                         onTap: () {
                           setState(() {
@@ -706,8 +684,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           ),
                         ),
                       ),
-
-                      // Liste (Sadece açıkken görünür)
                       if (_isGenresExpanded)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -755,42 +731,42 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
                 const SizedBox(height: 32),
                 
-                // --- FAVORİ YÖNETMENLER ---
+                // --- FAVORİ YÖNETMENLER (GÜNCELLENDİ) ---
                 _SectionTitle(title: 'Favori Yönetmenler', color: sectionTitleColor),
                 const SizedBox(height: 12),
-                
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: _favDirectors.map((name) => _buildChip(name, () => _removeDirector(name), primaryGreen)).toList(),
-                ),
-                const SizedBox(height: 12),
-                _buildAddItemRow(
-                  controller: _favDirectorCtrl,
-                  hintText: 'Yönetmen ekle...',
-                  onAdd: _addDirector,
-                  isDark: isDark,
-                  primaryColor: primaryGreen,
+                  children: [
+                    ..._favDirectors.map((item) {
+                      return _buildChip(_getItemName(item), () => _removeDirector(item), primaryGreen);
+                    }).toList(),
+                    ActionChip(
+                      avatar: const Icon(Icons.add, size: 16),
+                      label: const Text("Yönetmen Ekle"),
+                      onPressed: () => _showTMDBPersonSearch("Yönetmen Ara", false),
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 24),
 
-                // --- FAVORİ OYUNCULAR ---
+                // --- FAVORİ OYUNCULAR (GÜNCELLENDİ) ---
                 _SectionTitle(title: 'Favori Oyuncular', color: sectionTitleColor),
                 const SizedBox(height: 12),
-                
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: _favActors.map((name) => _buildChip(name, () => _removeActor(name), primaryGreen)).toList(),
-                ),
-                const SizedBox(height: 12),
-                _buildAddItemRow(
-                  controller: _favActorCtrl,
-                  hintText: 'Oyuncu ekle...',
-                  onAdd: _addActor,
-                  isDark: isDark,
-                  primaryColor: primaryGreen,
+                  children: [
+                    ..._favActors.map((item) {
+                      return _buildChip(_getItemName(item), () => _removeActor(item), primaryGreen);
+                    }).toList(),
+                    ActionChip(
+                      avatar: const Icon(Icons.add, size: 16),
+                      label: const Text("Oyuncu Ekle"),
+                      onPressed: () => _showTMDBPersonSearch("Oyuncu Ara", true),
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 40),
@@ -827,7 +803,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
   }
 
   // --- HELPER WIDGETS ---
-
   Widget _buildStyledTextField(
     BuildContext context, {
     required TextEditingController controller,
@@ -903,61 +878,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
       shadowColor: Colors.black26,
     );
   }
-
-  Widget _buildAddItemRow({
-    required TextEditingController controller,
-    required String hintText,
-    required VoidCallback onAdd,
-    required bool isDark,
-    required Color primaryColor,
-  }) {
-    final fillColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final hintColor = isDark ? Colors.grey[500] : Colors.grey[400];
-    final borderColor = isDark ? Colors.grey[800]! : Colors.grey.withOpacity(0.3);
-
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            height: 50,
-            decoration: BoxDecoration(
-              color: fillColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: borderColor),
-            ),
-            child: TextField(
-              controller: controller,
-              style: TextStyle(color: textColor),
-              decoration: InputDecoration(
-                hintText: hintText,
-                hintStyle: TextStyle(color: hintColor),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                border: InputBorder.none,
-              ),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => onAdd(),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Container(
-          height: 50,
-          width: 50,
-          decoration: BoxDecoration(
-            color: fillColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: primaryColor.withOpacity(0.5)),
-          ),
-          child: IconButton(
-            icon: Icon(Icons.add, color: primaryColor),
-            onPressed: _saving ? null : onAdd,
-            tooltip: 'Ekle',
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -974,6 +894,157 @@ class _SectionTitle extends StatelessWidget {
         fontWeight: FontWeight.bold,
         color: color,
         letterSpacing: -0.5,
+      ),
+    );
+  }
+}
+
+// --- YENİ TMDB ARAMA WIDGET'I (GÜNCELLENDİ) ---
+class _TMDBPersonSearchSheet extends StatefulWidget {
+  final String title;
+  final bool isActorSearch; // <-- YENİ: Ne aradığımızı bilelim
+  final Function(Map<String, dynamic>) onPersonSelected;
+
+  const _TMDBPersonSearchSheet({
+    required this.title, 
+    required this.isActorSearch, // <-- YENİ EKLENDİ
+    required this.onPersonSelected
+  });
+
+  @override
+  State<_TMDBPersonSearchSheet> createState() => _TMDBPersonSearchSheetState();
+}
+
+class _TMDBPersonSearchSheetState extends State<_TMDBPersonSearchSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  List<dynamic> _searchResults = [];
+  bool _isLoading = false;
+
+  Future<void> _searchTMDB(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() => _searchResults = []);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/search/person',
+        'params': {
+          'query': query,
+          'language': 'tr-TR',
+        }
+      });
+
+      if (mounted) {
+        setState(() {
+          // Gelen tüm sonuçları al
+          List<dynamic> allResults = result.data['results'] ?? [];
+          
+          // YENİ: Sadece aradığımız mesleğe göre filtrele
+          _searchResults = allResults.where((person) {
+            final dept = person['known_for_department'];
+            if (widget.isActorSearch) {
+              return dept == 'Acting'; // Oyuncu arıyorsak sadece oyuncular
+            } else {
+              return dept == 'Directing'; // Yönetmen arıyorsak sadece yönetmenler
+            }
+          }).toList();
+
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Arama hatası: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final primaryGreen = const Color(0xFF2E7D32);
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(widget.title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _searchController,
+            autofocus: true,
+            style: TextStyle(color: textColor),
+            decoration: InputDecoration(
+              hintText: widget.isActorSearch ? 'Oyuncu adı yazın...' : 'Yönetmen adı yazın...',
+              hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[400]),
+              prefixIcon: Icon(Icons.search, color: primaryGreen),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryGreen, width: 2),
+              ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
+            ),
+            onChanged: (val) {
+              Future.delayed(const Duration(milliseconds: 600), () {
+                if (_searchController.text == val) {
+                   _searchTMDB(val);
+                }
+              });
+            },
+            onSubmitted: _searchTMDB,
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 300, 
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator(color: primaryGreen))
+                : _searchResults.isEmpty
+                    ? Center(child: Text('Sonuç bulunamadı.', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600])))
+                    : ListView.builder(
+                        itemCount: _searchResults.length,
+                        itemBuilder: (context, index) {
+                          final person = _searchResults[index];
+                          final profilePath = person['profile_path'];
+                          final knownFor = person['known_for_department'] ?? '';
+                          
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                              backgroundImage: profilePath != null
+                                  ? CachedNetworkImageProvider('https://image.tmdb.org/t/p/w200$profilePath')
+                                  : null,
+                              child: profilePath == null 
+                                  ? Icon(Icons.person, color: isDark ? Colors.grey[500] : Colors.grey[400]) 
+                                  : null,
+                            ),
+                            title: Text(person['name'] ?? '', style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
+                            subtitle: Text(knownFor == 'Acting' ? 'Oyuncu' : (knownFor == 'Directing' ? 'Yönetmen' : knownFor), style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
+                            onTap: () {
+                              widget.onPersonSelected({
+                                'name': person['name'],
+                                'id': person['id'],
+                                'profile_path': profilePath, 
+                              });
+                            },
+                          );
+                        },
+                      ),
+          ),
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }

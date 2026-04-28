@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
+import 'package:cloud_functions/cloud_functions.dart'; // TMDB araması için
+import 'package:cached_network_image/cached_network_image.dart'; // Resimler için
 
 class OnboardingLetterboxd extends StatefulWidget {
   const OnboardingLetterboxd({super.key});
@@ -20,8 +22,6 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
   bool _saving = false;
 
   final _ageController = TextEditingController();
-  final _directorController = TextEditingController();
-  final _actorController = TextEditingController();
 
   // Tema Renkleri
   final primaryGreen = const Color(0xFF2E7D32);
@@ -41,8 +41,10 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     'LGBTQ+', 'Animasyon', 'Anime',
   ];
   final Set<String> _selectedGenres = {};
-  final List<String> _favDirectors = [];
-  final List<String> _favActors = [];
+  
+  // Eskiden List<String> idi, TMDB verisini tutabilmek için List<dynamic> yapıldı.
+  final List<dynamic> _favDirectors = [];
+  final List<dynamic> _favActors = [];
 
   static const int _totalSteps = 5;
   int _step = 0;
@@ -112,12 +114,11 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         children: List.generate(_totalSteps, (i) {
           final bool done = i < _step;
           final bool current = i == _step;
-          // Renk mantığı
           final Color color = done
-              ? primaryGreen // Tamamlananlar yeşil
+              ? primaryGreen 
               : current
-                  ? const Color(0xFF81C784) // Şu anki adım açık yeşil
-                  : Colors.grey.withOpacity(0.3); // Kalanlar gri
+                  ? const Color(0xFF81C784) 
+                  : Colors.grey.withOpacity(0.3); 
           
           return Expanded(
             child: GestureDetector(
@@ -263,12 +264,17 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
               style: TextStyle(color: Colors.grey[700], fontSize: 15),
             ),
             const SizedBox(height: 24),
-            _buildStyledTextField(
-              controller: _directorController,
-              hintText: 'Bir yönetmen yaz ve Enter’a bas',
-              icon: Icons.movie_creation_outlined,
-              onSubmitted: _addDirector,
-              textInputAction: TextInputAction.send,
+            // YENİ: Arama Butonu
+            OutlinedButton.icon(
+              onPressed: () => _showTMDBPersonSearch("Yönetmen Ara", false),
+              icon: Icon(Icons.search, color: primaryGreen),
+              label: Text("Yönetmen Ara ve Ekle", style: TextStyle(color: primaryGreen, fontSize: 16)),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(color: primaryGreen, width: 2),
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
             ),
             const SizedBox(height: 16),
             _buildChipList(_favDirectors, (item) {
@@ -288,12 +294,17 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
               style: TextStyle(color: Colors.grey[700], fontSize: 15),
             ),
             const SizedBox(height: 24),
-             _buildStyledTextField(
-              controller: _actorController,
-              hintText: 'Bir oyuncu yaz ve Enter’a bas',
-              icon: Icons.person_outline,
-              onSubmitted: _addActor,
-              textInputAction: TextInputAction.send,
+            // YENİ: Arama Butonu
+            OutlinedButton.icon(
+              onPressed: () => _showTMDBPersonSearch("Oyuncu Ara", true),
+              icon: Icon(Icons.search, color: primaryGreen),
+              label: Text("Oyuncu Ara ve Ekle", style: TextStyle(color: primaryGreen, fontSize: 16)),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                side: BorderSide(color: primaryGreen, width: 2),
+                backgroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
             ),
             const SizedBox(height: 16),
              _buildChipList(_favActors, (item) {
@@ -304,8 +315,8 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     }
   }
 
-  // Helper Widget: Chip Listesi
-  Widget _buildChipList(List<String> items, Function(String) onDelete) {
+  // Helper Widget: Chip Listesi (Dynamic tip desteği eklendi)
+  Widget _buildChipList(List<dynamic> items, Function(dynamic) onDelete) {
     if (items.isEmpty) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
@@ -318,13 +329,16 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
-        children: items.map((item) => Chip(
-          label: Text(item, style: const TextStyle(color: Colors.white)),
-          backgroundColor: primaryGreen.withOpacity(0.8),
-          deleteIcon: const Icon(Icons.close, size: 18, color: Colors.white),
-          onDeleted: () => onDelete(item),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide.none),
-        )).toList(),
+        children: items.map((item) {
+          final name = item is Map ? item['name'] : item.toString();
+          return Chip(
+            label: Text(name, style: const TextStyle(color: Colors.white)),
+            backgroundColor: primaryGreen.withOpacity(0.8),
+            deleteIcon: const Icon(Icons.close, size: 18, color: Colors.white),
+            onDeleted: () => onDelete(item),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide.none),
+          );
+        }).toList(),
       ),
     );
   }
@@ -397,20 +411,39 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     );
   }
 
-  void _addDirector(String v) {
-    final t = v.trim();
-    if (t.isEmpty) return;
-    if (!_favDirectors.contains(t)) _favDirectors.add(t);
-    _directorController.clear();
-    setState(() {});
-  }
-
-  void _addActor(String v) {
-    final t = v.trim();
-    if (t.isEmpty) return;
-    if (!_favActors.contains(t)) _favActors.add(t);
-    _actorController.clear();
-    setState(() {});
+  // --- TMDB Arama Menüsünü Açan Fonksiyon ---
+  void _showTMDBPersonSearch(String title, bool isActor) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: _TMDBPersonSearchSheet(
+            title: title,
+            isActorSearch: isActor,
+            onPersonSelected: (personData) {
+              setState(() {
+                if (isActor) {
+                  if (!_favActors.any((item) => (item is Map ? item['id'] : 0) == personData['id'])) {
+                    _favActors.add(personData);
+                  }
+                } else {
+                  if (!_favDirectors.any((item) => (item is Map ? item['id'] : 0) == personData['id'])) {
+                    _favDirectors.add(personData);
+                  }
+                }
+              });
+              Navigator.pop(context); // Seçimden sonra pencereyi kapat
+            },
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _saveAndBuild() async {
@@ -474,8 +507,6 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
         'syncReason': 'onboarding',
       }, SetOptions(merge: true));
 
-      // ESKİ "try/catch MatchService" kısmı tamamen temizlendi.
-
       if (!mounted) return;
       Navigator.of(context).pop();
       
@@ -511,8 +542,6 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
   void dispose() {
     _controller.dispose();
     _ageController.dispose();
-    _directorController.dispose();
-    _actorController.dispose();
     super.dispose();
   }
 
@@ -534,7 +563,6 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
     }
 
     return Scaffold(
-      // AppBar yerine Container gradient
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -657,6 +685,153 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd> {
             },
           ),
         ),
+      ),
+    );
+  }
+}
+
+// --- YENİ TMDB ARAMA WIDGET'I ---
+class _TMDBPersonSearchSheet extends StatefulWidget {
+  final String title;
+  final bool isActorSearch;
+  final Function(Map<String, dynamic>) onPersonSelected;
+
+  const _TMDBPersonSearchSheet({
+    required this.title, 
+    required this.isActorSearch, 
+    required this.onPersonSelected
+  });
+
+  @override
+  State<_TMDBPersonSearchSheet> createState() => _TMDBPersonSearchSheetState();
+}
+
+class _TMDBPersonSearchSheetState extends State<_TMDBPersonSearchSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  List<dynamic> _searchResults = [];
+  bool _isLoading = false;
+
+  Future<void> _searchTMDB(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() => _searchResults = []);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
+        'endpoint': '/3/search/person',
+        'params': {
+          'query': query,
+          'language': 'tr-TR',
+        }
+      });
+
+      if (mounted) {
+        setState(() {
+          List<dynamic> allResults = result.data['results'] ?? [];
+          
+          _searchResults = allResults.where((person) {
+            final dept = person['known_for_department'];
+            if (widget.isActorSearch) {
+              return dept == 'Acting'; 
+            } else {
+              return dept == 'Directing'; 
+            }
+          }).toList();
+
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Arama hatası: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryGreen = const Color(0xFF2E7D32);
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _searchController,
+            autofocus: true,
+            style: const TextStyle(color: Colors.black87),
+            decoration: InputDecoration(
+              hintText: widget.isActorSearch ? 'Oyuncu adı yazın...' : 'Yönetmen adı yazın...',
+              hintStyle: Colors.grey[400] != null ? TextStyle(color: Colors.grey[400]) : null,
+              prefixIcon: Icon(Icons.search, color: primaryGreen),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryGreen, width: 2),
+              ),
+              filled: true,
+              fillColor: Colors.grey[100],
+            ),
+            onChanged: (val) {
+              Future.delayed(const Duration(milliseconds: 600), () {
+                if (_searchController.text == val) {
+                   _searchTMDB(val);
+                }
+              });
+            },
+            onSubmitted: _searchTMDB,
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 300, 
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator(color: primaryGreen))
+                : _searchResults.isEmpty
+                    ? Center(child: Text('Sonuç bulunamadı.', style: TextStyle(color: Colors.grey[600])))
+                    : ListView.builder(
+                        itemCount: _searchResults.length,
+                        itemBuilder: (context, index) {
+                          final person = _searchResults[index];
+                          final profilePath = person['profile_path'];
+                          final knownFor = person['known_for_department'] ?? '';
+                          
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.grey[200],
+                              backgroundImage: profilePath != null
+                                  ? CachedNetworkImageProvider('https://image.tmdb.org/t/p/w200$profilePath')
+                                  : null,
+                              child: profilePath == null 
+                                  ? Icon(Icons.person, color: Colors.grey[400]) 
+                                  : null,
+                            ),
+                            title: Text(person['name'] ?? '', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+                            subtitle: Text(knownFor == 'Acting' ? 'Oyuncu' : (knownFor == 'Directing' ? 'Yönetmen' : knownFor), style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                            onTap: () {
+                              widget.onPersonSelected({
+                                'name': person['name'],
+                                'id': person['id'],
+                                'profile_path': profilePath, 
+                              });
+                            },
+                          );
+                        },
+                      ),
+          ),
+          const SizedBox(height: 16),
+        ],
       ),
     );
   }

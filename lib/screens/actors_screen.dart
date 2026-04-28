@@ -28,19 +28,23 @@ class _ActorScreenState extends State<ActorScreen> {
     _checkIfFavorited(); 
   }
   Future<void> _checkIfFavorited() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
 
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-    if (doc.exists) {
-      final List favActors = doc.data()?['favActors'] ?? [];
-      if (mounted) {
-        setState(() {
-          _isFavorited = favActors.contains(widget.actorName);
+  final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+  if (doc.exists) {
+    final List favActors = doc.data()?['favActors'] ?? [];
+    if (mounted) {
+      setState(() {
+        // Liste içinde hem Map hem String olabilir, her iki durumu da kontrol eder
+        _isFavorited = favActors.any((item) {
+          if (item is Map) return item['id'] == widget.actorId;
+          return item == widget.actorName;
         });
-      }
+      });
     }
   }
+}
 
   Future<void> _fetchActorData() async {
     try {
@@ -98,44 +102,51 @@ class _ActorScreenState extends State<ActorScreen> {
                         size: 22,
                       ),
                     ),
-                    onPressed: () async {
-                      final uid = FirebaseAuth.instance.currentUser?.uid;
-                      if (uid == null) return;
+                   onPressed: () async {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
+  final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
 
-                      final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+  // Kaydedilecek veri formatı
+  final actorData = {
+    'name': widget.actorName,
+    'id': widget.actorId,
+  };
 
-                      try {
-                        if (_isFavorited) {
-                          // Zaten favoriyse: LİSTEDEN ÇIKAR
-                          await userRef.update({
-                            'favActors': FieldValue.arrayRemove([widget.actorName])
-                          });
-                        } else {
-                          // Favori değilse: LİSTEYE EKLE
-                          await userRef.set({
-                            'favActors': FieldValue.arrayUnion([widget.actorName]),
-                            'updatedAt': FieldValue.serverTimestamp(),
-                          }, SetOptions(merge: true));
-                        }
+  try {
+    if (_isFavorited) {
+      // Favoriden çıkarırken listenin tamamını filtrelemek daha güvenlidir
+      final doc = await userRef.get();
+      List favs = List.from(doc.data()?['favActors'] ?? []);
+      favs.removeWhere((item) {
+        if (item is Map) return item['id'] == widget.actorId;
+        return item == widget.actorName;
+      });
+      await userRef.update({'favActors': favs});
+    } else {
+      // Favoriye eklerken Map olarak ekle
+      await userRef.set({
+        'favActors': FieldValue.arrayUnion([actorData]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
 
-                        if (mounted) {
-                          setState(() => _isFavorited = !_isFavorited); // UI'ı anında güncelle
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(_isFavorited 
-                                  ? '${widget.actorName} favorilere eklendi!' 
-                                  : '${widget.actorName} favorilerden çıkarıldı!'),
-                              backgroundColor: _isFavorited ? Colors.green.shade700 : Colors.redAccent,
-                              behavior: SnackBarBehavior.floating,
-                            )
-                          );
-                        }
-                      } catch (e) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
-                        }
-                      }
-                    },
+    if (mounted) {
+      setState(() => _isFavorited = !_isFavorited);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isFavorited 
+              ? '${widget.actorName} favorilere eklendi!' 
+              : '${widget.actorName} favorilerden çıkarıldı!'),
+          backgroundColor: _isFavorited ? Colors.green.shade700 : Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        )
+      );
+    }
+  } catch (e) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+  }
+},
                   ),
                   const SizedBox(width: 8),
                 ],

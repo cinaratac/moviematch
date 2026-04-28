@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
@@ -699,21 +700,68 @@ Widget _buildSectionHeader(String title, List<String> keys, ShelfTarget target) 
            return const SizedBox.shrink();
         }),
         Builder(builder: (context) {
-           final age = _lastUserData?['age'];
-           final genres = List<String>.from(_lastUserData?['favGenres'] ?? []);
-           final dirs = List<String>.from(_lastUserData?['favDirectors'] ?? []);
-           final acts = List<String>.from(_lastUserData?['favActors'] ?? []);
-           if((age==null || age<=0) && genres.isEmpty && dirs.isEmpty && acts.isEmpty) return const SizedBox.shrink();
+   final age = _lastUserData?['age'];
+   final genres = List<dynamic>.from(_lastUserData?['favGenres'] ?? []);
+  final dirs = List<dynamic>.from(_lastUserData?['favDirectors'] ?? []);
+   // Burayı List<dynamic> yapıyoruz çünkü hem String hem Map gelebilir
+   final acts = List<dynamic>.from(_lastUserData?['favActors'] ?? []);
+   
+   if((age==null || age<=0) && genres.isEmpty && dirs.isEmpty && acts.isEmpty) return const SizedBox.shrink();
 
-           Widget cw(String t, List<String> i) {
-             if(i.isEmpty) return const SizedBox.shrink();
-             return Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor)), const SizedBox(height: 8), Wrap(spacing: 8, runSpacing: 8, children: i.map((e)=>Chip(label: Text(e, style: const TextStyle(fontSize: 12)), backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200], side: BorderSide.none, padding: EdgeInsets.zero)).toList())]));
-           }
-           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-             if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [Icon(Icons.cake, size: 18, color: textColor), const SizedBox(width: 6), Text('Yaş: $age', style: TextStyle(color: textColor))])),
-             cw('Sevdiğin türler', genres), cw('Sevdiğin yönetmenler', dirs), cw('Sevdiğin oyuncular', acts)
-           ]);
-        }),
+   Widget cw(String t, List<dynamic> i, {bool isActor = false}) {
+     if(i.isEmpty) return const SizedBox.shrink();
+     return Padding(
+       padding: const EdgeInsets.only(top: 8), 
+       child: Column(
+         crossAxisAlignment: CrossAxisAlignment.start, 
+         children: [
+           Text(t, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor)), 
+           const SizedBox(height: 8), 
+           Wrap(
+             spacing: 8, 
+             runSpacing: 8, 
+             children: i.map((item) {
+                // Verinin tipine göre isim ve id'yi ayır
+                String name;
+                int id = 0;
+                if (item is Map) {
+                  name = item['name'] ?? '';
+                  id = item['id'] ?? 0;
+                } else {
+                  name = item.toString(); // Eski String veriler için
+                }
+
+                return ActionChip(
+                  label: Text(name, style: const TextStyle(fontSize: 12)), 
+                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200], 
+                  side: BorderSide.none, 
+                  padding: EdgeInsets.zero,
+                  onPressed: isActor ? () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ActorScreen(
+                          actorId: id, 
+                          actorName: name,
+                        ),
+                      ),
+                    );
+                  } : null,
+                );
+             }).toList()
+           )
+         ]
+       )
+     );
+   }
+
+   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+     if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [Icon(Icons.cake, size: 18, color: textColor), const SizedBox(width: 6), Text('Yaş: $age', style: TextStyle(color: textColor))])),
+     cw('Sevdiğin türler', genres), 
+     cw('Sevdiğin yönetmenler', dirs), 
+     cw('Sevdiğin oyuncular', acts, isActor: true) // isActor true olarak gönderildi
+   ]);
+}),
         
         const SizedBox(height: 16),
 

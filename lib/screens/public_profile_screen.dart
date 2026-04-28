@@ -16,6 +16,7 @@ import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 import 'package:fluttergirdi/models/gamification.dart'; 
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:fluttergirdi/screens/actors_screen.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
@@ -975,9 +976,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     final watchlistKeys = List<String>.from(data['watchlistKeys'] ?? const []); 
     final bio = (data['bio'] ?? '').toString();
     final age = data['age'];
-    final genres = List<String>.from(data['favGenres'] ?? const []);
-    final directors = List<String>.from(data['favDirectors'] ?? const []);
-    final actors = List<String>.from(data['favActors'] ?? const []);
+    
+    // BURASI DEĞİŞTİ: String yerine dynamic yapıyoruz çünkü Map de gelebilir
+    final genres = List<dynamic>.from(data['favGenres'] ?? const []);
+    final directors = List<dynamic>.from(data['favDirectors'] ?? const []);
+    final actors = List<dynamic>.from(data['favActors'] ?? const []);
     
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -1006,7 +1009,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
             if (genres.isNotEmpty) _ChipsSection(title: 'Sevdiği türler', items: genres),
             if (directors.isNotEmpty)
               _ChipsSection(title: 'Sevdiği yönetmenler', items: directors),
-            if (actors.isNotEmpty) _ChipsSection(title: 'Sevdiği oyuncular', items: actors),
+            // BURASI DEĞİŞTİ: isActor parametresi eklendi
+            if (actors.isNotEmpty) _ChipsSection(title: 'Sevdiği oyuncular', items: actors, isActor: true),
             const SizedBox(height: 12),
           ]),
         
@@ -1043,8 +1047,15 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
 class _ChipsSection extends StatelessWidget {
   final String title;
-  final List<String> items;
-  const _ChipsSection({required this.title, required this.items});
+  final List<dynamic> items; // String yerine dynamic yaptık
+  final bool isActor; // Tıklanabilirlik kontrolü
+
+  const _ChipsSection({
+    required this.title, 
+    required this.items, 
+    this.isActor = false,
+  });
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1059,12 +1070,36 @@ class _ChipsSection extends StatelessWidget {
           Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: items.map((e) => Chip(
-                label: Text(e, style: const TextStyle(fontSize: 12)),
-                backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
-                side: BorderSide.none,
-                padding: EdgeInsets.zero
-              )).toList()),
+              children: items.map((item) {
+                // Verinin tipine göre isim ve id'yi ayır
+                String name;
+                int id = 0;
+                if (item is Map) {
+                  name = item['name'] ?? '';
+                  id = item['id'] ?? 0;
+                } else {
+                  name = item.toString(); // Eski String veriler için
+                }
+
+                return ActionChip(
+                  label: Text(name, style: const TextStyle(fontSize: 12)),
+                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                  side: BorderSide.none,
+                  padding: EdgeInsets.zero,
+                  onPressed: isActor ? () {
+                    // Oyuncuysa sayfaya yönlendir
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ActorScreen(
+                          actorId: id,
+                          actorName: name,
+                        ),
+                      ),
+                    );
+                  } : null, // Oyuncu değilse (tür, yönetmen vb.) tıklanma kapalı
+                );
+              }).toList()),
         ],
       ),
     );
