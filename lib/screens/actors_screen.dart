@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'movie_detail_screen.dart'; // Yönlendirme için
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ActorScreen extends StatefulWidget {
   final int actorId;
@@ -17,11 +19,27 @@ class _ActorScreenState extends State<ActorScreen> {
   Map<String, dynamic>? _actorDetails;
   List<dynamic> _movies = [];
   bool _loading = true;
+  bool _isFavorited = false;
 
   @override
   void initState() {
     super.initState();
     _fetchActorData();
+    _checkIfFavorited(); 
+  }
+  Future<void> _checkIfFavorited() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    if (doc.exists) {
+      final List favActors = doc.data()?['favActors'] ?? [];
+      if (mounted) {
+        setState(() {
+          _isFavorited = favActors.contains(widget.actorName);
+        });
+      }
+    }
   }
 
   Future<void> _fetchActorData() async {
@@ -64,9 +82,64 @@ class _ActorScreenState extends State<ActorScreen> {
         : CustomScrollView(
             slivers: [
               // Üst Kısım: Fotoğraf ve İsim
+              // Üst Kısım: Fotoğraf ve İsim
               SliverAppBar(
                 expandedHeight: 300,
                 pinned: true,
+                // --- YENİ EKLENEN: Sağ Üstteki Favori Butonu ---
+                actions: [
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                      child: Icon(
+                        _isFavorited ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        color: _isFavorited ? Colors.green : Colors.white, // Like'lanmışsa YEŞİL
+                        size: 22,
+                      ),
+                    ),
+                    onPressed: () async {
+                      final uid = FirebaseAuth.instance.currentUser?.uid;
+                      if (uid == null) return;
+
+                      final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+
+                      try {
+                        if (_isFavorited) {
+                          // Zaten favoriyse: LİSTEDEN ÇIKAR
+                          await userRef.update({
+                            'favActors': FieldValue.arrayRemove([widget.actorName])
+                          });
+                        } else {
+                          // Favori değilse: LİSTEYE EKLE
+                          await userRef.set({
+                            'favActors': FieldValue.arrayUnion([widget.actorName]),
+                            'updatedAt': FieldValue.serverTimestamp(),
+                          }, SetOptions(merge: true));
+                        }
+
+                        if (mounted) {
+                          setState(() => _isFavorited = !_isFavorited); // UI'ı anında güncelle
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(_isFavorited 
+                                  ? '${widget.actorName} favorilere eklendi!' 
+                                  : '${widget.actorName} favorilerden çıkarıldı!'),
+                              backgroundColor: _isFavorited ? Colors.green.shade700 : Colors.redAccent,
+                              behavior: SnackBarBehavior.floating,
+                            )
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+                        }
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                // ------------------------------------------------
                 flexibleSpace: FlexibleSpaceBar(
                   title: Text(widget.actorName, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                   background: _actorDetails?['profile_path'] != null
