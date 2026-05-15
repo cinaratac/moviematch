@@ -1,32 +1,69 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * const {onCall} = require("firebase-functions/v2/https");
- * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
+/* eslint-disable */
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+admin.initializeApp();
 
-const {setGlobalOptions} = require("firebase-functions");
-const {onRequest} = require("firebase-functions/https");
-const logger = require("firebase-functions/logger");
+exports.sendChatNotification = functions.firestore
+    .document("chats/{chatId}/messages/{messageId}")
+    .onCreate(async (snap, context) => {
+        const messageData = snap.data();
+        const senderId = messageData.authorId;
+        const text = messageData.text || "Yeni bir mesajiniz var!";
 
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
-setGlobalOptions({ maxInstances: 10 });
+        const chatRef = admin.firestore().collection("chats").doc(context.params.chatId);
+        const chatDoc = await chatRef.get();
 
-// Create and deploy your first functions
-// https://firebase.google.com/docs/functions/get-started
+        if (!chatDoc.exists) return null;
 
-// exports.helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
+        const participants = chatDoc.data().participants || [];
+        const receivers = participants.filter((uid) => uid !== senderId);
+
+        if (receivers.length === 0) return null;
+
+        let senderName = "CineMatch";
+        try {
+            const senderDoc = await admin.firestore().collection("users").doc(senderId).get();
+            if (senderDoc.exists && senderDoc.data().displayName) {
+                senderName = senderDoc.data().displayName;
+            }
+        } catch (e) {
+            console.error("Kullanici adi cekilemedi:", e);
+        }
+
+        const tokens = [];
+        for (const receiverId of receivers) {
+            const tokensSnap = await admin.firestore()
+                .collection("users")
+                .doc(receiverId)
+                .collection("fcmTokens")
+                .get();
+
+            tokensSnap.forEach((doc) => {
+                if (doc.data().token) {
+                    tokens.push(doc.data().token);
+                }
+            });
+        }
+
+        if (tokens.length === 0) {
+            console.log("Alicilar icin token bulunamadi.");
+            return null;
+        }
+
+        const payload = {
+            notification: {
+                title: senderName,
+                body: text,
+            },
+            tokens: tokens,
+        };
+
+        try {
+            const response = await admin.messaging().sendEachForMulticast(payload);
+            console.log(response.successCount + " bildirim basariyla gonderildi.");
+        } catch (error) {
+            console.error("Bildirim gonderme hatasi:", error);
+        }
+
+        return null;
+    });
