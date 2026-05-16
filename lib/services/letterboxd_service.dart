@@ -152,7 +152,6 @@ class LetterboxdService {
 
       if (a == null && rc == null && img == null && divPoster == null) continue;
 
-      // 1. BAŞLIK
       String title =
           (divPoster?.attributes['data-film-name'] ??
                   a?.attributes['data-original-title'] ??
@@ -166,7 +165,6 @@ class LetterboxdService {
 
       if (title.isEmpty) continue;
 
-      // 2. LİNK
       String href =
           divPoster?.attributes['data-film-link'] ??
           rc?.attributes['data-item-link'] ??
@@ -177,9 +175,8 @@ class LetterboxdService {
       if (href.isEmpty) continue;
       if (href.startsWith('//')) href = 'https:$href';
       if (href.startsWith('/')) href = 'https://letterboxd.com$href';
-      if (!seenHref.add(href)) continue; // Kopya engelleme
+      if (!seenHref.add(href)) continue;
 
-      // 3. FİLM ID VE SLUG (GİZLİ JSON'DAN ID ÇIKARMA EKLENDİ)
       String? filmId =
           divPoster?.attributes['data-film-id'] ??
           rc?.attributes['data-film-id'] ??
@@ -189,7 +186,6 @@ class LetterboxdService {
       if (filmId == null) {
         final pId = rc?.attributes['data-postered-identifier'];
         if (pId != null) {
-          // "uid":"film:2704" gibi bir yapıdan sadece rakamı (2704) alıyoruz
           final match = RegExp(r'"uid":"film:(\d+)"').firstMatch(pId);
           if (match != null) filmId = match.group(1);
         }
@@ -209,7 +205,6 @@ class LetterboxdService {
 
       String? poster;
 
-      // 4. POSTER OLUŞTURMA VEYA KABUL ETME
       if (filmId != null && slug != null && slug.isNotEmpty) {
         poster = _buildPosterFromIdSlug(filmId, slug, w: 300, h: 450);
       } else {
@@ -226,20 +221,16 @@ class LetterboxdService {
       if (poster != null && poster.startsWith('/'))
         poster = 'https://a.ltrbxd.com$poster';
 
-      // KRİTİK DÜZELTME: Poster sahte (empty-poster) veya bozuk olsa bile filmi silme! Sadece resmi boş bırak.
       if (poster != null &&
           (poster.contains('empty-poster') || !_looksLikeImageUrl(poster))) {
         poster = '';
       }
       poster ??= '';
 
-      // FİLMİ LİSTEYE EKLE
       items.add(LetterboxdFilm(title: title, url: href, posterUrl: poster));
     }
     return items;
   }
-
-  // --- Scrapers ---
 
   static Future<List<LetterboxdFilm>> _fetchRated(
     String username,
@@ -285,7 +276,7 @@ class LetterboxdService {
             .toList();
         if (list.isNotEmpty) return list;
       }
-      return []; // Hata fırlatma, boş liste dön
+      return [];
     }
 
     final uniq = <String, LetterboxdFilm>{};
@@ -328,7 +319,6 @@ class LetterboxdService {
     return _fetchRated(username, '5', cacheSuffix: '_rated5');
   }
 
-  // --- GARANTİLİ FAVORİ ÇEKİCİ ---
   static Future<List<LetterboxdFilm>> fetchFavorites(String username) async {
     final prefs = await SharedPreferences.getInstance();
     try {
@@ -345,14 +335,7 @@ class LetterboxdService {
       final section = doc.querySelector('#favourites');
       if (section != null) {
         final lis = section.querySelectorAll('li');
-        print(
-          '📌 1. AŞAMA: Bulunan HTML liste elemanı sayısı: ${lis.length}',
-        ); // <-- BUNU EKLE
-
         final films = await _parseFilmsFromElements(lis);
-        print(
-          '📌 2. AŞAMA: Kodun onaylayıp çektiği film sayısı: ${films.length}',
-        ); // <-- BUNU EKLE
 
         if (films.isNotEmpty) {
           final deduped = <LetterboxdFilm>[];
@@ -369,9 +352,8 @@ class LetterboxdService {
           return result;
         }
       }
-      return []; // Hata fırlatmak yerine boş liste dönüyoruz ki sistem çökmesin
+      return [];
     } catch (e) {
-      print("🚨 FAVORİ ÇEKME HATASI: $e");
       final cached = prefs.getString(_cacheKeyFor(username));
       if (cached != null) {
         return (jsonDecode(cached) as List)
@@ -388,7 +370,6 @@ class LetterboxdService {
     int page = 1;
 
     while (page <= 3) {
-      // Maksimum 3 sayfa (yaklaşık 90-100 film)
       final uri = page == 1
           ? Uri.parse('https://letterboxd.com/$username/watchlist/')
           : Uri.parse('https://letterboxd.com/$username/watchlist/page/$page/');
@@ -430,21 +411,6 @@ class LetterboxdService {
     return all;
   }
 
-  // --- Helpers ---
-
-  static Future<String?> _resolvePosterFromDetails(String? detailsPath) async {
-    if (detailsPath == null) return null;
-    try {
-      final res = await _Http.get(
-        Uri.parse('https://letterboxd.com$detailsPath'),
-      );
-      if (res?.statusCode != 200) return null;
-      return _firstImageUrl(jsonDecode(res!.body));
-    } catch (_) {
-      return null;
-    }
-  }
-
   static String? _firstImageUrl(dynamic node) {
     if (node is String && (node.endsWith('.jpg') || node.endsWith('.png')))
       return node;
@@ -460,10 +426,7 @@ class LetterboxdService {
   static bool _looksLikeImageUrl(String? u) {
     if (u == null) return false;
     if (u.contains('empty-poster')) return false;
-
-    // URL'deki ?v=... gibi parametreleri ayıklayıp sadece uzantıya odaklanıyoruz
     final cleanUrl = u.split('?').first.toLowerCase();
-
     return cleanUrl.endsWith('.jpg') ||
         cleanUrl.endsWith('.png') ||
         cleanUrl.endsWith('.webp');
@@ -497,6 +460,10 @@ class LetterboxdService {
     });
   }
 
+  // =========================================================================
+  // KRİTİK GÜNCELLEME: Delta Sync Fonksiyonu
+  // MANUEL FİLMLERİ SİLMEZ, SADECE YENİLERİ EKLER VE KORUR.
+  // =========================================================================
   static Future<void> fullSyncOnboarding({
     required String uid,
     required String lbUsername,
@@ -511,6 +478,7 @@ class LetterboxdService {
       }
     }
 
+    // 1. Verileri Çek
     List<LetterboxdFilm> favs = [];
     try {
       favs = await fetchFavorites(lbUsername);
@@ -530,22 +498,117 @@ class LetterboxdService {
     final disliked = results[1];
     final watchlist = results[2];
 
-    final allFilms = [...favs, ...fiveStar, ...disliked, ...watchlist];
-    for (int i = 0; i < allFilms.length; i += 50) {
-      final end = (i + 50 < allFilms.length) ? i + 50 : allFilms.length;
-      await _upsertCatalog(allFilms.sublist(i, end));
-    }
-
     final db = FirebaseFirestore.instance;
     final userRef = db.collection('users').doc(uid);
     final tasteRef = db.collection('userTasteProfiles').doc(uid);
 
-    final favKeys = LetterboxdFilm.keysOf(favs);
-    final wlKeys = LetterboxdFilm.keysOf(watchlist);
-    final fiveKeys = LetterboxdFilm.keysOf(fiveStar);
-    final disKeys = LetterboxdFilm.keysOf(disliked);
+    // 2. Kullanıcının MEVCUT (manuel) verilerini Firestore'dan Oku
+    final userSnap = await userRef.get();
+    final Map<String, dynamic> currentData = userSnap.data() ?? {};
 
-    final favLite = favs
+    final Map<String, String> filmSources = Map<String, String>.from(
+      currentData['filmSources'] ?? {},
+    );
+
+    final existingFavKeys = List<String>.from(
+      currentData['favoritesKeys'] ?? [],
+    );
+    final existingWlKeys = List<String>.from(
+      currentData['watchlistKeys'] ?? [],
+    );
+    final existingFiveKeys = List<String>.from(
+      currentData['fiveStarKeys'] ?? [],
+    );
+    final existingDisKeys = List<String>.from(
+      currentData['dislikedKeys'] ?? [],
+    );
+
+    final existingFavLite = List<Map<String, dynamic>>.from(
+      currentData['favorites'] ?? [],
+    );
+    final existingWlite = List<Map<String, dynamic>>.from(
+      currentData['watchlist'] ?? [],
+    );
+
+    final Set<String> allExistingKeys = {
+      ...existingFavKeys,
+      ...existingWlKeys,
+      ...existingFiveKeys,
+      ...existingDisKeys,
+    };
+
+    // 3. Optimizasyon: Sadece veritabanında daha önce OLMAYAN yepyeni filmleri kataloğa yaz.
+    final allScrapedFilms = [...favs, ...fiveStar, ...disliked, ...watchlist];
+    final List<LetterboxdFilm> brandNewFilms = [];
+    final Set<String> processedKeys = {};
+
+    for (final f in allScrapedFilms) {
+      if (f.key.isNotEmpty &&
+          !allExistingKeys.contains(f.key) &&
+          processedKeys.add(f.key)) {
+        brandNewFilms.add(f);
+      }
+    }
+
+    for (int i = 0; i < brandNewFilms.length; i += 50) {
+      final end = (i + 50 < brandNewFilms.length)
+          ? i + 50
+          : brandNewFilms.length;
+      await _upsertCatalog(brandNewFilms.sublist(i, end));
+    }
+
+    // 4. Listeleri Harmanlama (Merge) - Manuel olanları koru
+    final newFavKeys = LetterboxdFilm.keysOf(favs);
+    final newWlKeys = LetterboxdFilm.keysOf(watchlist);
+    final newFiveKeys = LetterboxdFilm.keysOf(fiveStar);
+    final newDisKeys = LetterboxdFilm.keysOf(disliked);
+
+    List<String> mergeKeyList({
+      required List<String> existingKeys,
+      required List<String> newLbKeys,
+      required Map<String, String> sources,
+    }) {
+      // sources map'inde 'manual' olarak işaretlenmemiş veya kaynak bilgisi olmayan (eski veri) her şeyi manuel kabul et (esnek koruma)
+      final manualKeys = existingKeys
+          .where((k) => sources[k] == 'manual' || !sources.containsKey(k))
+          .toList();
+
+      for (final k in existingKeys) {
+        if (sources[k] == 'letterboxd') {
+          sources.remove(k);
+        }
+      }
+
+      for (final k in newLbKeys) {
+        if (sources[k] != 'manual') {
+          sources[k] = 'letterboxd';
+        }
+      }
+      return {...manualKeys, ...newLbKeys}.toList();
+    }
+
+    final finalFavKeys = mergeKeyList(
+      existingKeys: existingFavKeys,
+      newLbKeys: newFavKeys,
+      sources: filmSources,
+    );
+    final finalWlKeys = mergeKeyList(
+      existingKeys: existingWlKeys,
+      newLbKeys: newWlKeys,
+      sources: filmSources,
+    );
+    final finalFiveKeys = mergeKeyList(
+      existingKeys: existingFiveKeys,
+      newLbKeys: newFiveKeys,
+      sources: filmSources,
+    );
+    final finalDisKeys = mergeKeyList(
+      existingKeys: existingDisKeys,
+      newLbKeys: newDisKeys,
+      sources: filmSources,
+    );
+
+    final newFavLite = favs
         .take(4)
         .map(
           (f) => {
@@ -553,11 +616,12 @@ class LetterboxdService {
             'url': f.url,
             'posterUrl': f.posterUrl,
             'key': f.key,
+            'source': 'letterboxd',
           },
         )
         .toList();
 
-    final wLite = watchlist
+    final newWLite = watchlist
         .take(30)
         .map(
           (f) => {
@@ -565,36 +629,80 @@ class LetterboxdService {
             'url': f.url,
             'posterUrl': f.posterUrl,
             'key': f.key,
+            'source': 'letterboxd',
           },
         )
         .toList();
 
-    final postersMap = <String, String>{};
+    List<Map<String, dynamic>> mergeLiteList({
+      required List<Map<String, dynamic>> existingLite,
+      required List<Map<String, dynamic>> newLbLite,
+    }) {
+      // Manuel işaretlileri veya source etiketi olmayan (eski kayıtları) koru
+      final manualLite = existingLite
+          .where(
+            (item) => item['source'] == 'manual' || !item.containsKey('source'),
+          )
+          .toList();
+
+      final Map<String, Map<String, dynamic>> uniqMap = {};
+      for (final item in manualLite) {
+        final k = (item['key'] ?? '').toString();
+        if (k.isNotEmpty) uniqMap[k] = item;
+      }
+      for (final item in newLbLite) {
+        final k = (item['key'] ?? '').toString();
+        if (k.isNotEmpty && !uniqMap.containsKey(k)) {
+          uniqMap[k] = item;
+        }
+      }
+      return uniqMap.values.toList();
+    }
+
+    final finalFavLite = mergeLiteList(
+      existingLite: existingFavLite,
+      newLbLite: newFavLite,
+    );
+    final finalWlite = mergeLiteList(
+      existingLite: existingWlite,
+      newLbLite: newWLite,
+    );
+
+    final tasteSnap = await tasteRef.get();
+    final dynamic rawPosters = (tasteSnap.data() ?? {})['posters'];
+    final Map<String, String> existingPosters = rawPosters is Map
+        ? Map<String, String>.from(rawPosters)
+        : {};
+
+    final postersMap = <String, String>{}..addAll(existingPosters);
     for (var f in [...fiveStar, ...disliked]) {
       if (f.key.isNotEmpty && f.posterUrl.isNotEmpty) {
         postersMap[f.key] = f.posterUrl;
       }
     }
 
+    // 5. Veritabanına Güvenli Batch Yazma
     await _retryFirestore(() async {
       final batch = db.batch();
+
       batch.set(userRef, {
         'lbUsername': lbUsername,
-        'favoritesKeys': favKeys,
-        'favorites': favLite,
-        'watchlistKeys': wlKeys,
-        'watchlist': wLite,
+        'filmSources': filmSources,
+        'favoritesKeys': finalFavKeys,
+        'favorites': finalFavLite,
+        'watchlistKeys': finalWlKeys,
+        'watchlist': finalWlite,
         'watchlistUpdatedAt': FieldValue.serverTimestamp(),
-        'fiveStarKeys': fiveKeys,
-        'dislikedKeys': disKeys,
+        'fiveStarKeys': finalFiveKeys,
+        'dislikedKeys': finalDisKeys,
         'updatedAt': FieldValue.serverTimestamp(),
         'lastSyncedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
       batch.set(tasteRef, {
         'letterboxdUsername': lbUsername,
-        'loved': fiveKeys,
-        'disliked': disKeys,
+        'loved': finalFiveKeys,
+        'disliked': finalDisKeys,
         'posters': postersMap,
         'computedAtMs': DateTime.now().millisecondsSinceEpoch,
         'updatedAt': FieldValue.serverTimestamp(),
