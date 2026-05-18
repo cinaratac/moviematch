@@ -197,11 +197,27 @@ class PostDetailScreen extends StatelessWidget {
 
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return '${diff.inSeconds}s';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-    if (diff.inHours < 24) return '${diff.inHours}h';
-    if (diff.inDays < 7) return '${diff.inDays}g';
-    final years = diff.inDays ~/ 365;
-    return '${years}y';
+
+    if (diff.inSeconds < 60) {
+      return '${diff.inSeconds}s';
+    } else if (diff.inMinutes < 60) {
+      return '${diff.inMinutes}m';
+    } else if (diff.inHours < 24) {
+      return '${diff.inHours}h';
+    } else if (diff.inDays < 7) {
+      return '${diff.inDays}g';
+    } else if (diff.inDays < 30) {
+      // 7 ile 30 gün arasını hafta olarak göstermek istersen ('h' harfi hour ile karışmaması için 'hf' yapabilirsin veya gün olarak bırakabilirsin)
+      final weeks = diff.inDays ~/ 7;
+      return '${weeks}hf';
+    } else if (diff.inDays < 365) {
+      // 30 ile 365 gün arasını ay olarak gösterir
+      final months = diff.inDays ~/ 30;
+      return '${months}ay';
+    } else {
+      // 365 günden fazlasını yıl olarak gösterir
+      final years = diff.inDays ~/ 365;
+      return '${years}y';
+    }
   }
 }

@@ -3,8 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
+
 /// AppBar içinde kullan: NotificationsButton()
 class NotificationsButton extends StatelessWidget {
   const NotificationsButton({super.key});
@@ -108,12 +109,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         .collection('notifications')
         .orderBy('createdAt', descending: true)
         .limit(100);
-    
-   
-   
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -135,7 +131,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const Spacer(),
-                 
+
                   IconButton(
                     tooltip: 'Kapat',
                     onPressed: () => Navigator.pop(context),
@@ -183,7 +179,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           : _timeAgoShort(createdAt.toDate());
 
                       final title = _titleFor(type);
-                     final subtitle = _subtitleFor(type, count);
+                      final subtitle = _subtitleFor(type, count);
 
                       return FutureBuilder<_Actor>(
                         future: _getActor(actorId, m),
@@ -192,10 +188,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                           return ListTile(
                             onTap: () {
                               final navigator = Navigator.of(context);
-                              
+
                               // 1. Okundu işaretle (await etmeye gerek yok, UI takılmasın)
                               docs[i].reference.update({'read': true});
-                              
+
                               // 2. Bildirim tipine göre yönlendirme yap
                               final postId = (m['postId'] ?? '').toString();
 
@@ -203,28 +199,33 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                                 // Takip bildirimiyse profile git
                                 if (actorId.isNotEmpty) {
                                   // Önce bildirim penceresini kapat, sonra git
-                                  navigator.pop(); 
+                                  navigator.pop();
                                   navigator.push(
                                     MaterialPageRoute(
-                                      builder: (_) => PublicProfileScreen(uid: actorId),
+                                      builder: (_) =>
+                                          PublicProfileScreen(uid: actorId),
                                     ),
                                   );
                                 }
-                              } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
+                              } else if ((type == 'like' ||
+                                      type == 'comment') &&
+                                  postId.isNotEmpty &&
+                                  postId != '-') {
                                 // Like veya Yorum ise GÖNDERİYE git
                                 // Önce bildirim penceresini kapat, sonra git
                                 navigator.pop();
                                 navigator.push(
                                   MaterialPageRoute(
-                                    builder: (_) => PostDetailScreen(postId: postId),
+                                    builder: (_) =>
+                                        PostDetailScreen(postId: postId),
                                   ),
                                 );
-                              }
-                              else if (type == 'club_request') {
+                              } else if (type == 'club_request') {
                                 // KULÜP İSTEĞİNE TIKLANINCA
                                 final clubId = (m['clubId'] ?? '').toString();
-                                final clubName = (m['clubName'] ?? '').toString();
-                                
+                                final clubName = (m['clubName'] ?? '')
+                                    .toString();
+
                                 if (clubId.isNotEmpty) {
                                   navigator.pop(); // Bildirim sayfasını kapat
                                   navigator.push(
@@ -296,7 +297,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return 'Yeni yorum';
       case 'follow':
         return 'Yeni takipçi';
-      case 'club_request': return 'Kulüp İsteği';
+      case 'club_request':
+        return 'Kulüp İsteği';
       default:
         return 'Bildirim';
     }
@@ -313,7 +315,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         return '$suffix gönderinize yorum yaptı';
       case 'follow':
         return 'sizi takip etmeye başladı';
-      case 'club_request': 
+      case 'club_request':
         return 'kulübünüze katılmak istiyor';
       default:
         return 'bir etkinlikte bulundu';
@@ -324,8 +326,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
     final cachedName = (notif['actorName'] ?? '').toString();
     final cachedHandle = (notif['actorHandle'] ?? '').toString();
     final cachedPhoto = (notif['actorPhotoURL'] ?? '').toString();
-    
-    if (cachedName.isNotEmpty || cachedPhoto.isNotEmpty || cachedHandle.isNotEmpty) {
+
+    if (cachedName.isNotEmpty ||
+        cachedPhoto.isNotEmpty ||
+        cachedHandle.isNotEmpty) {
       return _Actor(
         uid: uid,
         displayName: cachedName.isNotEmpty ? cachedName : null,
@@ -398,12 +402,19 @@ class _Avatar extends StatelessWidget {
 String _timeAgoShort(DateTime dt) {
   final now = DateTime.now();
   final diff = now.difference(dt);
+
   if (diff.inSeconds < 60) return '${diff.inSeconds}s';
   if (diff.inMinutes < 60) return '${diff.inMinutes}m';
   if (diff.inHours < 24) return '${diff.inHours}h';
   if (diff.inDays < 7) return '${diff.inDays}g';
-  final months = diff.inDays ~/ 30;
-  if (months < 12) return '${months}a';
+  if (diff.inDays < 30) {
+    final weeks = diff.inDays ~/ 7;
+    return '${weeks}hf'; // h (hour) ile karışmasın diye hf (hafta)
+  }
+  if (diff.inDays < 365) {
+    final months = diff.inDays ~/ 30;
+    return '${months}a';
+  }
   final years = diff.inDays ~/ 365;
   return '${years}y';
 }

@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/text_filter_service.dart';
 import 'package:fluttergirdi/services/feed_service.dart';
 // Film arama ve detay sayfaları
-import '../screens/search_movie.dart'; 
-import '../screens/movie_detail_screen.dart'; 
+import '../screens/search_movie.dart';
+import '../screens/movie_detail_screen.dart';
 import 'poster_image.dart';
 
 class CommentsSheet extends StatefulWidget {
   final String postId;
-  final String postAuthorId; 
+  final String postAuthorId;
 
   const CommentsSheet({
     super.key,
@@ -25,10 +25,10 @@ class CommentsSheet extends StatefulWidget {
 class _CommentsSheetState extends State<CommentsSheet> {
   final TextEditingController _commentCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  
+
   late final Stream<QuerySnapshot> _mainRepliesStream;
 
-  String? _replyingToDocId; 
+  String? _replyingToDocId;
   String? _replyingToUserName;
   String? _replyingToUid;
 
@@ -84,7 +84,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
 
     if (text.isNotEmpty && TextFilterService.hasProfanity(text)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Uygunsuz içerik tespit edildi.'), backgroundColor: Colors.red),
+        const SnackBar(
+          content: Text('Uygunsuz içerik tespit edildi.'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -113,21 +116,28 @@ class _CommentsSheetState extends State<CommentsSheet> {
       if (_replyingToDocId == null) {
         // --- ANA YORUM ---
         data['replyCount'] = 0;
-        final ref = db.collection('posts').doc(widget.postId).collection('replies').doc();
+        final ref = db
+            .collection('posts')
+            .doc(widget.postId)
+            .collection('replies')
+            .doc();
         batch.set(ref, data);
-        
+
         final postRef = db.collection('posts').doc(widget.postId);
         batch.update(postRef, {'replyCount': FieldValue.increment(1)});
-
       } else {
         // --- ALT YANIT (REPLY) ---
-        final parentRef = db.collection('posts').doc(widget.postId).collection('replies').doc(_replyingToDocId);
+        final parentRef = db
+            .collection('posts')
+            .doc(widget.postId)
+            .collection('replies')
+            .doc(_replyingToDocId);
         final subRef = parentRef.collection('subReplies').doc();
-        
+
         batch.set(subRef, data);
 
         batch.update(parentRef, {'replyCount': FieldValue.increment(1)});
-        
+
         final postRef = db.collection('posts').doc(widget.postId);
         batch.update(postRef, {'replyCount': FieldValue.increment(1)});
       }
@@ -145,18 +155,17 @@ class _CommentsSheetState extends State<CommentsSheet> {
       } else if (_replyingToUid != null) {
         FeedService.instance.notifyComment(
           postId: widget.postId,
-          postAuthorUid: _replyingToUid!, 
+          postAuthorUid: _replyingToUid!,
           preview: previewText,
         );
       }
 
       // --- TEMİZLİK ---
       _commentCtrl.clear();
-      _removeSelectedMovie(); 
-      _cancelReply(); 
+      _removeSelectedMovie();
+      _cancelReply();
       FocusScope.of(context).unfocus();
-
-    }  finally {
+    } finally {
       if (mounted) setState(() => _isSending = false);
     }
   }
@@ -167,7 +176,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
       _replyingToUserName = userName;
       _replyingToUid = uid;
     });
-    _focusNode.requestFocus(); 
+    _focusNode.requestFocus();
   }
 
   void _cancelReply() {
@@ -185,7 +194,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
     final theme = Theme.of(context);
 
     return Container(
-      height: MediaQuery.of(context).size.height * 0.85, 
+      height: MediaQuery.of(context).size.height * 0.85,
       decoration: BoxDecoration(
         color: theme.scaffoldBackgroundColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -198,11 +207,18 @@ class _CommentsSheetState extends State<CommentsSheet> {
             child: Column(
               children: [
                 Container(
-                  width: 40, height: 4,
-                  decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(2)),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
                 const SizedBox(height: 12),
-                const Text('Yorumlar', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Text(
+                  'Yorumlar',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
               ],
             ),
           ),
@@ -218,7 +234,12 @@ class _CommentsSheetState extends State<CommentsSheet> {
                 }
                 final docs = snapshot.data?.docs ?? [];
                 if (docs.isEmpty) {
-                  return const Center(child: Text("Henüz yorum yok.", style: TextStyle(color: Colors.grey)));
+                  return const Center(
+                    child: Text(
+                      "Henüz yorum yok.",
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  );
                 }
 
                 return ListView.builder(
@@ -226,10 +247,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     return _CommentTile(
-                      key: ValueKey(docs[index].id), 
+                      key: ValueKey(docs[index].id),
                       postId: widget.postId,
                       doc: docs[index],
-                      onReply: _initiateReply, 
+                      onReply: _initiateReply,
                     );
                   },
                 );
@@ -242,11 +263,19 @@ class _CommentsSheetState extends State<CommentsSheet> {
             // --- GÜNCELLEME BURADA YAPILDI ---
             // Eğer klavye açıksa (bottomInset > 0) normal boşluk bırak.
             // Eğer klavye kapalıysa alt tarafa 24 birim (veya dilediğiniz kadar) ekstra boşluk ver.
-            padding: EdgeInsets.fromLTRB(16, 8, 16, bottomInset > 0 ? 8 : 40), 
+            padding: EdgeInsets.fromLTRB(16, 8, 16, bottomInset > 0 ? 8 : 40),
             decoration: BoxDecoration(
               color: theme.colorScheme.surface,
-              border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
-              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 5, offset: Offset(0,-2))]
+              border: Border(
+                top: BorderSide(color: Colors.grey.withOpacity(0.2)),
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black12,
+                  blurRadius: 5,
+                  offset: Offset(0, -2),
+                ),
+              ],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -257,32 +286,47 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     padding: const EdgeInsets.only(bottom: 8.0, left: 4),
                     child: Row(
                       children: [
-                        Icon(Icons.reply, size: 16, color: theme.colorScheme.primary),
+                        Icon(
+                          Icons.reply,
+                          size: 16,
+                          color: theme.colorScheme.primary,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             '$_replyingToUserName adlı kişiye yanıt veriliyor',
-                            style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12),
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         InkWell(
                           onTap: _cancelReply,
-                          child: const Icon(Icons.close, size: 18, color: Colors.grey),
-                        )
+                          child: const Icon(
+                            Icons.close,
+                            size: 18,
+                            color: Colors.grey,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                
+
                 // Seçilen Film Önizlemesi
                 if (_selectedMovie != null)
                   Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withOpacity(0.3),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: theme.colorScheme.outlineVariant),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -302,13 +346,23 @@ class _CommentsSheetState extends State<CommentsSheet> {
                             children: [
                               Text(
                                 _selectedMovie!['title'] ?? '',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                _selectedMovie!['releaseDate']?.toString().split('-').first ?? '',
-                                style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                                _selectedMovie!['releaseDate']
+                                        ?.toString()
+                                        .split('-')
+                                        .first ??
+                                    '',
+                                style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 11,
+                                ),
                               ),
                             ],
                           ),
@@ -316,7 +370,7 @@ class _CommentsSheetState extends State<CommentsSheet> {
                         IconButton(
                           icon: const Icon(Icons.close, size: 20),
                           onPressed: _removeSelectedMovie,
-                        )
+                        ),
                       ],
                     ),
                   ),
@@ -327,8 +381,10 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     IconButton(
                       onPressed: _pickMovie,
                       icon: Icon(
-                        Icons.movie_creation_outlined, 
-                        color: _selectedMovie != null ? theme.colorScheme.primary : Colors.grey.shade600
+                        Icons.movie_creation_outlined,
+                        color: _selectedMovie != null
+                            ? theme.colorScheme.primary
+                            : Colors.grey.shade600,
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -337,11 +393,20 @@ class _CommentsSheetState extends State<CommentsSheet> {
                         controller: _commentCtrl,
                         focusNode: _focusNode,
                         decoration: InputDecoration(
-                          hintText: _replyingToUserName != null ? 'Yanıtını yaz...' : 'Yorum yap...',
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                          hintText: _replyingToUserName != null
+                              ? 'Yanıtını yaz...'
+                              : 'Yorum yap...',
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
                           filled: true,
-                          fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                          fillColor: theme.colorScheme.surfaceContainerHighest
+                              .withOpacity(0.3),
                         ),
                         minLines: 1,
                         maxLines: 4,
@@ -351,15 +416,22 @@ class _CommentsSheetState extends State<CommentsSheet> {
                     IconButton(
                       onPressed: _isSending ? null : _send,
                       icon: _isSending
-                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Icon(Icons.send_rounded, color: theme.colorScheme.primary),
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              Icons.send_rounded,
+                              color: theme.colorScheme.primary,
+                            ),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          SizedBox(height: bottomInset), 
+          SizedBox(height: bottomInset),
         ],
       ),
     );
@@ -376,12 +448,12 @@ class _AttachedMovieWidget extends StatelessWidget {
     return GestureDetector(
       onTap: () {
         // Film ID'si varsa detay sayfasına yönlendir
-        final movieId = movie['id']; 
+        final movieId = movie['id'];
         if (movieId != null) {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => MovieDetailScreen(tmdbId: movieId), 
+              builder: (context) => MovieDetailScreen(tmdbId: movieId),
             ),
           );
         }
@@ -390,7 +462,9 @@ class _AttachedMovieWidget extends StatelessWidget {
         margin: const EdgeInsets.only(top: 6),
         padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+          color: Theme.of(
+            context,
+          ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.grey.withOpacity(0.2)),
         ),
@@ -413,7 +487,10 @@ class _AttachedMovieWidget extends StatelessWidget {
                 children: [
                   Text(
                     movie['title'] ?? '',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -421,12 +498,19 @@ class _AttachedMovieWidget extends StatelessWidget {
                     children: [
                       Text(
                         movie['releaseDate']?.toString().split('-').first ?? '',
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                       const SizedBox(width: 4),
-                      Icon(Icons.arrow_forward_ios, size: 8, color: Colors.grey.shade600)
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        size: 8,
+                        color: Colors.grey.shade600,
+                      ),
                     ],
-                  )
+                  ),
                 ],
               ),
             ),
@@ -460,7 +544,10 @@ class _CommentTile extends StatelessWidget {
     final movieData = data['movie'] as Map<String, dynamic>?;
 
     return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('users').doc(authorId).get(),
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(authorId)
+          .get(),
       builder: (context, userSnap) {
         String name = "Kullanıcı";
         String? photo;
@@ -478,7 +565,9 @@ class _CommentTile extends StatelessWidget {
               CircleAvatar(
                 radius: 18,
                 backgroundImage: photo != null ? NetworkImage(photo) : null,
-                child: photo == null ? const Icon(Icons.person, size: 20) : null,
+                child: photo == null
+                    ? const Icon(Icons.person, size: 20)
+                    : null,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -487,24 +576,33 @@ class _CommentTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text(
+                          name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
                         const SizedBox(width: 6),
                         if (createdAt != null)
                           Text(
-                            _formatTime(createdAt), 
-                            style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                            _formatTime(createdAt),
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 11,
+                            ),
                           ),
                       ],
                     ),
                     const SizedBox(height: 2),
                     if (text.isNotEmpty)
                       Text(text, style: const TextStyle(fontSize: 14)),
-                    
+
                     if (movieData != null)
                       _AttachedMovieWidget(movie: movieData),
 
                     const SizedBox(height: 6),
-                    
+
                     Row(
                       children: [
                         _CommentLikeButton(
@@ -516,7 +614,14 @@ class _CommentTile extends StatelessWidget {
                         const SizedBox(width: 16),
                         GestureDetector(
                           onTap: () => onReply(doc.id, name, authorId),
-                          child: Text('Yanıtla', style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.bold)),
+                          child: Text(
+                            'Yanıtla',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -524,9 +629,9 @@ class _CommentTile extends StatelessWidget {
                     // DÜZELTME 2: Alt yanıt listesine de benzersiz Key veriyoruz.
                     // Böylece üstteki yorumun yanıtları buraya kopyalanmaz.
                     _SubRepliesList(
-                      key: ValueKey(doc.id), 
-                      postId: postId, 
-                      parentId: doc.id
+                      key: ValueKey(doc.id),
+                      postId: postId,
+                      parentId: doc.id,
                     ),
                   ],
                 ),
@@ -543,7 +648,10 @@ class _CommentTile extends StatelessWidget {
     if (diff.inMinutes < 1) return 'şimdi';
     if (diff.inMinutes < 60) return '${diff.inMinutes}dk';
     if (diff.inHours < 24) return '${diff.inHours}s';
-    return '${diff.inDays}g';
+    if (diff.inDays < 7) return '${diff.inDays}g';
+    if (diff.inDays < 30) return '${diff.inDays ~/ 7}hf';
+    if (diff.inDays < 365) return '${diff.inDays ~/ 30}ay';
+    return '${diff.inDays ~/ 365}y';
   }
 }
 
@@ -553,8 +661,8 @@ class _SubRepliesList extends StatefulWidget {
 
   const _SubRepliesList({
     super.key, // Key eklendi
-    required this.postId, 
-    required this.parentId
+    required this.postId,
+    required this.parentId,
   });
 
   @override
@@ -569,13 +677,13 @@ class _SubRepliesListState extends State<_SubRepliesList> {
     super.initState();
     // Key kullandığımız için artık initState her yeni parentId için çalışacak.
     _subStream = FirebaseFirestore.instance
-          .collection('posts')
-          .doc(widget.postId)
-          .collection('replies')
-          .doc(widget.parentId)
-          .collection('subReplies')
-          .orderBy('createdAt', descending: false)
-          .snapshots();
+        .collection('posts')
+        .doc(widget.postId)
+        .collection('replies')
+        .doc(widget.parentId)
+        .collection('subReplies')
+        .orderBy('createdAt', descending: false)
+        .snapshots();
   }
 
   @override
@@ -628,7 +736,10 @@ class _SubReplyTile extends StatelessWidget {
     final movieData = data['movie'] as Map<String, dynamic>?;
 
     return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('users').doc(authorId).get(),
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(authorId)
+          .get(),
       builder: (context, snap) {
         String name = "";
         String? photo;
@@ -646,7 +757,9 @@ class _SubReplyTile extends StatelessWidget {
               CircleAvatar(
                 radius: 12,
                 backgroundImage: photo != null ? NetworkImage(photo) : null,
-                child: photo == null ? const Icon(Icons.person, size: 14) : null,
+                child: photo == null
+                    ? const Icon(Icons.person, size: 14)
+                    : null,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -654,21 +767,21 @@ class _SubReplyTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      name, 
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     if (text.isNotEmpty)
-                      Text(
-                        text, 
-                        style: const TextStyle(fontSize: 13)
-                      ),
-                    
+                      Text(text, style: const TextStyle(fontSize: 13)),
+
                     if (movieData != null)
                       _AttachedMovieWidget(movie: movieData),
 
                     const SizedBox(height: 4),
-                    
+
                     _CommentLikeButton(
                       postId: postId,
                       commentId: parentId,
@@ -690,7 +803,7 @@ class _SubReplyTile extends StatelessWidget {
 class _CommentLikeButton extends StatefulWidget {
   final String postId;
   final String commentId;
-  final String? subReplyId; 
+  final String? subReplyId;
   final int initialCount;
   final bool isSubReply;
 
@@ -720,8 +833,12 @@ class _CommentLikeButtonState extends State<_CommentLikeButton> {
 
   DocumentReference get _docRef {
     final db = FirebaseFirestore.instance;
-    final parent = db.collection('posts').doc(widget.postId).collection('replies').doc(widget.commentId);
-    
+    final parent = db
+        .collection('posts')
+        .doc(widget.postId)
+        .collection('replies')
+        .doc(widget.commentId);
+
     if (widget.isSubReply && widget.subReplyId != null) {
       return parent.collection('subReplies').doc(widget.subReplyId);
     }
@@ -789,9 +906,16 @@ class _CommentLikeButtonState extends State<_CommentLikeButton> {
             ),
           ],
           if (!widget.isSubReply && _count == 0) ...[
-             const SizedBox(width: 4),
-             Text('Beğen', style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.bold)),
-          ]
+            const SizedBox(width: 4),
+            Text(
+              'Beğen',
+              style: TextStyle(
+                color: Colors.grey.shade600,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ],
       ),
     );
