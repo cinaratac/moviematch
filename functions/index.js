@@ -67,7 +67,7 @@ exports.createNotificationOnLike = functions.firestore
     
     const actorSnap = await admin.firestore().collection("users").doc(actorId).get();
     const actorData = actorSnap.data() || {};
-    const actorName = actorData.displayName || "Bir Kullanıcı";
+    const actorName = actorData.username || "Bir Kullanıcı";
     
     const querySnapshot = await admin.firestore()
       .collection("users").doc(authorId).collection("notifications")
@@ -88,6 +88,38 @@ exports.createNotificationOnLike = functions.firestore
         preview: `${actorName} gönderini beğendi.`
       });
     }
+  });exports.removeNotificationOnUnlike = functions.firestore
+  .document("posts/{postId}/likes/{userId}")
+  .onDelete(async (snapshot, context) => {
+    const postId = context.params.postId;
+    
+    // Post'un yazarını (authorId) bulmamız lazım
+    const postSnap = await admin.firestore().collection("posts").doc(postId).get();
+    if (!postSnap.exists) return;
+    const authorId = postSnap.data().authorId;
+
+    // Yazarın bildirimlerinde bu post için olan okunmamış beğeni bildirimini bul
+    const querySnapshot = await admin.firestore()
+      .collection("users").doc(authorId).collection("notifications")
+      .where("type", "==", "like")
+      .where("postId", "==", postId)
+      .where("read", "==", false)
+      .limit(1).get();
+
+    if (!querySnapshot.empty) {
+      const doc = querySnapshot.docs[0];
+      const currentCount = doc.data().count || 1;
+      
+      if (currentCount > 1) {
+        // Eğer bildirimde birden fazla kişinin beğenisi gruplanmışsa, sayacı 1 azalt
+        await doc.ref.update({
+          count: currentCount - 1
+        });
+      } else {
+        // Eğer sadece 1 beğeni varsa ve o da geri alındıysa, bildirimi tamamen sil
+        await doc.ref.delete();
+      }
+    }
   });
 
 exports.createNotificationOnFollow = functions.firestore
@@ -99,7 +131,7 @@ exports.createNotificationOnFollow = functions.firestore
     const followerData = followerSnap.data() || {};
     await admin.firestore().collection("users").doc(followedId).collection("notifications")
       .doc(`${followerId}_follow`).set({
-        type: "follow", actorId: followerId, actorName: followerData.displayName || "Bir Kullanıcı",
+        type: "follow", actorId: followerId, actorName: followerData.username || "Bir Kullanıcı",
         createdAt: admin.firestore.FieldValue.serverTimestamp(), read: false,
       });
   });

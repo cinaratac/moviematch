@@ -9,17 +9,17 @@ class FeedController extends ChangeNotifier {
   bool isLoading = true;
   bool isLoadingMore = false;
   bool hasMore = true;
-  
+
   // DÜZELTME BURADA: Listeyi ve _lastDoc'u spesifik tipte tanımlıyoruz
   List<DocumentSnapshot<Map<String, dynamic>>> posts = [];
-  
+
   // Etkileşim verileri
   Set<String> myLikedPostIds = {};
   Set<String> myFollowingUserIds = {};
 
   // DÜZELTME BURADA: <Map<String, dynamic>> ekledik
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
-  
+
   final int _pageSize = 20;
 
   // Başlatıcı
@@ -43,30 +43,35 @@ class FeedController extends ChangeNotifier {
   Future<void> _loadData({required bool initial}) async {
     try {
       final userId = FirebaseAuth.instance.currentUser?.uid;
-      
+
       // 1. Postları Çek
       QuerySnapshot<Map<String, dynamic>> postSnapshot;
       if (initial) {
         // Paralel olarak beğeni ve takiplerimi de çek
         if (userId != null) {
           final results = await Future.wait([
-             FeedService.instance.fetchInitial(limit: _pageSize),
-             FeedService.instance.fetchUserLikedPostIds(userId),
-             FeedService.instance.fetchUserFollowingIds(userId),
+            FeedService.instance.fetchInitial(limit: _pageSize),
+            FeedService.instance.fetchUserLikedPostIds(userId),
+            FeedService.instance.fetchUserFollowingIds(userId),
           ]);
           postSnapshot = results[0] as QuerySnapshot<Map<String, dynamic>>;
           myLikedPostIds = results[1] as Set<String>;
           myFollowingUserIds = results[2] as Set<String>;
         } else {
-          postSnapshot = await FeedService.instance.fetchInitial(limit: _pageSize);
+          postSnapshot = await FeedService.instance.fetchInitial(
+            limit: _pageSize,
+          );
         }
       } else {
         // HATA VEREN SATIR ARTIK DÜZELMİŞ OLACAK
-        postSnapshot = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: _pageSize);
+        postSnapshot = await FeedService.instance.fetchMore(
+          lastDoc: _lastDoc!,
+          limit: _pageSize,
+        );
       }
 
       final newDocs = postSnapshot.docs;
-      
+
       // 2. Kullanıcı Verilerini Cache'e Yükle
       final authorIds = newDocs
           .map((d) => d.data()['authorId'] as String?)
@@ -84,9 +89,7 @@ class FeedController extends ChangeNotifier {
 
       _lastDoc = newDocs.isNotEmpty ? newDocs.last : _lastDoc;
       hasMore = newDocs.length == _pageSize;
-      
     } catch (e) {
-      
     } finally {
       isLoading = false;
       isLoadingMore = false;
@@ -96,9 +99,11 @@ class FeedController extends ChangeNotifier {
 
   // UI'dan gelen aksiyonlar
   void toggleLike(String postId, bool isLiked) {
-    if (isLiked) myLikedPostIds.add(postId);
-    else myLikedPostIds.remove(postId);
-    
+    if (isLiked)
+      myLikedPostIds.add(postId);
+    else
+      myLikedPostIds.remove(postId);
+
     FeedService.instance.toggleLike(postId: postId, like: isLiked);
   }
 
@@ -106,7 +111,6 @@ class FeedController extends ChangeNotifier {
     myFollowingUserIds.add(targetUid);
     notifyListeners();
     await FeedService.instance.followUser(targetUid);
-    await FeedService.instance.notifyFollow(toUid: targetUid);
   }
 
   void removePost(String postId) {

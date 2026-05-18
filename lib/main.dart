@@ -50,12 +50,14 @@ Future<void> main() async {
   }
 
   // --- APP CHECK AKTİVASYONU ---
+  // --- APP CHECK AKTİVASYONU ---
   await FirebaseAppCheck.instance.activate(
     androidProvider: kReleaseMode
         ? AndroidProvider.playIntegrity
         : AndroidProvider.debug,
     appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
-    webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'),
+    // Web sürümü şimdilik kullanılmadığı ve geçerli bir anahtar olmadığı için kapatıldı:
+    // webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'),
   );
 
   // Firestore Ayarları
@@ -93,6 +95,9 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  // YENİ: Servislerin birden fazla kez başlatılmasını engelleyecek kontrol bayrağı
+  bool _servicesStarted = false;
+
   @override
   void initState() {
     super.initState();
@@ -116,20 +121,22 @@ class _MyAppState extends State<MyApp> {
             stream: FirebaseAuth.instance.authStateChanges(),
             builder: (context, snapshot) {
               if (snapshot.hasData && snapshot.data != null) {
-                // --- SERVİSLERİ BAŞLAT ---
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  NotificationService.I
-                      .start(); // Bildirim dinleyicilerini (Firestore Stream) başlatır
-                  NotificationService.I
-                      .requestPermissions(); // İzin ister (Android 13+ ve iOS)
+                // YENİ KONTROL: Servisler daha önce başlatılmadıysa BAŞLAT
+                if (!_servicesStarted) {
+                  _servicesStarted = true; // Bayrağı işaretle
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    NotificationService.I.start();
+                    NotificationService.I.requestPermissions();
+                    PushTokenService.I.start();
+                  });
+                }
 
-                  // KRİTİK: Token kaydı yapan servisin.
-                  // Eğer bu isimde bir servisin yoksa kendi servis isminle güncelle.
-                  PushTokenService.I.start();
-                });
                 return const HomeShell();
+              } else {
+                // Kullanıcı çıkış yaptıysa veya oturum yoksa bayrağı sıfırla
+                _servicesStarted = false;
+                return const LoginPage();
               }
-              return const LoginPage();
             },
           ),
         );

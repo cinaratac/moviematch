@@ -20,7 +20,9 @@ class FeedService {
     return _fs.collection('posts').doc(postId);
   }
 
-  Future<QuerySnapshot<Map<String, dynamic>>> fetchInitial({int limit = 20}) async {
+  Future<QuerySnapshot<Map<String, dynamic>>> fetchInitial({
+    int limit = 20,
+  }) async {
     final q = _baseQuery().limit(limit);
     try {
       return await q.get(const GetOptions(source: Source.server));
@@ -34,10 +36,10 @@ class FeedService {
     int limit = 20,
   }) {
     final q = _baseQuery().startAfterDocument(lastDoc).limit(limit);
-    return q.get(); 
+    return q.get();
   }
 
- Future<Set<String>> fetchUserLikedPostIds(String userId) async {
+  Future<Set<String>> fetchUserLikedPostIds(String userId) async {
     try {
       final querySnapshot = await _fs
           .collectionGroup('likes')
@@ -53,7 +55,6 @@ class FeedService {
       }
       return likedIds;
     } catch (e) {
-      
       return {};
     }
   }
@@ -65,7 +66,7 @@ class FeedService {
           .doc(userId)
           .collection('following')
           .get(const GetOptions(source: Source.serverAndCache));
-      
+
       return querySnapshot.docs.map((d) => d.id).toSet();
     } catch (e) {
       return {};
@@ -78,19 +79,19 @@ class FeedService {
     Map<String, dynamic>? movie,
     String? handle,
     String? displayName,
-    String? photoURL, 
+    String? photoURL,
     List<String>? photoURLs, // YENİ: Çoklu foto desteği
-    double? rating,       
+    double? rating,
     bool isSpoiler = false,
-    List<String>? tags,   
-    String? reviewTitle,  
+    List<String>? tags,
+    String? reviewTitle,
   }) async {
     final user = _auth.currentUser;
     if (user == null) return;
 
     final doc = _fs.collection('posts').doc();
     final now = FieldValue.serverTimestamp();
-    
+
     await doc.set({
       'id': doc.id,
       'authorId': user.uid,
@@ -104,7 +105,8 @@ class FeedService {
       'isSpoiler': isSpoiler,
       'tags': tags ?? [],
       'reviewTitle': reviewTitle?.trim(),
-      'isReview': rating != null || (reviewTitle != null && reviewTitle.isNotEmpty),
+      'isReview':
+          rating != null || (reviewTitle != null && reviewTitle.isNotEmpty),
       'likeCount': 0,
       'replyCount': 0,
       'repostCount': 0,
@@ -121,57 +123,49 @@ class FeedService {
     final postRef = _postRef(postId);
     final likeRef = postRef.collection('likes').doc(me);
 
-    String postAuthorUid = '';
-    try {
-      final ps = await postRef.get();
-      postAuthorUid = (ps.data()?['authorId'] ?? '').toString();
-      if (postAuthorUid.isEmpty) {
-        final pc = await postRef.get(const GetOptions(source: Source.cache));
-        postAuthorUid = (pc.data()?['authorId'] ?? '').toString();
-      }
-    } catch (_) {}
-
-    bool addedLike = false;
-
     await _fs.runTransaction((tx) async {
       final likeSnap = await tx.get(likeRef);
       final now = FieldValue.serverTimestamp();
 
       if (like) {
         if (!likeSnap.exists) {
-          tx.set(likeRef, {'by': me, 'createdAt': now}, SetOptions(merge: true));
-          tx.update(postRef, {'likeCount': FieldValue.increment(1), 'updatedAt': now});
-          addedLike = true;
+          tx.set(likeRef, {
+            'by': me,
+            'createdAt': now,
+          }, SetOptions(merge: true));
+          tx.update(postRef, {
+            'likeCount': FieldValue.increment(1),
+            'updatedAt': now,
+          });
         }
       } else {
         if (likeSnap.exists) {
           tx.delete(likeRef);
-          tx.update(postRef, {'likeCount': FieldValue.increment(-1), 'updatedAt': now});
+          tx.update(postRef, {
+            'likeCount': FieldValue.increment(-1),
+            'updatedAt': now,
+          });
         }
       }
     });
 
-    if (addedLike && postAuthorUid.isNotEmpty && postAuthorUid != me) {
-      try {
-        await _writeNotification(
-          toUid: postAuthorUid,
-          type: 'like',
-          postId: postId,
-          actorId: me,
-          actorName: user?.displayName,
-          actorPhotoURL: user?.photoURL,
-          deterministicId: '${postId}_likes',
-          isGrouped: true,
-        );
-      } catch (_) {}
-    }
+    // NOT: _writeNotification kısmı silindi. Çünkü index.js içindeki
+    // createNotificationOnLike fonksiyonu Firestore trigger'ı olarak bu işi zaten yapıyor.
   }
 
   Future<void> followUser(String otherUid) async {
     final me = _auth.currentUser?.uid;
     if (me == null || me == otherUid) return;
-    final ref = _fs.collection('users').doc(me).collection('following').doc(otherUid);
-    await ref.set({'by': me, 'to': otherUid, 'createdAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    final ref = _fs
+        .collection('users')
+        .doc(me)
+        .collection('following')
+        .doc(otherUid);
+    await ref.set({
+      'by': me,
+      'to': otherUid,
+      'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Future<void> reportPost(String postId) async {
@@ -185,7 +179,11 @@ class FeedService {
     });
   }
 
-  Future<void> notifyComment({required String postId, required String postAuthorUid, String? preview}) async {
+  Future<void> notifyComment({
+    required String postId,
+    required String postAuthorUid,
+    String? preview,
+  }) async {
     final user = _auth.currentUser;
     final me = user?.uid;
     if (me == null) return;
@@ -218,17 +216,20 @@ class FeedService {
     bool isGrouped = false, // YENİ PARAMETRE
   }) async {
     final col = _fs.collection('users').doc(toUid).collection('notifications');
-    
+
     // Eğer ID verilmemişse rastgele oluştur
-    final ref = (deterministicId == null) ? col.doc() : col.doc(deterministicId);
+    final ref = (deterministicId == null)
+        ? col.doc()
+        : col.doc(deterministicId);
 
     final data = {
       'type': type,
-      'actorId': actorId,     // Son işlem yapan kişi
+      'actorId': actorId, // Son işlem yapan kişi
       'actorName': actorName ?? '',
       'actorPhotoURL': actorPhotoURL ?? '',
       'postId': postId,
-      'createdAt': FieldValue.serverTimestamp(), // Tarihi güncelle (üste çıksın)
+      'createdAt':
+          FieldValue.serverTimestamp(), // Tarihi güncelle (üste çıksın)
       'read': false, // Tekrar okunmamış yap
     };
 
@@ -244,27 +245,5 @@ class FeedService {
     }
 
     await ref.set(data, SetOptions(merge: true));
-  }
-
-  Future<void> notifyFollow({required String toUid}) async {
-    final user = _auth.currentUser;
-    final me = user?.uid;
-    if (me == null) return;
-    if (toUid.isEmpty || toUid == me) return;
-
-    try {
-      final col = _fs.collection('users').doc(toUid).collection('notifications');
-      final ref = col.doc('${me}_follow');
-
-      await ref.set({
-        'type': 'follow',
-        'actorId': me,
-        'postId': '-',
-        'createdAt': FieldValue.serverTimestamp(),
-        'read': false,
-        'actorName': user?.displayName ?? '',
-        'actorPhotoURL': user?.photoURL ?? '',
-      }, SetOptions(merge: true));
-    } catch (_) {}
   }
 }
