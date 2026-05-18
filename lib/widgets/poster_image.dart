@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:fluttergirdi/services/poster_fallback_service.dart'; 
+import 'package:fluttergirdi/services/poster_fallback_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 final customCacheManager = CacheManager(
   Config(
-    'moviePosterCache', 
-    stalePeriod: const Duration(days: 7), 
-    maxNrOfCacheObjects: 200, 
+    'moviePosterCache',
+    stalePeriod: const Duration(days: 7),
+    maxNrOfCacheObjects: 200,
   ),
 );
 
 class PosterImage extends StatefulWidget {
   final String? posterUrl;
-  final String? title; 
-  final int? tmdbId;   
+  final String? title;
+  final int? tmdbId;
   final double? width;
   final double? height;
   final BoxFit fit;
@@ -24,7 +24,7 @@ class PosterImage extends StatefulWidget {
     super.key,
     required this.posterUrl,
     required this.title,
-    this.tmdbId, 
+    this.tmdbId,
     this.width,
     this.height,
     this.fit = BoxFit.cover,
@@ -45,7 +45,7 @@ class _PosterImageState extends State<PosterImage> {
   void initState() {
     super.initState();
     _currentUrl = widget.posterUrl;
-    
+
     // Eğer URL baştan boşsa hemen fallback dene
     if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
       _tryFallback(force: true);
@@ -55,10 +55,9 @@ class _PosterImageState extends State<PosterImage> {
   @override
   void didUpdateWidget(covariant PosterImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.posterUrl != widget.posterUrl || 
-        oldWidget.title != widget.title || 
+    if (oldWidget.posterUrl != widget.posterUrl ||
+        oldWidget.title != widget.title ||
         oldWidget.tmdbId != widget.tmdbId) {
-      
       setState(() {
         _currentUrl = widget.posterUrl;
         _failed = false;
@@ -80,11 +79,11 @@ class _PosterImageState extends State<PosterImage> {
       if (mounted && _retryCount >= 3) setState(() => _failed = true);
       return;
     }
-    
+
     if (!mounted) return;
     setState(() {
       _isLoadingFallback = true;
-      _retryCount++; 
+      _retryCount++;
     });
 
     try {
@@ -94,7 +93,7 @@ class _PosterImageState extends State<PosterImage> {
         existing: widget.posterUrl,
         ignoreExisting: force, // KRİTİK DEĞİŞİKLİK
       );
-      
+
       if (mounted) {
         if (newUrl != null && newUrl.isNotEmpty && newUrl != _currentUrl) {
           setState(() {
@@ -122,8 +121,13 @@ class _PosterImageState extends State<PosterImage> {
       return _buildLoading();
     }
 
-    final int? optimalMemCacheWidth = widget.cacheWidth ?? 
-        (widget.width != null ? (widget.width! * 2.5).toInt() : 200);
+    final int? optimalMemCacheWidth =
+        widget.cacheWidth ??
+        (widget.width != null &&
+                !widget.width!.isInfinite &&
+                !widget.width!.isNaN
+            ? (widget.width! * 2.5).toInt()
+            : 300); // Sonsuzluk gelirse varsayılan olarak 300 kullan
 
     return CachedNetworkImage(
       imageUrl: _currentUrl!,
@@ -136,9 +140,9 @@ class _PosterImageState extends State<PosterImage> {
         // CachedNetworkImage yükleyemediyse URL bozuktur.
         // Bu yüzden force: true ile çağırıyoruz.
         if (!_isLoadingFallback && !_failed) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _tryFallback(force: true);
-            });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _tryFallback(force: true);
+          });
         }
         return _buildPlaceholder();
       },
@@ -148,17 +152,17 @@ class _PosterImageState extends State<PosterImage> {
 
   Widget _buildLoading() {
     return Container(
-        width: widget.width,
-        height: widget.height,
-        color: Colors.grey[900],
-        child: Center(
-          child: SizedBox(
-            width: (widget.width ?? 50) * 0.3,
-            height: (widget.width ?? 50) * 0.3,
-            child: const CircularProgressIndicator(strokeWidth: 2),
-          ),
+      width: widget.width,
+      height: widget.height,
+      color: Colors.grey[900],
+      child: Center(
+        child: SizedBox(
+          width: (widget.width ?? 50) * 0.3,
+          height: (widget.width ?? 50) * 0.3,
+          child: const CircularProgressIndicator(strokeWidth: 2),
         ),
-      );
+      ),
+    );
   }
 
   Widget _buildPlaceholder() {
@@ -168,8 +172,8 @@ class _PosterImageState extends State<PosterImage> {
       color: Colors.grey[900],
       child: Center(
         child: Icon(
-          Icons.movie_creation_outlined, 
-          color: Colors.white24, 
+          Icons.movie_creation_outlined,
+          color: Colors.white24,
           size: (widget.width ?? 50) * 0.4,
         ),
       ),
