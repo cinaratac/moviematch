@@ -7,16 +7,16 @@ import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/screens/full_shelf_screen.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
+import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/screens/edit_profile_page.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/search_movie.dart';
-import 'package:fluttergirdi/models/shelf_target.dart'; 
+import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart'; 
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
@@ -34,21 +34,35 @@ class UserShelfCache {
   static List<Map<String, String>> watchlist = [];
 
   static void setFavorites(List<LetterboxdFilm> items) {
-    favorites = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList();
+    favorites = items
+        .map((e) => {'title': e.title, 'poster': e.posterUrl})
+        .toList();
   }
+
   static void setFiveStar(List<LetterboxdFilm> items) {
-    fiveStar = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList();
+    fiveStar = items
+        .map((e) => {'title': e.title, 'poster': e.posterUrl})
+        .toList();
   }
+
   static void setDisliked(List<LetterboxdFilm> items) {
-    disliked = items.map((e) => {'title': e.title, 'poster': e.posterUrl}).toList();
+    disliked = items
+        .map((e) => {'title': e.title, 'poster': e.posterUrl})
+        .toList();
   }
+
   static void setWatchlistFromMaps(List<Map<String, dynamic>> items) {
-    watchlist = items.map((m) => {
-      'title': (m['title'] ?? '').toString(),
-      'poster': (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '').toString(),
-    }).toList();
+    watchlist = items
+        .map(
+          (m) => {
+            'title': (m['title'] ?? '').toString(),
+            'poster': (m['poster'] ?? m['posterUrl'] ?? m['image'] ?? '')
+                .toString(),
+          },
+        )
+        .toList();
   }
-  
+
   static void clear() {
     favorites = [];
     fiveStar = [];
@@ -58,11 +72,11 @@ class UserShelfCache {
 }
 
 class _ActivityItemData {
-  final String id; 
+  final String id;
   final String text;
   final DateTime? createdAt;
-  final String posterUrl; 
-  final String title; 
+  final String posterUrl;
+  final String title;
   final int likeCount;
   final int replyCount;
   final int? tmdbId;
@@ -120,7 +134,6 @@ class _CountPill extends StatelessWidget {
 }
 
 Widget _profileHeaderSection({
-  
   required BuildContext context,
   required User user,
   required int? followers,
@@ -138,22 +151,22 @@ Widget _profileHeaderSection({
         return GestureDetector(
           onTap: () => Navigator.pop(ctx),
           child: InteractiveViewer(
-            child: Center(
-              child: Image.network(imageUrl, fit: BoxFit.contain),
-            ),
+            child: Center(child: Image.network(imageUrl, fit: BoxFit.contain)),
           ),
         );
       },
     );
   }
-final isDark = Theme.of(context).brightness == Brightness.dark;
+
+  final isDark = Theme.of(context).brightness == Brightness.dark;
   void showUserList(String title, String collection) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (_) => _UserListSheet(title: title, uid: user.uid, collection: collection),
+      builder: (_) =>
+          _UserListSheet(title: title, uid: user.uid, collection: collection),
     );
   }
 
@@ -168,16 +181,22 @@ final isDark = Theme.of(context).brightness == Brightness.dark;
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF2E7D32), width: 2), // Yeşil çerçeve
+              border: Border.all(
+                color: const Color(0xFF2E7D32),
+                width: 2,
+              ), // Yeşil çerçeve
             ),
             child: CircleAvatar(
               radius: 36,
-              backgroundImage: user.photoURL != null && user.photoURL!.isNotEmpty
+              backgroundImage:
+                  user.photoURL != null && user.photoURL!.isNotEmpty
                   ? NetworkImage(user.photoURL!)
                   : null,
               child: (user.photoURL == null || user.photoURL!.isEmpty)
                   ? Text(
-                      shownName(user).isNotEmpty ? shownName(user)[0].toUpperCase() : '?',
+                      shownName(user).isNotEmpty
+                          ? shownName(user)[0].toUpperCase()
+                          : '?',
                       style: const TextStyle(fontSize: 24),
                     )
                   : null,
@@ -192,18 +211,26 @@ final isDark = Theme.of(context).brightness == Brightness.dark;
               Text(
                 shownName(user),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: isDark ?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),
+                  color: isDark
+                      ? const Color.fromARGB(255, 255, 255, 255)
+                      : const Color.fromARGB(255, 0, 0, 0),
                   fontWeight: FontWeight.w600,
-                  shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 4)],
+                  shadows: [
+                    Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 4),
+                  ],
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
-              
+
               // --- ROZET ALANI ---
               StreamBuilder<DocumentSnapshot>(
-                stream: FirebaseFirestore.instance.collection('users').doc(user.uid).snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .snapshots(),
                 builder: (context, snap) {
-                  if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
+                  if (!snap.hasData || !snap.data!.exists)
+                    return const SizedBox.shrink();
                   final userData = snap.data!.data() as Map<String, dynamic>?;
                   final badges = List<String>.from(userData?['badges'] ?? []);
                   if (badges.isEmpty) return const SizedBox.shrink();
@@ -215,8 +242,8 @@ final isDark = Theme.of(context).brightness == Brightness.dark;
                       runSpacing: 4,
                       children: badges.map((badgeId) {
                         final badge = AppBadge.allBadges.firstWhere(
-                          (b) => b.id == badgeId, 
-                          orElse: () => AppBadge.allBadges.first
+                          (b) => b.id == badgeId,
+                          orElse: () => AppBadge.allBadges.first,
                         );
                         return Tooltip(
                           message: '${badge.name}: ${badge.description}',
@@ -226,9 +253,16 @@ final isDark = Theme.of(context).brightness == Brightness.dark;
                             decoration: BoxDecoration(
                               color: badge.color.withOpacity(0.15),
                               shape: BoxShape.circle,
-                              border: Border.all(color: badge.color.withOpacity(0.6), width: 1),
+                              border: Border.all(
+                                color: badge.color.withOpacity(0.6),
+                                width: 1,
+                              ),
                             ),
-                            child: Icon(badge.icon, size: 12, color: badge.color),
+                            child: Icon(
+                              badge.icon,
+                              size: 12,
+                              color: badge.color,
+                            ),
                           ),
                         );
                       }).toList(),
@@ -236,23 +270,31 @@ final isDark = Theme.of(context).brightness == Brightness.dark;
                   );
                 },
               ),
-              
+
               const SizedBox(height: 6),
               (followers == null || following == null)
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
                         _CountPill(
-                          label: 'Takipçi', 
+                          label: 'Takipçi',
                           value: followers,
                           onTap: () => showUserList('Takipçiler', 'followers'),
                         ),
                         _CountPill(
-                          label: 'Takip', 
+                          label: 'Takip',
                           value: following,
-                          onTap: () => showUserList('Takip Edilenler', 'following'),
+                          onTap: () =>
+                              showUserList('Takip Edilenler', 'following'),
                         ),
                       ],
                     ),
@@ -264,7 +306,12 @@ final isDark = Theme.of(context).brightness == Brightness.dark;
                     'Letterboxd: @$lbUsername',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.white70,
-                      shadows: [Shadow(color: Colors.black.withOpacity(0.5), blurRadius: 2)]
+                      shadows: [
+                        Shadow(
+                          color: Colors.black.withOpacity(0.5),
+                          blurRadius: 2,
+                        ),
+                      ],
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -292,8 +339,9 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<List<LetterboxdFilm>>? _futureFavs;
   Future<List<LetterboxdFilm>>? _futureFiveStar;
   Future<List<LetterboxdFilm>>? _futureDisliked;
-  
-  final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache = {};
+
+  final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
+      {};
 
   int? _followersCount;
   int? _followingCount;
@@ -308,7 +356,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _bindLbFromFirestore();
     _bootstrapCounts();
   }
-  
+
   Future<void> _bootstrapCounts() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -316,7 +364,7 @@ class _ProfilePageState extends State<ProfilePage> {
     try {
       final f1 = await svc.fetchFollowerCountOnce(uid);
       final f2 = await svc.fetchFollowingCountOnce(uid);
-      
+
       if (mounted) {
         setState(() {
           _followersCount = f1;
@@ -329,24 +377,29 @@ class _ProfilePageState extends State<ProfilePage> {
 
       if (f1 != currentStoredFollowers || f2 != currentStoredFollowing) {
         await FirebaseFirestore.instance.collection('users').doc(uid).update({
-           'followersCount': f1,
-           'followingCount': f2,
-           'updatedAt': FieldValue.serverTimestamp(),
+          'followersCount': f1,
+          'followingCount': f2,
+          'updatedAt': FieldValue.serverTimestamp(),
         });
       }
 
       await GamificationService.instance.checkAndAwardBadges();
-
     } catch (_) {}
 
     _followSub?.cancel();
     _followSub = svc.events.listen((e) {
       if (!mounted) return;
       if (e.targetUid == uid) {
-        setState(() => _followersCount = (_followersCount ?? 0) + (e.followed ? 1 : -1));
+        setState(
+          () =>
+              _followersCount = (_followersCount ?? 0) + (e.followed ? 1 : -1),
+        );
       }
       if (e.actorUid == uid) {
-        setState(() => _followingCount = (_followingCount ?? 0) + (e.followed ? 1 : -1));
+        setState(
+          () =>
+              _followingCount = (_followingCount ?? 0) + (e.followed ? 1 : -1),
+        );
       }
     });
   }
@@ -396,12 +449,16 @@ class _ProfilePageState extends State<ProfilePage> {
     final favKeys = _lastUserData?['favoritesKeys'];
     final hasFirestoreFavs = (favKeys is List && favKeys.isNotEmpty);
     final fiveStarKeys = _lastUserData?['fiveStarKeys'];
-    final hasFirestoreFiveStar = (fiveStarKeys is List && fiveStarKeys.isNotEmpty);
-    
+    final hasFirestoreFiveStar =
+        (fiveStarKeys is List && fiveStarKeys.isNotEmpty);
+
     final hasCacheFavs = UserShelfCache.favorites.isNotEmpty;
     final hasCacheFiveStar = UserShelfCache.fiveStar.isNotEmpty;
 
-    if (hasFirestoreFavs || hasCacheFavs || hasFirestoreFiveStar || hasCacheFiveStar) {
+    if (hasFirestoreFavs ||
+        hasCacheFavs ||
+        hasFirestoreFiveStar ||
+        hasCacheFiveStar) {
       _showGuideNotifier.value = false;
     } else {
       _showGuideNotifier.value = true;
@@ -418,14 +475,24 @@ class _ProfilePageState extends State<ProfilePage> {
       await sp.setString('lb_username_$uid', oldGlobal);
       await sp.remove('lb_username');
     }
-    final u = uid != null ? sp.getString('lb_username_$uid') : sp.getString('lb_username');
+    final u = uid != null
+        ? sp.getString('lb_username_$uid')
+        : sp.getString('lb_username');
     setState(() {
       _lbUsername = u;
-      _futureFavs = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFavorites(u);
-      _futureFiveStar = (u == null || u.isEmpty) ? null : LetterboxdService.fetchFiveStar(u);
-      _futureDisliked = (u == null || u.isEmpty) ? null : LetterboxdService.fetchDisliked(u);
+      _futureFavs = (u == null || u.isEmpty)
+          ? null
+          : LetterboxdService.fetchFavorites(u);
+      _futureFiveStar = (u == null || u.isEmpty)
+          ? null
+          : LetterboxdService.fetchFiveStar(u);
+      _futureDisliked = (u == null || u.isEmpty)
+          ? null
+          : LetterboxdService.fetchDisliked(u);
     });
-    _primeShelfCache().then((_) { _checkGuideVisibility(); });
+    _primeShelfCache().then((_) {
+      _checkGuideVisibility();
+    });
     _forceWriteLbUsernameIfMissing();
   }
 
@@ -433,29 +500,40 @@ class _ProfilePageState extends State<ProfilePage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _userSub?.cancel();
-    _userSub = FirebaseFirestore.instance.collection('users').doc(uid).snapshots().listen((snap) async {
-      if (!snap.exists) return;
-      final data = snap.data() ?? const {};
-      
-      // GÜNCELLEME: Veri geldiğinde setState ile TÜM ekranın yenilenmesini sağlıyoruz.
-      if (mounted) {
-        setState(() {
-          _lastUserData = Map<String, dynamic>.from(data);
-          
-          final lb = (data['letterboxdUsername'] ?? '').toString().trim();
-          final appU = (data['displayName'] ?? data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
-          
-          if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
-            _appUsername = appU;
+    _userSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) async {
+          if (!snap.exists) return;
+          final data = snap.data() ?? const {};
+
+          // GÜNCELLEME: Veri geldiğinde setState ile TÜM ekranın yenilenmesini sağlıyoruz.
+          if (mounted) {
+            setState(() {
+              _lastUserData = Map<String, dynamic>.from(data);
+
+              final lb = (data['letterboxdUsername'] ?? '').toString().trim();
+              final appU =
+                  (data['displayName'] ??
+                          data['username'] ??
+                          data['handle'] ??
+                          data['appUsername'] ??
+                          '')
+                      .toString()
+                      .trim();
+
+              if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
+                _appUsername = appU;
+              }
+              if (lb.isNotEmpty && lb != _lbUsername) {
+                _lbUsername = lb;
+                _refreshFavorites();
+              }
+            });
           }
-          if (lb.isNotEmpty && lb != _lbUsername) {
-             _lbUsername = lb;
-             _refreshFavorites(); 
-          }
+          _checkGuideVisibility();
         });
-      }
-      _checkGuideVisibility();
-    });
   }
 
   Future<void> _refreshFavorites() async {
@@ -465,7 +543,8 @@ class _ProfilePageState extends State<ProfilePage> {
         try {
           final ref = FirebaseFirestore.instance.collection('users').doc(uid);
           var snap = await ref.get(const GetOptions(source: Source.cache));
-          if (!snap.exists) snap = await ref.get(const GetOptions(source: Source.server));
+          if (!snap.exists)
+            snap = await ref.get(const GetOptions(source: Source.server));
           final lb = (snap.data()?['letterboxdUsername'] ?? '').toString();
           if (lb.isNotEmpty) setState(() => _lbUsername = lb);
         } catch (_) {}
@@ -480,7 +559,7 @@ class _ProfilePageState extends State<ProfilePage> {
     await sp.remove('${key}_watchlist');
 
     setState(() {
-      if(_lbUsername != null) {
+      if (_lbUsername != null) {
         _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
         _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
         _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
@@ -519,11 +598,11 @@ class _ProfilePageState extends State<ProfilePage> {
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
   }
 
-
   Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     void onReturnFromSearch() {
       setState(() => _watchlistFutureCache.clear());
     }
+
     if (keys.isEmpty) {
       return SizedBox(
         height: 140,
@@ -533,7 +612,10 @@ class _ProfilePageState extends State<ProfilePage> {
           separatorBuilder: (_, __) => const SizedBox(width: 12),
           itemBuilder: (context, i) => AspectRatio(
             aspectRatio: 2 / 3,
-            child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch),
+            child: _AddPosterTile(
+              target: ShelfTarget.watchlist,
+              onRefresh: onReturnFromSearch,
+            ),
           ),
         ),
       );
@@ -542,21 +624,44 @@ class _ProfilePageState extends State<ProfilePage> {
     final hash = limited.join('|');
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
-        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
-        try { final c = await col.get(const GetOptions(source: Source.cache)); if (c.exists) { final d = c.data(); d?['docId'] = k; return d; } } catch (_) {}
-        try { final s = await col.get(const GetOptions(source: Source.server)); if (s.exists) { final d = s.data(); d?['docId'] = k; return d; } } catch (_) {}
+        final col = FirebaseFirestore.instance
+            .collection('catalog_films')
+            .doc(k);
+        try {
+          final c = await col.get(const GetOptions(source: Source.cache));
+          if (c.exists) {
+            final d = c.data();
+            d?['docId'] = k;
+            return d;
+          }
+        } catch (_) {}
+        try {
+          final s = await col.get(const GetOptions(source: Source.server));
+          if (s.exists) {
+            final d = s.data();
+            d?['docId'] = k;
+            return d;
+          }
+        } catch (_) {}
         return null;
       }),
     );
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
-        if (filmSnap.connectionState == ConnectionState.waiting && !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
-          return const SizedBox(height: 140, child: Center(child: CircularProgressIndicator()));
+        if (filmSnap.connectionState == ConnectionState.waiting &&
+            !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
+          return const SizedBox(
+            height: 140,
+            child: Center(child: CircularProgressIndicator()),
+          );
         }
-        final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+        final films = (filmSnap.data ?? [])
+            .where((m) => m != null)
+            .map((m) => m!)
+            .toList();
         UserShelfCache.setWatchlistFromMaps(films);
-        
+
         return SizedBox(
           height: 140,
           child: ListView.separated(
@@ -564,21 +669,74 @@ class _ProfilePageState extends State<ProfilePage> {
             itemCount: films.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
-              if (i == films.length) return AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: ShelfTarget.watchlist, onRefresh: onReturnFromSearch));
-              
+              if (i == films.length)
+                return AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _AddPosterTile(
+                    target: ShelfTarget.watchlist,
+                    onRefresh: onReturnFromSearch,
+                  ),
+                );
+
               final film = films[i];
-              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
+              final poster =
+                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
+                      .toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
               final tmdbId = _extractTmdbId(film); // TMDB ID Extraction
-             
-             return GestureDetector(
+
+              return GestureDetector(
                 onTap: () {
-                  if (title.isNotEmpty) MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: ShelfTarget.watchlist, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
+                  if (title.isNotEmpty)
+                    MovieActionHelper.show(
+                      context,
+                      title: title,
+                      posterUrl: poster,
+                      docId: docId,
+                      target: ShelfTarget.watchlist,
+                      onItemDeleted: () =>
+                          setState(() => _watchlistFutureCache.clear()),
+                    );
                 },
-                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [
-                  PosterImage(posterUrl: poster, title: title, tmdbId: tmdbId, fit: BoxFit.cover), // Passed tmdbId
-                  if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PosterImage(
+                          posterUrl: poster,
+                          title: title,
+                          tmdbId: tmdbId,
+                          fit: BoxFit.cover,
+                        ), // Passed tmdbId
+                        if (title.isNotEmpty)
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              color: Colors.black54,
+                              child: Text(
+                                _noYear(title),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               );
             },
           ),
@@ -587,12 +745,23 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _shelfSectionFromUserField(String fieldName, {int maxItems = 30, String emptyText = 'Film bulunamadı.'}) {
+  Widget _shelfSectionFromUserField(
+    String fieldName, {
+    int maxItems = 30,
+    String emptyText = 'Film bulunamadı.',
+  }) {
     void onReturnFromSearch() {
       setState(() => _watchlistFutureCache.clear());
     }
-    final keys = List<dynamic>.from((_lastUserData?[fieldName] ?? const [])).map((e) => e.toString()).toList();
-    final ShelfTarget target = fieldName == 'favoritesKeys' ? ShelfTarget.favorites : fieldName == 'fiveStarKeys' ? ShelfTarget.fiveStar : ShelfTarget.disliked;
+
+    final keys = List<dynamic>.from(
+      (_lastUserData?[fieldName] ?? const []),
+    ).map((e) => e.toString()).toList();
+    final ShelfTarget target = fieldName == 'favoritesKeys'
+        ? ShelfTarget.favorites
+        : fieldName == 'fiveStarKeys'
+        ? ShelfTarget.fiveStar
+        : ShelfTarget.disliked;
     if (keys.isEmpty) {
       return SizedBox(
         height: 140,
@@ -600,7 +769,13 @@ class _ProfilePageState extends State<ProfilePage> {
           scrollDirection: Axis.horizontal,
           itemCount: 1,
           separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (context, i) => AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch)),
+          itemBuilder: (context, i) => AspectRatio(
+            aspectRatio: 2 / 3,
+            child: _AddPosterTile(
+              target: target,
+              onRefresh: onReturnFromSearch,
+            ),
+          ),
         ),
       );
     }
@@ -608,19 +783,42 @@ class _ProfilePageState extends State<ProfilePage> {
     final hash = '$fieldName:' + limited.join('|');
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
-        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
-        try { final c = await col.get(const GetOptions(source: Source.cache)); if (c.exists) { final d = c.data(); d?['docId'] = k; return d; } } catch (_) {}
-        try { final s = await col.get(const GetOptions(source: Source.server)); if (s.exists) { final d = s.data(); d?['docId'] = k; return d; } } catch (_) {}
+        final col = FirebaseFirestore.instance
+            .collection('catalog_films')
+            .doc(k);
+        try {
+          final c = await col.get(const GetOptions(source: Source.cache));
+          if (c.exists) {
+            final d = c.data();
+            d?['docId'] = k;
+            return d;
+          }
+        } catch (_) {}
+        try {
+          final s = await col.get(const GetOptions(source: Source.server));
+          if (s.exists) {
+            final d = s.data();
+            d?['docId'] = k;
+            return d;
+          }
+        } catch (_) {}
         return null;
       }),
     );
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
-        if (filmSnap.connectionState == ConnectionState.waiting && !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
-          return const SizedBox(height: 140, child: Center(child: CircularProgressIndicator()));
+        if (filmSnap.connectionState == ConnectionState.waiting &&
+            !(filmSnap.hasData && (filmSnap.data?.isNotEmpty ?? false))) {
+          return const SizedBox(
+            height: 140,
+            child: Center(child: CircularProgressIndicator()),
+          );
         }
-        final films = (filmSnap.data ?? []).where((m) => m != null).map((m) => m!).toList();
+        final films = (filmSnap.data ?? [])
+            .where((m) => m != null)
+            .map((m) => m!)
+            .toList();
         return SizedBox(
           height: 140,
           child: ListView.separated(
@@ -628,20 +826,73 @@ class _ProfilePageState extends State<ProfilePage> {
             itemCount: films.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, i) {
-              if (i == films.length) return AspectRatio(aspectRatio: 2 / 3, child: _AddPosterTile(target: target, onRefresh: onReturnFromSearch));
+              if (i == films.length)
+                return AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: _AddPosterTile(
+                    target: target,
+                    onRefresh: onReturnFromSearch,
+                  ),
+                );
               final film = films[i];
-              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
+              final poster =
+                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
+                      .toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
               final tmdbId = _extractTmdbId(film); // TMDB ID Extraction
 
               return GestureDetector(
                 onTap: () {
-                  if (title.isNotEmpty) MovieActionHelper.show(context, title: title, posterUrl: poster, docId: docId, target: target, onItemDeleted: () => setState(() => _watchlistFutureCache.clear()));
+                  if (title.isNotEmpty)
+                    MovieActionHelper.show(
+                      context,
+                      title: title,
+                      posterUrl: poster,
+                      docId: docId,
+                      target: target,
+                      onItemDeleted: () =>
+                          setState(() => _watchlistFutureCache.clear()),
+                    );
                 },
-                child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Stack(fit: StackFit.expand, children: [
-                  PosterImage(posterUrl: poster, title: title, tmdbId: tmdbId, fit: BoxFit.cover), // Passed tmdbId
-                  if (title.isNotEmpty) Align(alignment: Alignment.bottomCenter, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.black54, child: Text(_noYear(title), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.white), textAlign: TextAlign.center)))]))),
+                child: AspectRatio(
+                  aspectRatio: 2 / 3,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PosterImage(
+                          posterUrl: poster,
+                          title: title,
+                          tmdbId: tmdbId,
+                          fit: BoxFit.cover,
+                        ), // Passed tmdbId
+                        if (title.isNotEmpty)
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              color: Colors.black54,
+                              child: Text(
+                                _noYear(title),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               );
             },
           ),
@@ -651,135 +902,269 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // --- 1. SEKME: FİLMLER ---
- 
-Widget _buildSectionHeader(String title, List<String> keys, ShelfTarget target) { // target eklendi
-  final textColor = Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87;
-  return Padding(
-    padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor)),
-        if (keys.isNotEmpty) 
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => FullShelfScreen(
-                    title: title,
-                    filmKeys: keys,
-                    target: target, 
-                  ),
-                ),
-              );
-            },
-            child: const Text('Tümü', style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 14)),
+
+  Widget _buildSectionHeader(
+    String title,
+    List<String> keys,
+    ShelfTarget target,
+  ) {
+    // target eklendi
+    final textColor = Theme.of(context).brightness == Brightness.dark
+        ? Colors.white
+        : Colors.black87;
+    return Padding(
+      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
           ),
-      ],
-    ),
-  );
-}
-  
+          if (keys.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FullShelfScreen(
+                      title: title,
+                      filmKeys: keys,
+                      target: target,
+                    ),
+                  ),
+                );
+              },
+              child: const Text(
+                'Tümü',
+                style: TextStyle(
+                  color: Color(0xFF2E7D32),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildProfileContentAfterHeader() {
-    final favKeys = List<String>.from((_lastUserData?['favoritesKeys'] ?? []).map((e) => e.toString()));
-    final fiveStarKeys = List<String>.from((_lastUserData?['fiveStarKeys'] ?? []).map((e) => e.toString()));
-    final dislikedKeys = List<String>.from((_lastUserData?['dislikedKeys'] ?? []).map((e) => e.toString()));
-    final watchlistKeys = List<String>.from((_lastUserData?['watchlistKeys'] ?? []).map((e) => e.toString()));
+    final favKeys = List<String>.from(
+      (_lastUserData?['favoritesKeys'] ?? []).map((e) => e.toString()),
+    );
+    final fiveStarKeys = List<String>.from(
+      (_lastUserData?['fiveStarKeys'] ?? []).map((e) => e.toString()),
+    );
+    final dislikedKeys = List<String>.from(
+      (_lastUserData?['dislikedKeys'] ?? []).map((e) => e.toString()),
+    );
+    final watchlistKeys = List<String>.from(
+      (_lastUserData?['watchlistKeys'] ?? []).map((e) => e.toString()),
+    );
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        if (_lbUsername == null) Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Row(children: [Icon(Icons.alternate_email, color: textColor), const SizedBox(width: 8), Text('Letterboxd bağlı değil', style: TextStyle(color: textColor))])),
+        if (_lbUsername == null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Row(
+              children: [
+                Icon(Icons.alternate_email, color: textColor),
+                const SizedBox(width: 8),
+                Text(
+                  'Letterboxd bağlı değil',
+                  style: TextStyle(color: textColor),
+                ),
+              ],
+            ),
+          ),
         const SizedBox(height: 12),
-        Builder(builder: (context) {
-           final bio = (_lastUserData?['bio'] ?? '').toString();
-           if(bio.isNotEmpty) return Padding(padding: const EdgeInsets.only(bottom: 16), child: Text(bio, style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4, color: textColor)));
-           return const SizedBox.shrink();
-        }),
-        Builder(builder: (context) {
-   final age = _lastUserData?['age'];
-   final genres = List<dynamic>.from(_lastUserData?['favGenres'] ?? []);
-  final dirs = List<dynamic>.from(_lastUserData?['favDirectors'] ?? []);
-   // Burayı List<dynamic> yapıyoruz çünkü hem String hem Map gelebilir
-   final acts = List<dynamic>.from(_lastUserData?['favActors'] ?? []);
-   
-   if((age==null || age<=0) && genres.isEmpty && dirs.isEmpty && acts.isEmpty) return const SizedBox.shrink();
+        Builder(
+          builder: (context) {
+            final bio = (_lastUserData?['bio'] ?? '').toString();
+            if (bio.isNotEmpty)
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  bio,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    height: 1.4,
+                    color: textColor,
+                  ),
+                ),
+              );
+            return const SizedBox.shrink();
+          },
+        ),
+        Builder(
+          builder: (context) {
+            final age = _lastUserData?['age'];
+            final genres = List<dynamic>.from(
+              _lastUserData?['favGenres'] ?? [],
+            );
+            final dirs = List<dynamic>.from(
+              _lastUserData?['favDirectors'] ?? [],
+            );
+            // Burayı List<dynamic> yapıyoruz çünkü hem String hem Map gelebilir
+            final acts = List<dynamic>.from(_lastUserData?['favActors'] ?? []);
 
-   Widget cw(String t, List<dynamic> i, {bool isActor = false}) {
-     if(i.isEmpty) return const SizedBox.shrink();
-     return Padding(
-       padding: const EdgeInsets.only(top: 8), 
-       child: Column(
-         crossAxisAlignment: CrossAxisAlignment.start, 
-         children: [
-           Text(t, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: textColor)), 
-           const SizedBox(height: 8), 
-           Wrap(
-             spacing: 8, 
-             runSpacing: 8, 
-             children: i.map((item) {
-                // Verinin tipine göre isim ve id'yi ayır
-                String name;
-                int id = 0;
-                if (item is Map) {
-                  name = item['name'] ?? '';
-                  id = item['id'] ?? 0;
-                } else {
-                  name = item.toString(); // Eski String veriler için
-                }
+            if ((age == null || age <= 0) &&
+                genres.isEmpty &&
+                dirs.isEmpty &&
+                acts.isEmpty)
+              return const SizedBox.shrink();
 
-                return ActionChip(
-                  label: Text(name, style: const TextStyle(fontSize: 12)), 
-                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200], 
-                  side: BorderSide.none, 
-                  padding: EdgeInsets.zero,
-                  onPressed: isActor ? () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ActorScreen(
-                          actorId: id, 
-                          actorName: name,
-                        ),
-                      ),
-                    );
-                  } : null,
-                );
-             }).toList()
-           )
-         ]
-       )
-     );
-   }
+            // EKLENDİ: isDirector parametresi
+            Widget cw(
+              String t,
+              List<dynamic> i, {
+              bool isActor = false,
+              bool isDirector = false,
+            }) {
+              if (i.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      t,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleSmall?.copyWith(color: textColor),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: i.map((item) {
+                        String name;
+                        int id = 0;
+                        if (item is Map) {
+                          name = item['name'] ?? '';
+                          id = item['id'] ?? 0;
+                        } else {
+                          name = item.toString();
+                        }
 
-   return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-     if(age is int && age > 0) Padding(padding: const EdgeInsets.only(top:8), child: Row(children: [Icon(Icons.cake, size: 18, color: textColor), const SizedBox(width: 6), Text('Yaş: $age', style: TextStyle(color: textColor))])),
-     cw('Sevdiğin türler', genres), 
-     cw('Sevdiğin yönetmenler', dirs), 
-     cw('Sevdiğin oyuncular', acts, isActor: true) // isActor true olarak gönderildi
-   ]);
-}),
-        
+                        return ActionChip(
+                          label: Text(
+                            name,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          backgroundColor: isDark
+                              ? Colors.grey[800]
+                              : Colors.grey[200],
+                          side: BorderSide.none,
+                          padding: EdgeInsets.zero,
+                          // EKLENDİ: Yönetmen ekranı yönlendirmesi
+                          onPressed: isActor
+                              ? () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ActorScreen(
+                                        actorId: id,
+                                        actorName: name,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : isDirector
+                              ? () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => DirectorScreen(
+                                        directorId: id,
+                                        directorName: name,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : null,
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (age is int && age > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.cake, size: 18, color: textColor),
+                        const SizedBox(width: 6),
+                        Text('Yaş: $age', style: TextStyle(color: textColor)),
+                      ],
+                    ),
+                  ),
+                cw('Sevdiğin türler', genres),
+                cw('Sevdiğin yönetmenler', dirs, isDirector: true),
+                cw('Sevdiğin oyuncular', acts, isActor: true),
+              ],
+            );
+          },
+        ),
+
         const SizedBox(height: 16),
 
         // --- BÖLÜMLER ---
-        _buildSectionHeader('Favori Filmler', favKeys, ShelfTarget.favorites), // ShelfTarget.favorites eklendi
-_shelfSectionFromUserField('favoritesKeys', emptyText: 'Favori film bulunamadı.', maxItems: 10),
+        _buildSectionHeader(
+          'Favori Filmler',
+          favKeys,
+          ShelfTarget.favorites,
+        ), // ShelfTarget.favorites eklendi
+        _shelfSectionFromUserField(
+          'favoritesKeys',
+          emptyText: 'Favori film bulunamadı.',
+          maxItems: 10,
+        ),
 
-// Sevdiği Filmler
-_buildSectionHeader('Sevdiği Filmler', fiveStarKeys, ShelfTarget.fiveStar), // ShelfTarget.fiveStar eklendi
-_shelfSectionFromUserField('fiveStarKeys', emptyText: '5★ film bulunamadı.', maxItems: 10),
+        // Sevdiği Filmler
+        _buildSectionHeader(
+          'Sevdiği Filmler',
+          fiveStarKeys,
+          ShelfTarget.fiveStar,
+        ), // ShelfTarget.fiveStar eklendi
+        _shelfSectionFromUserField(
+          'fiveStarKeys',
+          emptyText: '5★ film bulunamadı.',
+          maxItems: 10,
+        ),
 
-// Sevmediği Filmler
-_buildSectionHeader('Sevmediği Filmler', dislikedKeys, ShelfTarget.disliked), // ShelfTarget.disliked eklendi
-_shelfSectionFromUserField('dislikedKeys', emptyText: 'Sevmediği film bulunamadı.', maxItems: 10),
+        // Sevmediği Filmler
+        _buildSectionHeader(
+          'Sevmediği Filmler',
+          dislikedKeys,
+          ShelfTarget.disliked,
+        ), // ShelfTarget.disliked eklendi
+        _shelfSectionFromUserField(
+          'dislikedKeys',
+          emptyText: 'Sevmediği film bulunamadı.',
+          maxItems: 10,
+        ),
 
-// Watchlist
-_buildSectionHeader('Watchlist', watchlistKeys, ShelfTarget.watchlist), // ShelfTarget.watchlist eklendi
-_watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
+        // Watchlist
+        _buildSectionHeader(
+          'Watchlist',
+          watchlistKeys,
+          ShelfTarget.watchlist,
+        ), // ShelfTarget.watchlist eklendi
+        _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
 
         const SizedBox(height: 52),
       ],
@@ -791,7 +1176,9 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
     // --- TEMA VE RENKLER ---
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryGreen = const Color(0xFF2E7D32);
-    final bgGradientStart = isDark ? const Color(0xFF0D2410) : const Color(0xFFE8F5E9);
+    final bgGradientStart = isDark
+        ? const Color(0xFF0D2410)
+        : const Color(0xFFE8F5E9);
     final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
 
     return StreamBuilder<User?>(
@@ -800,16 +1187,25 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
         if (snap.connectionState == ConnectionState.waiting) {
           return Scaffold(
             body: Container(
-              decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [bgGradientStart, bgGradientEnd])),
-              child: const Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [bgGradientStart, bgGradientEnd],
+                ),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(color: Color(0xFF2E7D32)),
+              ),
             ),
           );
         }
         final user = snap.data;
-        if (user == null) return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
+        if (user == null)
+          return const Scaffold(body: Center(child: Text('Oturum açılmadı')));
 
         return DefaultTabController(
-          length: 3, 
+          length: 3,
           child: Scaffold(
             extendBodyBehindAppBar: true,
             // Gradient Arka Planı
@@ -819,7 +1215,7 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [bgGradientStart, bgGradientEnd],
-                  stops: const [0.0, 0.4], 
+                  stops: const [0.0, 0.4],
                 ),
               ),
               child: Stack(
@@ -828,65 +1224,98 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
                     headerSliverBuilder: (context, innerBoxIsScrolled) {
                       return [
                         SliverAppBar(
-                          floating: true, 
-                          snap: true, 
-                          backgroundColor: Colors.transparent, // Gradient görünsün
-                          elevation: 0, 
-                          scrolledUnderElevation: 0, 
-                          surfaceTintColor: Colors.transparent, 
+                          floating: true,
+                          snap: true,
+                          backgroundColor:
+                              Colors.transparent, // Gradient görünsün
+                          elevation: 0,
+                          scrolledUnderElevation: 0,
+                          surfaceTintColor: Colors.transparent,
                           automaticallyImplyLeading: false,
                           actions: [
                             Container(
                               margin: const EdgeInsets.symmetric(horizontal: 4),
-                              
+
                               child: IconButton(
-      tooltip: 'Düzenle',
-      icon: Icon(
-        Icons.edit_outlined,
-        color: isDark ? const Color.fromARGB(255, 255, 255, 255) : const Color.fromARGB(255, 0, 0, 0),
-      ),
-      // --- BURAYI GÜNCELLEYİN ---
-      onPressed: () async {
-        // 1. Edit sayfasına git ve sonucu bekle
-        final bool? result = await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => EditProfilePage(initialUserData: _lastUserData),
-          ),
-        );
+                                tooltip: 'Düzenle',
+                                icon: Icon(
+                                  Icons.edit_outlined,
+                                  color: isDark
+                                      ? const Color.fromARGB(255, 255, 255, 255)
+                                      : const Color.fromARGB(255, 0, 0, 0),
+                                ),
+                                // --- BURAYI GÜNCELLEYİN ---
+                                onPressed: () async {
+                                  // 1. Edit sayfasına git ve sonucu bekle
+                                  final bool? result =
+                                      await Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => EditProfilePage(
+                                            initialUserData: _lastUserData,
+                                          ),
+                                        ),
+                                      );
 
-        // 2. Eğer 'true' döndüyse (kayıt yapıldıysa)
-        if (result == true && mounted) {
-          // A) Önce mevcut ekranı bir yenile (loading gösterebilir veya bekleyebilirsin)
-          setState(() {});
+                                  // 2. Eğer 'true' döndüyse (kayıt yapıldıysa)
+                                  if (result == true && mounted) {
+                                    // A) Önce mevcut ekranı bir yenile (loading gösterebilir veya bekleyebilirsin)
+                                    setState(() {});
 
-          // B) Firestore'dan güncel veriyi MANUEL olarak hemen çek (Stream'i bekleme)
-          final uid = FirebaseAuth.instance.currentUser?.uid;
-          if (uid != null) {
-            try {
-              final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-              if (doc.exists && mounted) {
-                final data = doc.data()!;
-                // C) Değişkenleri güncelle ki ekran hemen değişsin
-                setState(() {
-                  _lastUserData = data;
-                  // Header'da kullanılan değişkeni güncelle
-                  _appUsername = (data['displayName'] ?? data['username'] ?? '').toString();
-                  // Varsa diğer alanlar da güncellenebilir
-                  _lbUsername = (data['letterboxdUsername'] ?? '').toString();
-                });
-              }
-            } catch (_) {
-              // Hata olursa zaten stream (listener) arkadan gelip düzeltecektir.
-            }
-          }
-        }
-      },
-                              )
+                                    // B) Firestore'dan güncel veriyi MANUEL olarak hemen çek (Stream'i bekleme)
+                                    final uid =
+                                        FirebaseAuth.instance.currentUser?.uid;
+                                    if (uid != null) {
+                                      try {
+                                        final doc = await FirebaseFirestore
+                                            .instance
+                                            .collection('users')
+                                            .doc(uid)
+                                            .get();
+                                        if (doc.exists && mounted) {
+                                          final data = doc.data()!;
+                                          // C) Değişkenleri güncelle ki ekran hemen değişsin
+                                          setState(() {
+                                            _lastUserData = data;
+                                            // Header'da kullanılan değişkeni güncelle
+                                            _appUsername =
+                                                (data['displayName'] ??
+                                                        data['username'] ??
+                                                        '')
+                                                    .toString();
+                                            // Varsa diğer alanlar da güncellenebilir
+                                            _lbUsername =
+                                                (data['letterboxdUsername'] ??
+                                                        '')
+                                                    .toString();
+                                          });
+                                        }
+                                      } catch (_) {
+                                        // Hata olursa zaten stream (listener) arkadan gelip düzeltecektir.
+                                      }
+                                    }
+                                  }
+                                },
+                              ),
                             ),
                             Container(
                               margin: const EdgeInsets.only(right: 12, left: 4),
-                             
-                              child: IconButton(tooltip: 'Ayarlar', icon: Icon(Icons.settings_outlined, color: isDark?  const Color.fromARGB(255, 255, 255, 255): const Color.fromARGB(255, 0, 0, 0),), onPressed: () { Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsPage())); }),
+
+                              child: IconButton(
+                                tooltip: 'Ayarlar',
+                                icon: Icon(
+                                  Icons.settings_outlined,
+                                  color: isDark
+                                      ? const Color.fromARGB(255, 255, 255, 255)
+                                      : const Color.fromARGB(255, 0, 0, 0),
+                                ),
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const SettingsPage(),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ],
                         ),
@@ -894,47 +1323,74 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
                           child: Stack(
                             children: [
                               // Blur Arka Plan (Yine de tutuyoruz, üst kısım için güzel)
-                              
+
                               // İçerik
                               Column(
                                 children: [
-                                 
-                                  _profileHeaderSection(context: context, user: user, followers: _followersCount, following: _followingCount, lbUsername: _lbUsername, shownName: _shownName),
+                                  _profileHeaderSection(
+                                    context: context,
+                                    user: user,
+                                    followers: _followersCount,
+                                    following: _followingCount,
+                                    lbUsername: _lbUsername,
+                                    shownName: _shownName,
+                                  ),
                                   const SizedBox(height: 35),
                                   // Tab Bar
                                   Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
                                     child: Container(
                                       height: 40, // Yükseklik sınırlandırıldı
                                       decoration: BoxDecoration(
-                                        color: isDark ? Colors.black45 : Colors.white.withOpacity(0.5),
-                                        borderRadius: BorderRadius.circular(20), // Daha oval köşeler
+                                        color: isDark
+                                            ? Colors.black45
+                                            : Colors.white.withOpacity(0.5),
+                                        borderRadius: BorderRadius.circular(
+                                          20,
+                                        ), // Daha oval köşeler
                                       ),
                                       child: TabBar(
                                         isScrollable: false,
                                         indicator: BoxDecoration(
                                           color: primaryGreen,
-                                          borderRadius: BorderRadius.circular(20),
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
                                           boxShadow: [
                                             BoxShadow(
-                                              color: primaryGreen.withOpacity(0.4), 
+                                              color: primaryGreen.withOpacity(
+                                                0.4,
+                                              ),
                                               blurRadius: 6,
-                                              offset: const Offset(0, 2)
-                                            )
+                                              offset: const Offset(0, 2),
+                                            ),
                                           ],
                                         ),
                                         indicatorSize: TabBarIndicatorSize.tab,
                                         dividerColor: Colors.transparent,
-                                        labelPadding: EdgeInsets.zero, // İç boşluk sıfırlandı
-                                        labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13), // Yazı boyutu dengelendi
-                                        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                                        labelPadding: EdgeInsets
+                                            .zero, // İç boşluk sıfırlandı
+                                        labelStyle: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                        ), // Yazı boyutu dengelendi
+                                        unselectedLabelStyle: const TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: 13,
+                                        ),
                                         labelColor: Colors.white,
-                                        unselectedLabelColor: isDark ? Colors.white60 : Colors.black54,
-                                        overlayColor: WidgetStateProperty.all(Colors.transparent),
+                                        unselectedLabelColor: isDark
+                                            ? Colors.white60
+                                            : Colors.black54,
+                                        overlayColor: WidgetStateProperty.all(
+                                          Colors.transparent,
+                                        ),
                                         tabs: const [
                                           Tab(text: 'Filmler', height: 40),
                                           Tab(text: 'Aktiviteler', height: 40),
-                                          Tab(text: 'Listeler', height: 40), 
+                                          Tab(text: 'Listeler', height: 40),
                                         ],
                                       ),
                                     ),
@@ -959,7 +1415,14 @@ _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
                     valueListenable: _showGuideNotifier,
                     builder: (context, isVisible, child) {
                       if (!isVisible) return const SizedBox.shrink();
-                      return GuideCharacterOverlay(message: "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.", isVisible: isVisible, onClose: () { _showGuideNotifier.value = false; });
+                      return GuideCharacterOverlay(
+                        message:
+                            "Profilin çok boş görünüyor! Hadi artı butonuna basıp favori filmlerini ekle.",
+                        isVisible: isVisible,
+                        onClose: () {
+                          _showGuideNotifier.value = false;
+                        },
+                      );
                     },
                   ),
                 ],
@@ -981,10 +1444,11 @@ class _ActivitiesTab extends StatefulWidget {
   State<_ActivitiesTab> createState() => _ActivitiesTabState();
 }
 
-class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveClientMixin {
+class _ActivitiesTabState extends State<_ActivitiesTab>
+    with AutomaticKeepAliveClientMixin {
   bool _loadingActivities = false;
   List<_ActivityItemData> _activities = [];
-  
+
   @override
   bool get wantKeepAlive => true;
 
@@ -1001,28 +1465,52 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
     final db = FirebaseFirestore.instance;
     final List<_ActivityItemData> items = [];
     try {
-      final q = db.collection('posts').where('authorId', isEqualTo: widget.uid).orderBy('createdAt', descending: true).limit(30);
+      final q = db
+          .collection('posts')
+          .where('authorId', isEqualTo: widget.uid)
+          .orderBy('createdAt', descending: true)
+          .limit(30);
       final qs = await q.get();
       for (final d in qs.docs) {
         final m = d.data();
         final ts = m['createdAt'];
-        final poster = (m['moviePoster'] ?? m['moviePosterUrl'] ?? m['poster'] ?? (m['movie'] is Map ? (m['movie']['poster'] ?? m['movie']['posterUrl']) : '') ?? '').toString();
-        final title = (m['movieTitle'] ?? m['title'] ?? (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ?? '').toString();
-        final tmdbId = (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
+        final poster =
+            (m['moviePoster'] ??
+                    m['moviePosterUrl'] ??
+                    m['poster'] ??
+                    (m['movie'] is Map
+                        ? (m['movie']['poster'] ?? m['movie']['posterUrl'])
+                        : '') ??
+                    '')
+                .toString();
+        final title =
+            (m['movieTitle'] ??
+                    m['title'] ??
+                    (m['movie'] is Map ? (m['movie']['title'] ?? '') : '') ??
+                    '')
+                .toString();
+        final tmdbId =
+            (m['movie'] is Map ? m['movie']['id'] : null) ?? m['tmdbId'];
 
-        items.add(_ActivityItemData(
-          id: d.id,
-          text: (m['text'] ?? '').toString(),
-          createdAt: ts is Timestamp ? ts.toDate() : null,
-          posterUrl: poster,
-          title: title,
-          likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
-          replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-          tmdbId: (tmdbId is int) ? tmdbId : null,
-        ));
+        items.add(
+          _ActivityItemData(
+            id: d.id,
+            text: (m['text'] ?? '').toString(),
+            createdAt: ts is Timestamp ? ts.toDate() : null,
+            posterUrl: poster,
+            title: title,
+            likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
+            replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
+            tmdbId: (tmdbId is int) ? tmdbId : null,
+          ),
+        );
       }
     } catch (_) {}
-    items.sort((a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(a.createdAt?.millisecondsSinceEpoch ?? 0));
+    items.sort(
+      (a, b) => (b.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(
+        a.createdAt?.millisecondsSinceEpoch ?? 0,
+      ),
+    );
     if (mounted) {
       setState(() {
         _activities = items;
@@ -1030,7 +1518,7 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
       });
     }
   }
-  
+
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 60) return '${diff.inMinutes}m';
@@ -1047,19 +1535,39 @@ class _ActivitiesTabState extends State<_ActivitiesTab> with AutomaticKeepAliveC
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: [
-        Row(children: [Text('Aktiviteler', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor, fontWeight: FontWeight.bold))]),
+        Row(
+          children: [
+            Text(
+              'Aktiviteler',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: textColor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 10),
         if (_loadingActivities)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Center(child: CircularProgressIndicator()))
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator()),
+          )
         else if (_activities.isEmpty)
-          Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text('Henüz aktivite yok.', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)))
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'Henüz aktivite yok.',
+              style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+            ),
+          )
         else
           ListView.separated(
             itemCount: _activities.length,
             physics: const NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             padding: EdgeInsets.zero,
-            separatorBuilder: (_, __) => const SizedBox(height: 12), // Kartlar arası boşluk
+            separatorBuilder: (_, __) =>
+                const SizedBox(height: 12), // Kartlar arası boşluk
             itemBuilder: (context, i) {
               final a = _activities[i];
               final when = a.createdAt;
@@ -1086,7 +1594,10 @@ class _ActivityWidget extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: item.id)));
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => PostDetailScreen(postId: item.id)),
+        );
       },
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -1094,7 +1605,11 @@ class _ActivityWidget extends StatelessWidget {
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4)),
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
           ],
         ),
         child: Row(
@@ -1104,12 +1619,12 @@ class _ActivityWidget extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: PosterImage(
-                  posterUrl: item.posterUrl, 
+                  posterUrl: item.posterUrl,
                   title: item.title,
                   tmdbId: item.tmdbId,
-                  width: 44, 
-                  height: 66, 
-                  fit: BoxFit.cover
+                  width: 44,
+                  height: 66,
+                  fit: BoxFit.cover,
                 ),
               ),
               const SizedBox(width: 12),
@@ -1120,18 +1635,100 @@ class _ActivityWidget extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Expanded(child: Text(FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı', maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: textColor))),
+                      Expanded(
+                        child: Text(
+                          FirebaseAuth.instance.currentUser?.displayName ??
+                              'Kullanıcı',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                              ),
+                        ),
+                      ),
                       const SizedBox(width: 8),
-                      Text('Paylaştı', style: TextStyle(fontSize: 12, color: subTextColor)),
-                      if (timeLabel.isNotEmpty) ...[const SizedBox(width: 6), Text('• $timeLabel', style: TextStyle(fontSize: 12, color: subTextColor))],
+                      Text(
+                        'Paylaştı',
+                        style: TextStyle(fontSize: 12, color: subTextColor),
+                      ),
+                      if (timeLabel.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '• $timeLabel',
+                          style: TextStyle(fontSize: 12, color: subTextColor),
+                        ),
+                      ],
                     ],
                   ),
-                  if (item.text.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4.0), child: Text(item.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: textColor))),
-                  if (item.title.isNotEmpty && item.posterUrl.isEmpty && item.tmdbId == null)
-                    Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [Icon(Icons.local_movies, size: 16, color: subTextColor), const SizedBox(width: 6), Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: subTextColor, fontStyle: FontStyle.italic)))])),
+                  if (item.text.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(
+                        item.text,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: textColor),
+                      ),
+                    ),
+                  if (item.title.isNotEmpty &&
+                      item.posterUrl.isEmpty &&
+                      item.tmdbId == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.local_movies,
+                            size: 16,
+                            color: subTextColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: subTextColor,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
-                    child: Row(children: [Icon(Icons.favorite_border, size: 16, color: subTextColor), const SizedBox(width: 4), Text('${item.likeCount}', style: TextStyle(fontSize: 12, color: subTextColor)), const SizedBox(width: 16), Icon(Icons.mode_comment_outlined, size: 16, color: subTextColor), const SizedBox(width: 4), Text('${item.replyCount}', style: TextStyle(fontSize: 12, color: subTextColor)), const SizedBox(width: 16), Icon(Icons.repeat, size: 16, color: subTextColor)]),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.favorite_border,
+                          size: 16,
+                          color: subTextColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${item.likeCount}',
+                          style: TextStyle(fontSize: 12, color: subTextColor),
+                        ),
+                        const SizedBox(width: 16),
+                        Icon(
+                          Icons.mode_comment_outlined,
+                          size: 16,
+                          color: subTextColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${item.replyCount}',
+                          style: TextStyle(fontSize: 12, color: subTextColor),
+                        ),
+                        const SizedBox(width: 16),
+                        Icon(Icons.repeat, size: 16, color: subTextColor),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1152,7 +1749,8 @@ class _ListsTab extends StatefulWidget {
   State<_ListsTab> createState() => _ListsTabState();
 }
 
-class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin {
+class _ListsTabState extends State<_ListsTab>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -1160,38 +1758,48 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
   Widget build(BuildContext context) {
     super.build(context);
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if(uid == null) return const SizedBox.shrink();
+    if (uid == null) return const SizedBox.shrink();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return StreamBuilder<List<CustomList>>(
       stream: CustomListService.instance.getUserLists(uid),
       builder: (context, snapshot) {
-         if(snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-         final lists = snapshot.data ?? [];
-         
-         if (lists.isEmpty) {
-           return ListView(
-             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-             children: [
-               _CreateListTile(onTap: () => _showCreateListDialog(context)),
-               const SizedBox(height: 20),
-               Center(child: Text("Henüz liste oluşturmadın.", style: TextStyle(color: isDark ? Colors.white70 : Colors.black54))),
-             ],
-           );
-         }
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
+        final lists = snapshot.data ?? [];
 
-         return ListView.builder(
-           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-           itemCount: lists.length + 1,
-           itemBuilder: (context, index) {
-             if(index == 0) {
-               return _CreateListTile(onTap: () => _showCreateListDialog(context));
-             }
-             final list = lists[index - 1];
-             return _CustomListCard(list: list, isMine: true);
-           }
-         );
-      }
+        if (lists.isEmpty) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            children: [
+              _CreateListTile(onTap: () => _showCreateListDialog(context)),
+              const SizedBox(height: 20),
+              Center(
+                child: Text(
+                  "Henüz liste oluşturmadın.",
+                  style: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          itemCount: lists.length + 1,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return _CreateListTile(
+                onTap: () => _showCreateListDialog(context),
+              );
+            }
+            final list = lists[index - 1];
+            return _CustomListCard(list: list, isMine: true);
+          },
+        );
+      },
     );
   }
 
@@ -1205,31 +1813,114 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
       context: context,
       isScrollControlled: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom + 24, left: 24, right: 24, top: 24),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+            left: 24,
+            right: 24,
+            top: 24,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Yeni Liste Oluştur", style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                "Yeni Liste Oluştur",
+                style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 24),
-              TextField(controller: titleCtrl, autofocus: true, decoration: InputDecoration(labelText: "Liste Adı", hintText: "Örn: En İyi Korku Filmleri", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), prefixIcon: const Icon(Icons.format_list_bulleted))),
+              TextField(
+                controller: titleCtrl,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: "Liste Adı",
+                  hintText: "Örn: En İyi Korku Filmleri",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: const Icon(Icons.format_list_bulleted),
+                ),
+              ),
               const SizedBox(height: 16),
-              TextField(controller: descCtrl, decoration: InputDecoration(labelText: "Açıklama (İsteğe bağlı)", border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), prefixIcon: const Icon(Icons.description_outlined)), maxLines: 2),
+              TextField(
+                controller: descCtrl,
+                decoration: InputDecoration(
+                  labelText: "Açıklama (İsteğe bağlı)",
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: const Icon(Icons.description_outlined),
+                ),
+                maxLines: 2,
+              ),
               const SizedBox(height: 16),
-              SwitchListTile(title: const Text("Herkese Açık"), subtitle: Text(isPublic ? "Herkes profilinizde görebilir" : "Sadece siz görebilirsiniz", style: const TextStyle(fontSize: 12, color: Colors.grey)), value: isPublic, contentPadding: EdgeInsets.zero, activeColor: Theme.of(ctx).colorScheme.primary, onChanged: (val) => setSheetState(() => isPublic = val)),
+              SwitchListTile(
+                title: const Text("Herkese Açık"),
+                subtitle: Text(
+                  isPublic
+                      ? "Herkes profilinizde görebilir"
+                      : "Sadece siz görebilirsiniz",
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                value: isPublic,
+                contentPadding: EdgeInsets.zero,
+                activeColor: Theme.of(ctx).colorScheme.primary,
+                onChanged: (val) => setSheetState(() => isPublic = val),
+              ),
               const SizedBox(height: 24),
-              SizedBox(width: double.infinity, height: 50, child: FilledButton(onPressed: isLoading ? null : () async {
-                final title = titleCtrl.text.trim();
-                if (title.isEmpty) return;
-                setSheetState(() => isLoading = true);
-                try {
-                  await CustomListService.instance.createList(title, descCtrl.text.trim(), isPublic: isPublic);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                } catch (e) {} finally { if (ctx.mounted) setSheetState(() => isLoading = false); }
-              }, style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), backgroundColor: const Color(0xFF2E7D32)), child: isLoading ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text("Oluştur", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)))),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton(
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                          final title = titleCtrl.text.trim();
+                          if (title.isEmpty) return;
+                          setSheetState(() => isLoading = true);
+                          try {
+                            await CustomListService.instance.createList(
+                              title,
+                              descCtrl.text.trim(),
+                              isPublic: isPublic,
+                            );
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          } catch (e) {
+                          } finally {
+                            if (ctx.mounted)
+                              setSheetState(() => isLoading = false);
+                          }
+                        },
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    backgroundColor: const Color(0xFF2E7D32),
+                  ),
+                  child: isLoading
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text(
+                          "Oluştur",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1253,12 +1944,33 @@ class _CreateListTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          border: Border.all(color: primaryGreen.withOpacity(0.5), width: 1.5), 
-          borderRadius: BorderRadius.circular(12), 
-          color: isDark ? primaryGreen.withOpacity(0.1) : Colors.white.withOpacity(0.8),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, 2))],
+          border: Border.all(color: primaryGreen.withOpacity(0.5), width: 1.5),
+          borderRadius: BorderRadius.circular(12),
+          color: isDark
+              ? primaryGreen.withOpacity(0.1)
+              : Colors.white.withOpacity(0.8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 5,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_circle_outline, color: primaryGreen), const SizedBox(width: 8), Text("Yeni Liste Oluştur", style: TextStyle(fontWeight: FontWeight.bold, color: primaryGreen))]),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_circle_outline, color: primaryGreen),
+            const SizedBox(width: 8),
+            Text(
+              "Yeni Liste Oluştur",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: primaryGreen,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1274,21 +1986,86 @@ class _CustomListCard extends StatelessWidget {
     final textColor = isDark ? Colors.white : Colors.black87;
 
     return GestureDetector(
-      onTap: () { Navigator.push(context, MaterialPageRoute(builder: (_) => CustomListDetailScreen(list: list, isMyList: isMine))); },
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                CustomListDetailScreen(list: list, isMyList: isMine),
+          ),
+        );
+      },
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         height: 100,
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(isDark ? 0.3 : 0.05), blurRadius: 10, offset: const Offset(0, 4))],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        child: Row(children: [
-          ClipRRect(borderRadius: const BorderRadius.horizontal(left: Radius.circular(12)), child: SizedBox(width: 70, height: double.infinity, child: list.coverImageUrl != null ? PosterImage(posterUrl: list.coverImageUrl!, title: list.title, fit: BoxFit.cover) : Container(color: Colors.grey.shade800, child: const Icon(Icons.list, color: Colors.white24)))),
-          const SizedBox(width: 16),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [Text(list.title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor), maxLines: 1, overflow: TextOverflow.ellipsis), const SizedBox(height: 4), Text('${list.movieCount} film', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)), if (!list.isPublic) const Padding(padding: EdgeInsets.only(top: 4), child: Icon(Icons.lock, size: 12, color: Colors.grey))])),
-          const Icon(Icons.chevron_right, color: Colors.grey), const SizedBox(width: 12),
-        ]),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.horizontal(
+                left: Radius.circular(12),
+              ),
+              child: SizedBox(
+                width: 70,
+                height: double.infinity,
+                child: list.coverImageUrl != null
+                    ? PosterImage(
+                        posterUrl: list.coverImageUrl!,
+                        title: list.title,
+                        fit: BoxFit.cover,
+                      )
+                    : Container(
+                        color: Colors.grey.shade800,
+                        child: const Icon(Icons.list, color: Colors.white24),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    list.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: textColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${list.movieCount} film',
+                    style: TextStyle(
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (!list.isPublic)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Icon(Icons.lock, size: 12, color: Colors.grey),
+                    ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+            const SizedBox(width: 12),
+          ],
+        ),
       ),
     );
   }
@@ -1298,7 +2075,7 @@ class _AddPosterTile extends StatelessWidget {
   final ShelfTarget target;
   final VoidCallback? onRefresh;
   const _AddPosterTile({required this.target, this.onRefresh});
-  
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1306,8 +2083,13 @@ class _AddPosterTile extends StatelessWidget {
 
     return GestureDetector(
       onTap: () async {
-        final result = await Navigator.push(context, MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)));
-        if (result == true) { onRefresh?.call(); }
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)),
+        );
+        if (result == true) {
+          onRefresh?.call();
+        }
       },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
@@ -1319,9 +2101,9 @@ class _AddPosterTile extends StatelessWidget {
           ),
           alignment: Alignment.center,
           child: Icon(
-            Icons.add, 
-            size: 40, 
-            color: primaryGreen.withOpacity(0.7), 
+            Icons.add,
+            size: 40,
+            color: primaryGreen.withOpacity(0.7),
           ),
         ),
       ),
@@ -1355,7 +2137,11 @@ class _AddFilmDialogState extends State<_AddFilmDialog> {
         ElevatedButton(
           onPressed: _submitting ? null : () => _submit(_controller.text),
           child: _submitting
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('Ekle'),
         ),
       ],
@@ -1374,9 +2160,13 @@ class _AddFilmDialogState extends State<_AddFilmDialog> {
 class _UserListSheet extends StatelessWidget {
   final String title;
   final String uid;
-  final String collection; 
+  final String collection;
 
-  const _UserListSheet({required this.title, required this.uid, required this.collection});
+  const _UserListSheet({
+    required this.title,
+    required this.uid,
+    required this.collection,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1388,7 +2178,13 @@ class _UserListSheet extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: textColor)),
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
+            ),
           ),
           const Divider(height: 1),
           Expanded(
@@ -1410,25 +2206,39 @@ class _UserListSheet extends StatelessWidget {
                   itemCount: docs.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
-                    final docId = docs[index].id; 
+                    final docId = docs[index].id;
                     return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance.collection('users').doc(docId).get(),
+                      future: FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(docId)
+                          .get(),
                       builder: (context, userSnap) {
-                        if (!userSnap.hasData) return const ListTile(title: Text('Yükleniyor...'));
-                        final data = userSnap.data!.data() as Map<String, dynamic>?;
-                        final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
+                        if (!userSnap.hasData)
+                          return const ListTile(title: Text('Yükleniyor...'));
+                        final data =
+                            userSnap.data!.data() as Map<String, dynamic>?;
+                        final name =
+                            data?['displayName'] ??
+                            data?['username'] ??
+                            'Kullanıcı';
                         final photo = data?['photoURL'];
-                        
+
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundImage: (photo != null) ? NetworkImage(photo) : null,
-                            child: photo == null ? const Icon(Icons.person) : null,
+                            backgroundImage: (photo != null)
+                                ? NetworkImage(photo)
+                                : null,
+                            child: photo == null
+                                ? const Icon(Icons.person)
+                                : null,
                           ),
                           title: Text(name, style: TextStyle(color: textColor)),
                           onTap: () {
                             Navigator.push(
-                              context, 
-                              MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: docId))
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => PublicProfileScreen(uid: docId),
+                              ),
                             );
                           },
                         );

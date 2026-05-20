@@ -3,6 +3,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class DirectorScreen extends StatefulWidget {
   final int directorId;
@@ -22,11 +24,34 @@ class _DirectorScreenState extends State<DirectorScreen> {
   bool _isLoading = true;
   Map<String, dynamic>? _directorDetails;
   List<dynamic> _directedMovies = [];
+  bool _isFavorited = false;
 
   @override
   void initState() {
     super.initState();
     _fetchDirectorData();
+    _checkIfFavorited();
+  }
+
+  Future<void> _checkIfFavorited() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
+    if (doc.exists) {
+      final List favDirectors = doc.data()?['favDirectors'] ?? [];
+      if (mounted) {
+        setState(() {
+          _isFavorited = favDirectors.any((item) {
+            if (item is Map) return item['id'] == widget.directorId;
+            return item == widget.directorName;
+          });
+        });
+      }
+    }
   }
 
   Future<void> _fetchDirectorData() async {
@@ -99,6 +124,93 @@ class _DirectorScreenState extends State<DirectorScreen> {
         centerTitle: true,
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _isFavorited
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: _isFavorited ? Colors.green : Colors.grey,
+                size: 22,
+              ),
+            ),
+            onPressed: () async {
+              final uid = FirebaseAuth.instance.currentUser?.uid;
+              if (uid == null) return;
+
+              // 1. OPTIMISTIC UI: Arayüzü anında güncelle (Kullanıcı beklemesin)
+              final bool wasFavorited = _isFavorited;
+              setState(() {
+                _isFavorited = !wasFavorited;
+              });
+
+              final userRef = FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid);
+              final directorData = {
+                'name': widget.directorName,
+                'id': widget.directorId,
+              };
+
+              try {
+                // 2. Arka planda Firestore işlemlerini yap
+                if (wasFavorited) {
+                  // Eskiden favoriydi, şimdi çıkarıyoruz
+                  final doc = await userRef.get();
+                  List favs = List.from(doc.data()?['favDirectors'] ?? []);
+                  favs.removeWhere((item) {
+                    if (item is Map) return item['id'] == widget.directorId;
+                    return item == widget.directorName;
+                  });
+                  await userRef.update({'favDirectors': favs});
+                } else {
+                  // Eskiden favori değildi, şimdi ekliyoruz
+                  await userRef.set({
+                    'favDirectors': FieldValue.arrayUnion([directorData]),
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true));
+                }
+
+                // 3. Başarılı Snackbar'ı göster
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        !wasFavorited
+                            ? '${widget.directorName} favorilere eklendi!'
+                            : '${widget.directorName} favorilerden çıkarıldı!',
+                      ),
+                      backgroundColor: !wasFavorited
+                          ? Colors.green.shade700
+                          : Colors.redAccent,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(
+                        seconds: 1,
+                      ), // Çok ekranda kalmasın
+                    ),
+                  );
+                }
+              } catch (e) {
+                // 4. HATA DURUMU: Eğer internet kopuksa vs. işlemi geri al (Revert)
+                if (mounted) {
+                  setState(() {
+                    _isFavorited = wasFavorited;
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Hata oluştu, geri alındı: $e')),
+                  );
+                }
+              }
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -279,7 +391,6 @@ class _DirectorScreenState extends State<DirectorScreen> {
                                     posterUrl: fullPosterUrl,
                                     title: movie['title'],
                                     fit: BoxFit.cover,
-                                    width: double.infinity,
                                   ),
                                 ),
                               ),
