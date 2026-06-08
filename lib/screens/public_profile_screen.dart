@@ -59,6 +59,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   StreamSubscription<FollowEvent>? _followSub;
   bool _isBlocked = false;
   bool _hasBlockedMe = false;
+  bool _isLoadingBlock = true;
   int? _matchScore;
 
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
@@ -501,7 +502,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
 
   Future<void> _loadBlockStatus() async {
     final myUid = FirebaseAuth.instance.currentUser?.uid;
-    if (myUid == null) return;
+    if (myUid == null) {
+      if (mounted) setState(() => _isLoadingBlock = false); // <-- EKLE
+      return;
+    }
     final other = widget.uid;
     try {
       // YENİ FONSİYONU ÇAĞIRIYORUZ
@@ -515,8 +519,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         // Artık kimin kimi engellediğini kesin olarak biliyoruz
         _isBlocked = status['iBlockedThem'] ?? false;
         _hasBlockedMe = status['theyBlockedMe'] ?? false;
+        _isLoadingBlock = false;
       });
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingBlock = false);
+    }
   }
 
   @override
@@ -630,6 +637,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
           child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: _userStream,
             builder: (context, snap) {
+              if (_isLoadingBlock) {
+                return const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF2E7D32)),
+                );
+              }
               if (snap.connectionState == ConnectionState.waiting)
                 return const Center(
                   child: CircularProgressIndicator(color: Color(0xFF2E7D32)),

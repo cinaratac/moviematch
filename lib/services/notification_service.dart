@@ -176,4 +176,50 @@ class NotificationService {
     const ios = DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true);
     await _fln.show(DateTime.now().hashCode % 1000000, title, body, const NotificationDetails(android: android, iOS: ios), payload: 'social');
   }
+  Future<void> markAllAsRead(String userId) async {
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('notifications')
+          .where('read', isEqualTo: false)
+          .get();
+
+      if (query.docs.isEmpty) return; // Zaten hepsi okunmuşsa sunucuyu yorma
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (var doc in query.docs) {
+        batch.update(doc.reference, {'read': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint("Toplu okundu işaretleme hatası: $e");
+    }
+  }
+  /// 3 aydan (90 gün) eski bildirimleri veritabanından tamamen siler
+  Future<void> deleteOldNotifications(String userId) async {
+    try {
+      // 90 gün öncesinin Timestamp değerini al
+      final threeMonthsAgo = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 90)));
+
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .collection('notifications')
+          .where('createdAt', isLessThan: threeMonthsAgo) // 3 aydan DAHA ESKİ olanlar
+          .get();
+
+      if (query.docs.isEmpty) return; // Silinecek eski bildirim yoksa işlemi bitir
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (var doc in query.docs) {
+        batch.delete(doc.reference); // Toplu silme kuyruğuna ekle
+      }
+      await batch.commit(); // Hepsini tek seferde sil
+      
+      debugPrint("${query.docs.length} adet eski bildirim sistemden silindi.");
+    } catch (e) {
+      debugPrint("Eski bildirimleri silme hatası: $e");
+    }
+  }
 }

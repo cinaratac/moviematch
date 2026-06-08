@@ -365,77 +365,108 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         elevation: 0,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              _buildFeaturedMovieBanner(),
-              Expanded(
-                child: Container(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _messagesStream, 
-                    builder: (context, snap) {
-                      if (snap.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final docs = snap.data?.docs ?? [];
-                      if (docs.isEmpty) {
-                        return const EmptyChatView();
-                      }
-
-                      return ListView.builder(
-                        controller: _scrollController,
-                        reverse: true,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        itemCount: docs.length,
-                        itemBuilder: (context, i) {
-                          final doc = docs[i];
-                          final m = doc.data();
-                          final author = (m['authorId'] ?? m['from'] ?? '') as String;
-                          final mine = author == myUid;
-                          final text = (m['text'] ?? '') as String;
-                          final ts = (m['createdAt'] as Timestamp?);
-                          
-                          final type = m['type'] as String?;
-                          final eventData = m['event'] as Map<String, dynamic>?;
-                          final pollData = m['poll'] as Map<String, dynamic>?;
-
-                          return MessageRow(
-                            key: ValueKey(doc.id),
-                            text: text,
-                            movie: m['movie'],
-                            isMine: mine,
-                            timestamp: ts?.toDate(),
-                            authorId: author,
-                            type: type,
-                            eventData: eventData,
-                            pollData: pollData,
-                            chatId: widget.chatId,
-                          );
-                        },
-                      );
-                    },
+      body: _isLoadingBlock
+    ? const Center(
+        child: CircularProgressIndicator(color: Color(0xFF2E7D32)),
+      )
+    : (_isBlocked || _hasBlockedMe)
+        ? Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.block, size: 48, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'Bu kullanıcıyla mesajlaşamazsınız.',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+              ],
+            ),
+          )
+        : Stack(
+            children: [
+              Column(
+                children: [
+                  _buildFeaturedMovieBanner(),
+                  Expanded(
+                    child: Container(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: _messagesStream,
+                        builder: (context, snap) {
+                          if (snap.connectionState == ConnectionState.waiting) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          }
+                          final docs = snap.data?.docs ?? [];
+                          if (docs.isEmpty) {
+                            return const EmptyChatView();
+                          }
+
+                          return ListView.builder(
+                            controller: _scrollController,
+                            reverse: true,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            itemCount: docs.length,
+                            itemBuilder: (context, i) {
+                              final doc = docs[i];
+                              final m = doc.data();
+                              final author = (m['authorId'] ??
+                                  m['from'] ??
+                                  '') as String;
+                              final mine = author == myUid;
+                              final text = (m['text'] ?? '') as String;
+                              final ts = (m['createdAt'] as Timestamp?);
+
+                              final type = m['type'] as String?;
+                              final eventData =
+                                  m['event'] as Map<String, dynamic>?;
+                              final pollData =
+                                  m['poll'] as Map<String, dynamic>?;
+
+                              return MessageRow(
+                                key: ValueKey(doc.id),
+                                text: text,
+                                movie: m['movie'],
+                                isMine: mine,
+                                timestamp: ts?.toDate(),
+                                authorId: author,
+                                type: type,
+                                eventData: eventData,
+                                pollData: pollData,
+                                chatId: widget.chatId,
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  _buildInputArea(),
+                ],
               ),
-              _buildInputArea(),
+              ValueListenableBuilder<bool>(
+                valueListenable: _showGuideNotifier,
+                builder: (context, isVisible, child) {
+                  if (!isVisible) return const SizedBox.shrink();
+                  return GuideCharacterOverlay(
+                    message:
+                        "Beraber film izlemek için watchlist çarkını deneyebilirsin",
+                    isVisible: isVisible,
+                    onClose: () => _showGuideNotifier.value = false,
+                  );
+                },
+              ),
             ],
           ),
-          
-          ValueListenableBuilder<bool>(
-            valueListenable: _showGuideNotifier,
-            builder: (context, isVisible, child) {
-              if (!isVisible) return const SizedBox.shrink();
-              return GuideCharacterOverlay(
-                message: "Beraber film izlemek için watchlist çarkını deneyebilirsin",
-                isVisible: isVisible,
-                onClose: () => _showGuideNotifier.value = false,
-              );
-            },
-          ),
-        ],
-      ),
     );
   }
 }
