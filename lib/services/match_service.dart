@@ -199,42 +199,44 @@ class MatchService {
     final seenUids = (prefs.getStringList('seen_uids_$myUid') ?? []).toSet();
 
     List<MatchResult> out = [];
-    bool cloudFailed = false;
 
-    try {
-      final callable = FirebaseFunctions.instance.httpsCallable('findMatchesCallable');
-      final resp = await callable.call();
-      final rawList = resp.data['results'] as List<dynamic>;
-      
-      for (final item in rawList) {
-        final map = Map<String, dynamic>.from(item as Map);
-        final uid = map['uid'] as String;
+    // --- OPTİMİZASYON: PARALEL İŞLEM BAŞLANGICI ---
+    // Cloud Function ve Firestore sorgularını aynı anda başlatıyoruz.
+    // Böylece biri diğerini bekleyip (30 saniye vs.) sistemi kilitlemeyecek.
+    
+    // 1. İŞLEM: Cloud Function'ı arka planda başlat
+    Future<List<MatchResult>> fetchFromCloudFunction() async {
+      List<MatchResult> cloudResults = [];
+      try {
+        final callable = FirebaseFunctions.instance.httpsCallable('findMatchesCallable');
+        final resp = await callable.call();
+        final rawList = resp.data['results'] as List<dynamic>;
+        
+        for (final item in rawList) {
+          final map = Map<String, dynamic>.from(item as Map);
+          final uid = map['uid'] as String;
 
-        if (hiddenUids.contains(uid)) continue;
+          if (hiddenUids.contains(uid)) continue;
 
-        final isSeen = seenUids.contains(uid);
-        final result = _computeMatch(myUid, uid, myData, map, isSeen);
-        out.add(result);
+          final isSeen = seenUids.contains(uid);
+          final result = _computeMatch(myUid, uid, myData, map, isSeen);
+          cloudResults.add(result);
+        }
+      } catch (e) {
+        // Sessizce yut, normal akış devam etsin.
       }
-
-      if (out.isNotEmpty) {
-        out.sort((a, b) => b.sortScore.compareTo(a.sortScore)); 
-        _findCache[myUid] = _FindCache(out, DateTime.now());
-        return out;
-      } else {
-         cloudFailed = true;
-      }
-    } catch (e) {
-      cloudFailed = true;
+      return cloudResults;
     }
 
-    if (cloudFailed || out.isEmpty) {
+    // 2. İŞLEM: Firestore'dan normal kullanıcıları çekme
+    Future<List<MatchResult>> fetchFromFirestore() async {
+      List<MatchResult> firestoreResults = [];
       DocumentSnapshot? lastDoc;
       bool keepFetching = true;
       int fetchCycles = 0;
-      const int maxCycles = 20; 
+      const int maxCycles = 10; // Daha hızlı dönmesi için limiti 10'a çektim
 
-      while (keepFetching && out.length < candidateLimit && fetchCycles < maxCycles) {
+      while (keepFetching && firestoreResults.length < candidateLimit && fetchCycles < maxCycles) {
         fetchCycles++;
         Query query = _users.orderBy(FieldPath.documentId).limit(50);
         
@@ -259,21 +261,171 @@ class MatchService {
 
           final isSeen = seenUids.contains(uid);
           final result = _computeMatch(myUid, uid, myData, data, isSeen);
-          out.add(result); 
+          firestoreResults.add(result); 
         }
       }
-      
-      out.sort((a, b) {
-        final s = b.sortScore.compareTo(a.sortScore);
-        if (s != 0) return s;
-        return b.commonFiveCount.compareTo(a.commonFiveCount);
-      });
+      return firestoreResults;
     }
+
+    // İki işlemi aynı anda (paralel) çalıştır ve hangisi önce biterse bitmesini bekle
+    // Not: Cloud Function uzun sürse bile (Cold Start), Firestore hızlıca biteceği için
+    // uygulama Firestore verileriyle anında devam edebilir (Eğer timeout eklersek).
+    // Ancak burada iki işlemin de sonucunu sağlıklı birleştirmek için Future.wait kullanıyoruz.
+    final results = await Future.wait([
+      fetchFromCloudFunction(),
+      fetchFromFirestore()
+    ]);
+
+    // Sonuçları birleştir (Cloud Function'dan gelenler ve Firestore'dan gelenler)
+    final cloudMatches = results[0];
+    final dbMatches = results[1];
+
+    // Tekilleştirme: Aynı kullanıcı her iki listede de varsa sadece birini al
+    final Set<String> processedUids = {};
+    
+    for (var match in cloudMatches) {
+      if (!processedUids.contains(match.uid)) {
+        out.add(match);
+        processedUids.add(match.uid);
+      }
+    }
+
+    for (var match in dbMatches) {
+      if (!processedUids.contains(match.uid)) {
+        out.add(match);
+        processedUids.add(match.uid);
+      }
+    }
+
+    // --- AŞAMA 3: LİSTEYİ PUANA GÖRE SIRALA VE CACHE'E YAZ ---
+    out.sort((a, b) {
+      final s = b.sortScore.compareTo(a.sortScore);
+      if (s != 0) return s;
+      return b.commonFiveCount.compareTo(a.commonFiveCount);
+    });
 
     _findCache[myUid] = _FindCache(out, DateTime.now());
     return out;
   }
+  // YENİ: AŞAMALI YÜKLEME AKIŞI (STREAM)
+  Stream<List<MatchResult>> findMatchesStream(String myUid, {int candidateLimit = 1000}) async* {
+    final now = DateTime.now();
+    final cached = _findCache[myUid];
+    if (cached != null && now.difference(cached.ts) < _findCacheTtl) {
+      if (cached.results.isNotEmpty) {
+        yield cached.results;
+        return;
+      }
+    }
 
+    final meDoc = await _users.doc(myUid).get();
+    if (!meDoc.exists) {
+      yield [];
+      return;
+    }
+    final myData = meDoc.data() ?? {};
+
+    final hiddenUids = <String>{myUid};
+    try {
+      final followingSnap = await _users.doc(myUid).collection('following').get();
+      for (final doc in followingSnap.docs) {
+        hiddenUids.add(doc.id);
+      }
+    } catch (_) {}
+    try {
+      final blockedIds = await BlockingService.instance.getBlockedAndBlockerIds(myUid);
+      hiddenUids.addAll(blockedIds);
+    } catch (_) {}
+
+    final prefs = await SharedPreferences.getInstance();
+    final seenUids = (prefs.getStringList('seen_uids_$myUid') ?? []).toSet();
+
+    List<MatchResult> out = [];
+    final Set<String> processedUids = {};
+
+    // Ekranda kaymayı engellemek için yeni gelenleri kendi içinde sıralayıp SONA ekliyoruz
+    void appendResults(List<MatchResult> newItems) {
+      newItems.sort((a, b) {
+        final s = b.sortScore.compareTo(a.sortScore);
+        if (s != 0) return s;
+        return b.commonFiveCount.compareTo(a.commonFiveCount);
+      });
+      
+      for (var item in newItems) {
+        if (!processedUids.contains(item.uid)) {
+          out.add(item);
+          processedUids.add(item.uid);
+          hiddenUids.add(item.uid);
+        }
+      }
+    }
+
+    // 1. CLOUD FUNCTION'I BEKLEMEDEN ARKA PLANDA BAŞLAT
+    final cloudFuture = FirebaseFunctions.instance.httpsCallable('findMatchesCallable').call().then((resp) {
+      final rawList = resp.data['results'] as List<dynamic>;
+      List<MatchResult> cloudRes = [];
+      for (final item in rawList) {
+        final map = Map<String, dynamic>.from(item as Map);
+        final uid = map['uid'] as String;
+        if (hiddenUids.contains(uid)) continue;
+        final isSeen = seenUids.contains(uid);
+        cloudRes.add(_computeMatch(myUid, uid, myData, map, isSeen));
+      }
+      return cloudRes;
+    }).catchError((_) => <MatchResult>[]);
+
+    // 2. VERİTABANINDAN 10'ARLI GRUPLAR HALİNDE KARTLARI ÇEK VE ANINDA GÖSTER
+    DocumentSnapshot? lastDoc;
+    bool keepFetching = true;
+    int fetchCycles = 0;
+    const int maxCycles = 15; // Maksimum 150 kişi
+
+    while (keepFetching && out.length < candidateLimit && fetchCycles < maxCycles) {
+      fetchCycles++;
+      // İLK 10 KİŞİ ÇEKİLDİĞİ AN EKRANA GİDER!
+      Query query = _users.orderBy(FieldPath.documentId).limit(10); 
+      
+      if (lastDoc != null) {
+        query = query.startAfterDocument(lastDoc);
+      }
+
+      final snapshot = await query.get();
+      if (snapshot.docs.isEmpty) {
+        keepFetching = false;
+        break;
+      }
+      lastDoc = snapshot.docs.last;
+
+      List<MatchResult> chunkResults = [];
+      for (final d in snapshot.docs) {
+        final uid = d.id;
+        final data = d.data() as Map<String, dynamic>;
+
+        final username = data['username'] as String?;
+        if (username == null || username.trim().isEmpty) continue;
+        if (hiddenUids.contains(uid)) continue;
+
+        final isSeen = seenUids.contains(uid);
+        chunkResults.add(_computeMatch(myUid, uid, myData, data, isSeen));
+      }
+
+      appendResults(chunkResults);
+      
+      // İlk 10 veri geldiği an (ve her yeni pakette) arayüzü güncelle
+      if (out.isNotEmpty) {
+        yield List.from(out); 
+      }
+    }
+
+    // 3. EN SON CLOUD FUNCTION BİTİNCE ONLARI DA DESTENİN ALTINA GİZLİCE EKLE
+    final cloudMatches = await cloudFuture;
+    if (cloudMatches.isNotEmpty) {
+      appendResults(cloudMatches);
+      yield List.from(out);
+    }
+
+    _findCache[myUid] = _FindCache(out, DateTime.now());
+  }
   // PUBLIC PROFILE EKRANININ HATA VERDİĞİ YER (GERİ EKLENDİ)
   Future<int> calculateMatchScore(String myUid, String otherUid) async {
     try {

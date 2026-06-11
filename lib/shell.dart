@@ -34,6 +34,7 @@ class _HomeShellState extends State<HomeShell> {
         final newIndex = TabService.instance.indexNotifier.value;
         setState(() {
           _index = newIndex; // DÜZELTME: _selectedIndex yerine _index kullanıldı
+          _loadedPages[newIndex] = true;
         });
       }
     });
@@ -96,6 +97,7 @@ class _HomeShellState extends State<HomeShell> {
     const MessagesPage(),
     const ProfilePage(),
   ];
+  final List<bool> _loadedPages = [true, false, false, false];
 
   @override
   Widget build(BuildContext context) {
@@ -119,7 +121,15 @@ class _HomeShellState extends State<HomeShell> {
       },
       child: Scaffold( 
         extendBody: true,
-        body: IndexedStack(index: _index, children: _pages),
+        body: IndexedStack(
+          index: _index,
+          children: List.generate(_pages.length, (index) {
+            // Eğer sayfa henüz hiç ziyaret edilmediyse hafızada yer kaplamaması
+            // ve gereksiz yükleme yapmaması için boş bir kutu (SizedBox) koyuyoruz.
+            // Sayfaya tıklandığı an asıl sayfa oluşturulup veriler çekilecek.
+            return _loadedPages[index] ? _pages[index] : const SizedBox.shrink();
+          }),
+        ),
         bottomNavigationBar: _buildBottomBar(context),
       ),
     );
@@ -161,7 +171,10 @@ class _HomeShellState extends State<HomeShell> {
           child: NavigationBar(
             selectedIndex: _index,
             onDestinationSelected: (i) {
-              setState(() => _index = i);
+             setState(() {
+                _index = i;
+                _loadedPages[i] = true; // SEKMEYE TIKLANINCA YÜKLEMEYE İZİN VER
+              });
               TabService.instance.changeTab(i); 
             },
             destinations: [

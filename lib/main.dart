@@ -49,17 +49,15 @@ Future<void> main() async {
         );
   }
 
-  // --- APP CHECK AKTİVASYONU ---
-  // --- APP CHECK AKTİVASYONU ---
+  // --- APP CHECK AKTİVASYONU (GEÇİCİ OLARAK KAPATILDI) ---
+  /*
   await FirebaseAppCheck.instance.activate(
     androidProvider: kReleaseMode
         ? AndroidProvider.playIntegrity
         : AndroidProvider.debug,
     appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
-    // Web sürümü şimdilik kullanılmadığı ve geçerli bir anahtar olmadığı için kapatıldı:
-    // webProvider: ReCaptchaV3Provider('recaptcha-v3-site-key'),
   );
-
+  */
   // Firestore Ayarları
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,

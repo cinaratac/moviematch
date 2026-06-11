@@ -8,6 +8,7 @@ import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+import 'dart:async';
 
 class FilmItem {
   final String id;
@@ -75,6 +76,7 @@ class MatchListScreen extends StatefulWidget {
   @override
   State<MatchListScreen> createState() => _MatchListScreenState();
 }
+StreamSubscription<List<global_match.MatchResult>>? _matchSubscription;
 
 class _MatchListScreenState extends State<MatchListScreen> {
   List<global_match.MatchResult> _all = [];
@@ -93,7 +95,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
     super.dispose();
   }
 
-  Future<void> _loadMatches({bool forceRefresh = false}) async {
+  void _loadMatches({bool forceRefresh = false}) {
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) {
       if (mounted) setState(() => _loading = false);
@@ -114,29 +116,29 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
     if (mounted) setState(() => _loading = true);
 
-    try {
-      final results = await global_match.MatchService.instance.findMatches(me.uid);
+    _matchSubscription?.cancel();
+    // YENİ: findMatches() yerine findMatchesStream() kullanıyoruz ve .listen() ile dinliyoruz
+    _matchSubscription = global_match.MatchService.instance.findMatchesStream(me.uid).listen((results) {
       if (!mounted) return;
 
-      _all = results;
-      _MatchListSessionCache.results = results;
+      setState(() {
+        _all = results;
+        _loading = false; // İLK 10 KİŞİ GELDİĞİ SANİYE YÜKLEME EKRANI KALKAR!
+      });
+
+      _MatchListSessionCache.results = _all;
 
       if (_all.isNotEmpty) {
         global_match.MatchService.instance.markAsSeen(me.uid, _all.first.uid);
       }
-
-      setState(() {
-        _loading = false;
-      });
-
-    } catch (e) {
+    }, onError: (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _all = [];
+        if (_all.isEmpty) _all = []; 
       });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Öneriler alınamadı: $e')));
-    }
+    });
   }
 
   @override
@@ -163,13 +165,12 @@ class _MatchListScreenState extends State<MatchListScreen> {
           ),
         ),
         centerTitle: true,
-        // YENİ: Sağ üst köşeye yenileme butonu eklendi
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 28),
             onPressed: () {
               if (_pageController.hasClients) {
-                _pageController.jumpToPage(0); // Listeyi en başa sar
+                _pageController.jumpToPage(0);
               }
               _loadMatches(forceRefresh: true);
             },
@@ -180,14 +181,13 @@ class _MatchListScreenState extends State<MatchListScreen> {
           ? const Center(child: CircularProgressIndicator(color: Colors.green))
           : _all.isEmpty
               ? const _NoMatchesCharacter()
-              // YENİ: RefreshIndicator kaldırıldı, sadece PageView kullanıldı
               : PageView.builder(
                   scrollDirection: Axis.vertical, 
                   controller: _pageController,
-                  physics: const BouncingScrollPhysics(), // Daha hassas ve akıcı kaydırma hissi
+                  physics: const BouncingScrollPhysics(), 
+                  allowImplicitScrolling: true, // KARTLARI ARKA PLANDA ÖNCEDEN YÜKLER (PREFETCH)
                   onPageChanged: (index) {
                     if (me != null) {
-                      // Kaydırılan kişiyi arka planda sessizce "görüldü" olarak işaretler
                       global_match.MatchService.instance.markAsSeen(me.uid, _all[index].uid);
                     }
                   },
@@ -216,13 +216,18 @@ class _VerticalUserCard extends StatefulWidget {
   State<_VerticalUserCard> createState() => _VerticalUserCardState();
 }
 
-class _VerticalUserCardState extends State<_VerticalUserCard> {
+// KARTIN HAFIZADA KALMASI İÇİN MIXIN EKLENDİ
+class _VerticalUserCardState extends State<_VerticalUserCard> with AutomaticKeepAliveClientMixin {
   bool _isAdded = false;
   bool _isLoading = false;
   
   Map<String, dynamic>? _userData;
   List<FilmItem>? _commonFilms;
   List<FilmItem>? _favoriteFilms;
+
+  // HAFIZADA TUTMA İZNİ VERİLDİ
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -386,6 +391,9 @@ class _VerticalUserCardState extends State<_VerticalUserCard> {
 
   @override
   Widget build(BuildContext context) {
+    // MIXIN'İN ÇALIŞMASI İÇİN ZORUNLU KOD:
+    super.build(context);
+
     final m = widget.result;
     final pct = m.score.clamp(0, 100).toStringAsFixed(0);
 

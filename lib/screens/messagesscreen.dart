@@ -159,7 +159,7 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
         controller: _tabController,
         children: [
           _ChatsView(uid: uid, filterText: _chatSearchText.trim()),
-          JoinedClubsList(filterText: _clubSearchText.trim()),
+          JoinedClubsList(uid: uid, filterText: _clubSearchText.trim()),
         ],
       ),
     );
@@ -179,7 +179,7 @@ class _ChatsView extends StatefulWidget {
 
 class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMixin {
   final Map<String, Map<String, dynamic>> _userCache = {};
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _chatsStream;
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _chatsStream;
 
   @override
   bool get wantKeepAlive => true;
@@ -187,23 +187,33 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   @override
   void initState() {
     super.initState();
+    _initStream();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uid != widget.uid) {
+      _userCache.clear();
+      _initStream();
+    }
+  }
+
+  void _initStream() {
     _chatsStream = FirebaseFirestore.instance
         .collection('chats')
         .where('participants', arrayContains: widget.uid)
-        .snapshots(includeMetadataChanges: true);
+        .snapshots();
   }
 
   Future<void> _fetchMissingUsers(List<String> uids) async {
-    // Cache'te olmayanları tespit et
     final missing = uids.where((id) => !_userCache.containsKey(id)).toSet().toList();
     if (missing.isEmpty) return;
 
-    // Önce hepsini "boş" olarak işaretle (Silinmiş varsayımı ve loop engelleme)
     for (final id in missing) {
       _userCache[id] = {}; 
     }
 
-    // Veritabanından çekmeye çalış
     for (var i = 0; i < missing.length; i += 10) {
       final chunk = missing.sublist(i, i + 10 > missing.length ? missing.length : i + 10);
       try {
@@ -212,17 +222,14 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
             .where(FieldPath.documentId, whereIn: chunk)
             .get();
         
-        // Bulunanları güncelle
         for (var doc in qs.docs) {
           _userCache[doc.id] = doc.data();
         }
-        // Bulunamayanlar {} olarak kalır (yani silinmiş)
       } catch (e) {
         debugPrint('');
       }
     }
     
-    // UI'ı güncelle ki silinenler listeden kaybolsun
     if (mounted) setState(() {});
   }
 
@@ -231,10 +238,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
     super.build(context);
     
     return Scaffold(
-    floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 65.0),
-        child: _TrashFab(currentUid: widget.uid),
-      ),
+      // FAB (Çöp Kutusu) TAMAMEN KALDIRILDI
       body: Column(
         children: [
           if (widget.filterText.isEmpty) 
@@ -250,24 +254,20 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                 
                 var docs = s.data?.docs.toList() ?? [];
                 
-                // 1. Gizli sohbetleri, grupları ve SİLİNMİŞ kullanıcıları filtrele
                 docs.removeWhere((doc) {
                    final data = doc.data();
-                   
-                   // Gizlilik kontrolü
-                   final isGroup = data['isGroup'] == true;
-                   final vis = (data['visibleFor'] as Map?) ?? {};
-                   final isHidden = vis[widget.uid] == false;
-                   if (isGroup || isHidden) return true;
-
-                   // Silinmiş Kullanıcı Kontrolü
                    final parts = List.from(data['participants'] ?? []);
-                   final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+
+                   // Katılımcı kontrolü: Eğer ben yoksam (silindiyse), anında at.
+                   if (!parts.contains(widget.uid)) return true;
                    
-                   if (otherId == null) return true; // Bozuk veri
+                   // Sadece grup kontrolü kaldı, gereksiz visibleFor kontrolü çöpe atıldı.
+                   if (data['isGroup'] == true) return true;
+
+                   final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                   if (otherId == null) return true; 
 
                    final cached = _userCache[otherId];
-                   // Eğer cache'te {} varsa, bu kullanıcı silinmiş demektir -> Listeden çıkar.
                    if (cached != null && cached.isEmpty) {
                        return true; 
                    }
@@ -275,7 +275,6 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                    return false;
                 });
 
-                // 2. Eksik kullanıcıları tespit et (henüz cache'te olmayanlar)
                 final otherUids = <String>{};
                 for (var doc in docs) {
                   final parts = List.from(doc.data()['participants'] ?? []);
@@ -287,7 +286,6 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                   Future.microtask(() => _fetchMissingUsers(otherUids.toList()));
                 }
 
-                // 3. Arama Filtresi
                 if (widget.filterText.isNotEmpty) {
                   docs = docs.where((doc) {
                     final data = doc.data();
@@ -353,7 +351,6 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
 }
 
 // --- YARDIMCI WIDGET'LAR ---
-
 class ChatListTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
   final String currentUid;
@@ -366,12 +363,7 @@ class ChatListTile extends StatelessWidget {
     this.cachedUserData, 
   });
   
-  // ChatListTile sınıfının içindeki _buildTile metodunu bununla değiştirin:
-  Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime, {bool isDeleted = false}) {
-    if (isDeleted) return const SizedBox.shrink(); 
-
-    // YENİ KISIM: Okunmamış mesaj sayısını doğrudan dökümandan alıyoruz
-    // Ekstra maliyet yok!
+  Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime) {
     final data = chatDoc.data();
     final unreadMap = (data['unreadCounts'] as Map?) ?? {};
     final int count = (unreadMap[currentUid] as num?)?.toInt() ?? 0;
@@ -381,7 +373,7 @@ class ChatListTile extends StatelessWidget {
             Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(chatId: chatDoc.id, otherUid: otherUid, otherTitle: displayName)));
             ChatService.instance.markAsRead(chatDoc.id, currentUid);
         },
-        onLongPress: () => _showHideDialog(context, chatDoc.id),
+        onLongPress: () => _showDeleteDialog(context, chatDoc.id), // Kalıcı silme diyaloğu eklendi
         leading: InkWell(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid))),
             child: CircleAvatar(
@@ -415,8 +407,6 @@ class ChatListTile extends StatelessWidget {
                     ),
             ],
         ),
-        // ESKİ HALİ: trailing: _UnreadCountBadge(...) idi.
-        // YENİ HALİ: Doğrudan Container gösteriyoruz.
         trailing: count > 0 
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -446,12 +436,9 @@ class ChatListTile extends StatelessWidget {
     final titles = (data['titles'] as Map?) ?? {};
     final photos = (data['photos'] as Map?) ?? {};
     
-    // 1. Veri Kaynaklarını Hazırla
-    // Kaynak A: Denormalize Veri (Chat dökümanı içindeki)
     String? denormName = (titles[currentUid] as String?);
     String? denormPhoto = (photos[currentUid] as String?);
 
-    // Kaynak B: Cache Verisi (Parent widget'tan gelen güncel kullanıcı verisi)
     String? cachedName;
     String? cachedPhoto;
     if (cachedUserData != null && cachedUserData!.isNotEmpty) {
@@ -459,27 +446,16 @@ class ChatListTile extends StatelessWidget {
         cachedPhoto = cachedUserData!['photoURL'];
     }
 
-    // 2. Verileri Birleştir (Önce Denormalize, Yoksa Cache)
     String finalName = (denormName != null && denormName.isNotEmpty) ? denormName : (cachedName ?? 'Kullanıcı');
-    
-    // Fotoğraf mantığı: Denormalize foto varsa onu kullan, yoksa cache'e bak.
-    String? finalPhoto = (denormPhoto != null && denormPhoto.isNotEmpty) 
-        ? denormPhoto 
-        : cachedPhoto;
+    String? finalPhoto = (denormPhoto != null && denormPhoto.isNotEmpty) ? denormPhoto : cachedPhoto;
 
-    // 3. Karar Anı: Elimizde gösterecek bir veri var mı?
-    // İsim varsa (ki "Kullanıcı" fallback'i var) tile'ı çiz.
-    // Eğer denormalize isim de cache isim de yoksa mecburen FutureBuilder'a düş.
-    
     if (finalName != 'Kullanıcı' || (cachedUserData != null && cachedUserData!.isNotEmpty)) {
         return _buildTile(context, otherUid, finalName, finalPhoto, lastMsg, lastMsgTime);
     }
     
-    // 4. Son çare FutureBuilder (Eğer cache gecikirse ve chat doc'ta veri yoksa)
     return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
         builder: (context, userSnap) {
-            // Silinmişse gösterme
             if (userSnap.hasData && !userSnap.data!.exists) {
                return const SizedBox.shrink();
             }
@@ -502,31 +478,31 @@ class ChatListTile extends StatelessWidget {
     );
   }
   
-  Future<void> _showHideDialog(BuildContext context, String docId) async {
+  // YENİ KALICI SİLME FONKSİYONU
+  Future<void> _showDeleteDialog(BuildContext context, String docId) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Sohbeti gizle?'),
-        content: const Text('Sohbet listenizden kaldırılacak (karşı taraf etkilenmez).'),
+        title: const Text('Sohbeti Sil?'),
+        content: const Text('Sohbet kalıcı olarak silinecek ve geri alınamaz. Onaylıyor musunuz?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Gizle')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true), 
+            child: const Text('Sil')
+          ),
         ],
       ),
     );
 
     if (confirm == true) {
-      await FirebaseFirestore.instance.collection('chats').doc(docId).set({
-        'visibleFor': {currentUid: false},
-      }, SetOptions(merge: true));
+      // Sohbet dokümanını doğrudan ve kalıcı olarak veritabanından uçururuz.
+      await FirebaseFirestore.instance.collection('chats').doc(docId).delete();
     }
   }
 }
 
-// ... DİĞER YARDIMCI SINIFLAR (NewMatchHeader, _UnreadCountBadge, _TrashFab, vb.) AYNEN KALIYOR ...
-// Kodun geri kalanını (NewMatchHeader ve sonrası) önceki dosyanızdan olduğu gibi kullanabilirsiniz.
-// Buraya hepsini tekrar kopyalamıyorum çünkü değişmediler. 
-// Sadece ChatListTile sınıfını yukarıdaki ile değiştirmeniz yeterlidir.
 class NewMatchHeader extends StatefulWidget {
   final String currentUid;
   const NewMatchHeader({super.key, required this.currentUid});
@@ -544,13 +520,19 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
     _matchFuture = _findLatestMatch();
   }
 
-  // YENİ: Artık "likes" yerine "matches" koleksiyonundan veri çekiyor!
+  @override
+  void didUpdateWidget(covariant NewMatchHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentUid != widget.currentUid) {
+      _matchFuture = _findLatestMatch();
+    }
+  }
+
   Future<Map<String, dynamic>?> _findLatestMatch() async {
     final fs = FirebaseFirestore.instance;
     final uid = widget.currentUid;
 
     try {
-      // YENİ: Ana ROOT 'matches' koleksiyonunu okuyoruz
       final matchQs = await fs
           .collection('matches')
           .where('users', arrayContains: uid)
@@ -570,7 +552,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
 
       String? targetUid;
       for (var doc in matchQs.docs) {
-        // Ortak havuzdaki dökümandan diğer kişinin UID'sini buluyoruz
         final matchUsers = List.from(doc.data()['users'] ?? []);
         final matchedUid = matchUsers.firstWhere((id) => id != uid, orElse: () => '');
 
@@ -593,7 +574,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
         'photoURL': userData['photoURL'],
       };
     } catch (e) {
-      debugPrint('Eşleşme bulunurken hata: $e');
       return null;
     }
   }
@@ -631,16 +611,13 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
                   child: CircleAvatar(
                     radius: 6,
                     backgroundColor: Colors.green,
-                    child: Icon(Icons.people_alt, size: 8, color: Colors.white), // İkon değişti
+                    child: Icon(Icons.people_alt, size: 8, color: Colors.white), 
                   ),
                 ),
               ],
             ),
             title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-            
-            // METİN YENİ SİSTEME GÖRE GÜNCELLENDİ
             subtitle: const Text('Artık karşılıklı takip ediyorsunuz!'), 
-            
             trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
             onTap: () async {
                final chatId = await ChatService.instance.getOrCreateChat(widget.currentUid, otherUid);
@@ -651,7 +628,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
                   builder: (_) => ChatRoomScreen(chatId: chatId, otherUid: otherUid, otherTitle: name),
                 ),
               );
-              // Tıklandıktan sonra bir sonraki (varsa) yeni eşleşmeyi arar
               setState(() {
                 _matchFuture = _findLatestMatch();
               });
@@ -661,206 +637,6 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
       },
     );
   }
-}
-
-
-
-class _TrashFab extends StatelessWidget {
-  final String currentUid;
-  const _TrashFab({required this.currentUid});
-  @override
-  Widget build(BuildContext context) {
-    return FloatingActionButton(
-      tooltip: 'Silinen/Gizlenen mesajlar',
-      onPressed: () {
-        showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          useSafeArea: true,
-          builder: (_) => _HiddenMessagesSheet(currentUid: currentUid),
-        );
-      },
-      child: const Icon(Icons.delete_outline),
-    );
-  }
-}
-
-class _HiddenMessagesSheet extends StatefulWidget {
-  final String currentUid;
-  const _HiddenMessagesSheet({required this.currentUid});
-  @override
-  State<_HiddenMessagesSheet> createState() => _HiddenMessagesSheetState();
-}
-
-class _HiddenMessagesSheetState extends State<_HiddenMessagesSheet> {
-  final _fs = FirebaseFirestore.instance;
-  late Future<List<_TrashItem>> _loaderMsgs;
-  late Future<List<_HiddenChatItem>> _loaderChats;
-
-  @override
-  void initState() {
-    super.initState();
-    _loaderMsgs = _loadHiddenMessages();
-    _loaderChats = _loadHiddenChats();
-  }
-
-  Future<List<_TrashItem>> _loadHiddenMessages() async {
-    final uid = widget.currentUid;
-    final chatsQs = await _fs.collection('chats').where('participants', arrayContains: uid).get();
-    final items = <_TrashItem>[];
-
-    for (final chatDoc in chatsQs.docs) {
-      final chatId = chatDoc.id;
-      final msgs = _fs.collection('chats').doc(chatId).collection('messages');
-      final futures = <Future<QuerySnapshot<Map<String, dynamic>>>>[
-        msgs.where('deletedFor.$uid', isEqualTo: true).limit(200).get(),
-        msgs.where('hiddenFor.$uid', isEqualTo: true).limit(200).get(),
-        msgs.where('deleted', isEqualTo: true).limit(200).get(),
-      ];
-      final results = await Future.wait(futures);
-      final seen = <String>{};
-      for (final qs in results) {
-        for (final d in qs.docs) {
-          if (seen.add(d.reference.path)) {
-            final m = d.data();
-            final text = (m['text'] ?? '').toString();
-            final ts = (m['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
-            items.add(_TrashItem(chatId: chatId, messageRef: d.reference, text: text, when: ts));
-          }
-        }
-      }
-    }
-    items.sort((a, b) => b.when.compareTo(a.when));
-    return items;
-  }
-
-  Future<void> _restore(_TrashItem it) async {
-    try {
-      await it.messageRef.update({
-        'deletedFor.${widget.currentUid}': FieldValue.delete(),
-        'hiddenFor.${widget.currentUid}': FieldValue.delete(),
-        'deleted': false,
-      });
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mesaj geri alındı.')));
-      setState(() {
-        _loaderMsgs = _loadHiddenMessages();
-        _loaderChats = _loadHiddenChats();
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
-    }
-  }
-
-  Future<List<_HiddenChatItem>> _loadHiddenChats() async {
-    final uid = widget.currentUid;
-    final qs = await _fs
-        .collection('chats')
-        .where('participants', arrayContains: uid)
-        .where('visibleFor.$uid', isEqualTo: false)
-        .get();
-
-    final items = <_HiddenChatItem>[];
-    for (final d in qs.docs) {
-      final data = d.data();
-      final parts = List.from(data['participants'] ?? []);
-      final otherUid = parts.firstWhere((e) => e != uid, orElse: () => '');
-      final last = (data['lastMessage'] ?? '') as String;
-      final lastAt = (data['lastMessageAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
-      final titles = (data['titles'] as Map?) ?? {};
-      final photos = (data['photos'] as Map?) ?? {};
-      String title = (titles[uid] as String?) ?? '';
-      String? photo = (photos[otherUid] as String?);
-      items.add(_HiddenChatItem(chatId: d.id, otherUid: otherUid, title: title.isNotEmpty ? title : otherUid, photoURL: photo, lastMessage: last, lastAt: lastAt));
-    }
-    items.sort((a, b) => b.lastAt.compareTo(a.lastAt));
-    return items;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.85,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (context, controller) {
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Text('Geri Dönüşüm Kutusu', style: Theme.of(context).textTheme.titleMedium),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.refresh),
-                    onPressed: () => setState(() {
-                      _loaderMsgs = _loadHiddenMessages();
-                      _loaderChats = _loadHiddenChats();
-                    }),
-                  )
-                ],
-              ),
-            ),
-            Expanded(
-              child: FutureBuilder<List<Object>>(
-                future: Future.wait([_loaderChats, _loaderMsgs]),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final chats = (snap.data?[0] as List<_HiddenChatItem>?) ?? [];
-                  final items = (snap.data?[1] as List<_TrashItem>?) ?? [];
-                  if (chats.isEmpty && items.isEmpty) return const Center(child: Text("Çöp kutusu boş."));
-
-                  return ListView(
-                    controller: controller,
-                    children: [
-                      if (chats.isNotEmpty) ...[
-                        const Padding(padding: EdgeInsets.all(8.0), child: Text("Gizlenen Sohbetler", style: TextStyle(fontWeight: FontWeight.bold))),
-                        ...chats.map((c) => ListTile(
-                          title: Text(c.title),
-                          subtitle: Text(c.lastMessage),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.restore),
-                            onPressed: () async {
-                              await _fs.collection('chats').doc(c.chatId).set({'visibleFor': {widget.currentUid: true}}, SetOptions(merge: true));
-                              if (mounted) setState(() => _loaderChats = _loadHiddenChats());
-                            },
-                          ),
-                        ))
-                      ],
-                      if (items.isNotEmpty) ...[
-                        const Padding(padding: EdgeInsets.all(8.0), child: Text("Silinen Mesajlar", style: TextStyle(fontWeight: FontWeight.bold))),
-                        ...items.map((it) => ListTile(
-                          title: Text(it.text),
-                          subtitle: Text(_formatTime(it.when)),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.restore),
-                            onPressed: () => _restore(it),
-                          ),
-                        ))
-                      ]
-                    ],
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _TrashItem {
-  final String chatId;
-  final DocumentReference<Map<String, dynamic>> messageRef;
-  final String text;
-  final DateTime when;
-  _TrashItem({required this.chatId, required this.messageRef, required this.text, required this.when});
 }
 
 String _formatTime(DateTime dt) {
@@ -967,20 +743,11 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
   }
 }
 
-class _HiddenChatItem {
-  final String chatId;
-  final String otherUid;
-  final String title;
-  final String? photoURL;
-  final String lastMessage;
-  final DateTime lastAt;
-  _HiddenChatItem({required this.chatId, required this.otherUid, required this.title, required this.photoURL, required this.lastMessage, required this.lastAt});
-}
-
 class JoinedClubsList extends StatefulWidget {
+  final String uid; 
   final String filterText;
   
-  const JoinedClubsList({super.key, this.filterText = ''});
+  const JoinedClubsList({super.key, required this.uid, this.filterText = ''});
 
   @override
   State<JoinedClubsList> createState() => _JoinedClubsListState();
@@ -995,19 +762,24 @@ class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAli
   @override
   void initState() {
     super.initState();
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      _clubsStream = ClubService.instance.getUserClubsStream(uid);
-    } else {
-      _clubsStream = const Stream.empty();
+    _initStream();
+  }
+
+  @override
+  void didUpdateWidget(covariant JoinedClubsList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uid != widget.uid) {
+      _initStream();
     }
+  }
+
+  void _initStream() {
+    _clubsStream = ClubService.instance.getUserClubsStream(widget.uid);
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    
-    if (FirebaseAuth.instance.currentUser?.uid == null) return const SizedBox.shrink();
 
     return StreamBuilder<QuerySnapshot>(
       stream: _clubsStream,
