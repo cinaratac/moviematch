@@ -95,12 +95,16 @@ class _NotificationsSheet extends StatefulWidget {
 
 class _NotificationsSheetState extends State<_NotificationsSheet> {
   late final Query<Map<String, dynamic>> _q;
+  
+  // YENİ VE KRİTİK EKLENTİ: Akışı (Stream) hafızada tutacağımız sabit değişken
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _notificationsStream;
+  
+  // Profil resimleri hafızası (Bir önceki adımdan kalma)
+  static final Map<String, _Actor> _actorCache = {};
 
   @override
   void initState() {
     super.initState();
-    
-    // Sadece son 3 aydaki bildirimleri getir
     final threeMonthsAgo = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 90)));
 
     _q = FirebaseFirestore.instance
@@ -111,9 +115,10 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         .orderBy('createdAt', descending: true)
         .limit(100);
 
-    // EKRAN AÇILIR AÇILMAZ TÜMÜNÜ OKUNDU YAP
+    // KİLİT ÇÖZÜM: Stream'i sadece sayfa ilk açıldığında 1 kere oluşturup hafızaya alıyoruz!
+    _notificationsStream = _q.snapshots();
+
     NotificationService.I.markAllAsRead(widget.uid);
-    // ARKA PLANDA 3 AYDAN ESKİLERİ SİL
     NotificationService.I.deleteOldNotifications(widget.uid);
   }
 
@@ -146,7 +151,8 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
             const Divider(height: 1),
             Expanded(
               child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _q.snapshots(),
+                // DİKKAT: Artık _q.snapshots() yerine, hafızadaki sabit stream'i kullanıyoruz
+                stream: _notificationsStream,
                 builder: (context, snap) {
                   if (snap.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -161,7 +167,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                     );
                   }
 
-                  // 1. BEĞENİLERİ GRUPLA
+                  // BEĞENİLERİ GRUPLA
                   final List<dynamic> displayItems = [];
                   final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> likeGroups = {};
 
@@ -185,12 +191,11 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                         'isGroupedLike': true,
                         'postId': postId,
                         'docs': groupDocs,
-                        'createdAt': groupDocs.first.data()['createdAt'], 
                       });
                     }
                   });
 
-                  // 2. TARİHE GÖRE SIRALA
+                  // TARİHE GÖRE SIRALA
                   displayItems.sort((a, b) {
                     Timestamp? tA = a is QueryDocumentSnapshot 
                         ? (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp? 
@@ -204,196 +209,22 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   });
 
                   return ListView.separated(
-                    controller: controller,
+                    controller: controller, // Kaydırma controller'ı burada sabit çalışacak
                     itemCount: displayItems.length,
                     separatorBuilder: (context, index) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final item = displayItems[i];
 
-                      // ==========================================
-                      // DURUM A: GRUPLANMIŞ ÇOKLU BEĞENİ GÖSTERİMİ
-                      // ==========================================
                       if (item is Map && item['isGroupedLike'] == true) {
-                        final List<QueryDocumentSnapshot<Map<String, dynamic>>> groupDocs = item['docs'];
-                        final firstData = groupDocs[0].data();
-                        final secondData = groupDocs[1].data(); 
-                        
-                        final createdAt = firstData['createdAt'] as Timestamp?;
-                        final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
-                        final othersCount = groupDocs.length - 1;
-
-                        // İki kişinin de bilgilerini aynı anda çekiyoruz
-                        return FutureBuilder<List<_Actor>>(
-                          future: Future.wait([
-                            _getActor((firstData['actorId'] ?? '').toString(), firstData),
-                            _getActor((secondData['actorId'] ?? '').toString(), secondData),
-                          ]),
-                          builder: (context, snap) {
-                            final actor1 = snap.data?.isNotEmpty == true ? snap.data![0] : null;
-                            final actor2 = snap.data?.length == 2 ? snap.data![1] : null;
-                            final name = actor1?.handle ?? actor1?.displayName ?? 'Bir kullanıcı';
-                            
-                            return ListTile(
-                              onTap: () {
-                                Navigator.pop(context);
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: item['postId'])));
-                              },
-                              // INSTAGRAM STİLİ ÜST ÜSTE BİNEN AVATARLAR
-                              leading: SizedBox(
-                                width: 52,
-                                height: 42,
-                                child: Stack(
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    // Arkadaki kişi (İkinci)
-                                    Positioned(
-                                      right: 0,
-                                      top: 4,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2.5),
-                                        ),
-                                        child: _Avatar(url: actor2?.photoURL, radius: 15),
-                                      ),
-                                    ),
-                                    // Öndeki kişi (Birinci)
-                                    Positioned(
-                                      left: 0,
-                                      top: 0,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2.5),
-                                        ),
-                                        child: _Avatar(url: actor1?.photoURL, radius: 18),
-                                      ),
-                                    ),
-                                    // Kalp ikonu
-                                    Positioned(
-                                      bottom: -4,
-                                      right: -4,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(3),
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context).scaffoldBackgroundColor,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(Icons.favorite, size: 12, color: Colors.red),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              title: Text(
-                                '$name ve $othersCount diğer kişi',
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                              subtitle: const Text('gönderini beğendi'),
-                              trailing: Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
-                            );
-                          },
+                        return _GroupedNotificationTile(
+                          postId: item['postId'],
+                          docs: item['docs'],
+                        );
+                      } else {
+                        return _SingleNotificationTile(
+                          doc: item as QueryDocumentSnapshot<Map<String, dynamic>>,
                         );
                       }
-
-                      // ==========================================
-                      // DURUM B: TEKİL BİLDİRİM (1 KİŞİ) GÖSTERİMİ
-                      // ==========================================
-                      final doc = item as QueryDocumentSnapshot<Map<String, dynamic>>;
-                      final m = doc.data();
-                      final type = (m['type'] ?? '').toString();
-                      final actorId = (m['actorId'] ?? '').toString();
-                      final count = (m['count'] as num?)?.toInt() ?? 1;
-                      final createdAt = m['createdAt'] as Timestamp?;
-                      final read = (m['read'] ?? false) == true;
-
-                      final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
-                      final title = _titleFor(type);
-                      final subtitle = _subtitleFor(type, count);
-
-                      return FutureBuilder<_Actor>(
-                        future: _getActor(actorId, m),
-                        builder: (context, actorSnap) {
-                          final actor = actorSnap.data;
-
-                          // PROFİLE GİTME FONKSİYONU
-                          void goToProfile() {
-                            if (actorId.isNotEmpty) {
-                              Navigator.pop(context);
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: actorId)));
-                            }
-                          }
-
-                          // İÇERİĞE GİTME FONKSİYONU
-                          void goToContent() {
-                            final postId = (m['postId'] ?? '').toString();
-                            if (type == 'follow') {
-                              goToProfile();
-                            } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
-                              Navigator.pop(context);
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)));
-                            } else if (type == 'club_request') {
-                              final clubId = (m['clubId'] ?? '').toString();
-                              final clubName = (m['clubName'] ?? '').toString();
-                              if (clubId.isNotEmpty) {
-                                Navigator.pop(context);
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(
-                                  chatId: clubId, otherUid: '', otherTitle: clubName, isGroup: true, groupName: clubName,
-                                )));
-                              }
-                            }
-                          }
-
-                          return ListTile(
-                            onTap: () {
-                              doc.reference.update({'read': true});
-                              goToContent(); // Tile boşluğuna basınca İçeriğe git
-                            },
-                            // SADECE RESME BASINCA PROFİLE GİT
-                            leading: GestureDetector(
-                              onTap: goToProfile,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  _Avatar(url: actor?.photoURL, radius: 20),
-                                  if (type == 'like')
-                                    Positioned(
-                                      bottom: -4,
-                                      right: -4,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(3),
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context).scaffoldBackgroundColor, 
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(Icons.favorite, size: 12, color: Colors.red),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                            // SADECE İSME BASINCA PROFİLE GİT
-                            title: GestureDetector(
-                              onTap: goToProfile,
-                              child: Text(
-                                actor?.displayName ?? title, 
-                                maxLines: 1, 
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w600), // Tıklanabilir hissi verir
-                              ),
-                            ),
-                            subtitle: Text('${actor?.handle ?? actor?.displayName ?? 'Kullanıcı'} $subtitle', maxLines: 2, overflow: TextOverflow.ellipsis),
-                            trailing: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
-                                const SizedBox(height: 4),
-                                if (!read) Container(width: 8, height: 8, decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle)),
-                              ],
-                            ),
-                          );
-                        },
-                      );
                     },
                   );
                 },
@@ -404,57 +235,322 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
       },
     );
   }
+}
 
-  String _titleFor(String type) {
-    switch (type) {
-      case 'like': return 'Yeni beğeni';
-      case 'comment': return 'Yeni yorum';
-      case 'follow': return 'Yeni takipçi';
-      case 'club_request': return 'Kulüp İsteği';
-      default: return 'Bildirim';
-    }
+// ============================================================================
+// 1. TEKİL BİLDİRİM KARTI (SIFIR YANIP SÖNME GARANTİLİ)
+// ============================================================================
+class _SingleNotificationTile extends StatefulWidget {
+  final QueryDocumentSnapshot<Map<String, dynamic>> doc;
+  const _SingleNotificationTile({required this.doc});
+
+  @override
+  State<_SingleNotificationTile> createState() => _SingleNotificationTileState();
+}
+
+class _SingleNotificationTileState extends State<_SingleNotificationTile> {
+  _Actor? actor;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActor();
   }
 
-  String _subtitleFor(String type, int count) {
-    final suffix = count > 1 ? ' ve ${count - 1} diğer kişi' : '';
-    switch (type) {
-      case 'like': return '$suffix gönderinizi beğendi';
-      case 'comment': return '$suffix gönderinize yorum yaptı';
-      case 'follow': return 'sizi takip etmeye başladı';
-      case 'club_request': return 'kulübünüze katılmak istiyor';
-      default: return 'bir etkinlikte bulundu';
-    }
-  }
+  void _loadActor() {
+    final m = widget.doc.data();
+    final actorId = (m['actorId'] ?? '').toString();
+    
+    if (actorId.isEmpty) return;
 
-  Future<_Actor> _getActor(String uid, Map<String, dynamic> notif) async {
-    final cachedName = (notif['actorName'] ?? '').toString();
-    final cachedHandle = (notif['actorHandle'] ?? '').toString();
-    final cachedPhoto = (notif['actorPhotoURL'] ?? '').toString();
-
-    if (cachedName.isNotEmpty || cachedPhoto.isNotEmpty || cachedHandle.isNotEmpty) {
-      return _Actor(
-        uid: uid,
-        displayName: cachedName.isNotEmpty ? cachedName : null,
-        handle: cachedHandle.isNotEmpty ? cachedHandle : null,
-        photoURL: cachedPhoto.isNotEmpty ? cachedPhoto : null,
-      );
+    // 1. ADIM: Daha önce yüklendiyse direkt RAM'den al (Anında görünür, yükleniyor ekranı çıkmaz)
+    if (_NotificationsSheetState._actorCache.containsKey(actorId)) {
+      actor = _NotificationsSheetState._actorCache[actorId];
+      return; 
     }
 
-    if (uid.isEmpty) return _Actor(uid: uid);
-    try {
-      final u = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-      if (u.exists) {
-        final m = u.data() ?? {};
-        return _Actor(
-          uid: uid,
-          displayName: (m['displayName'] ?? m['name'] ?? '').toString(),
-          handle: (m['handle'] ?? m['letterboxdUsername'] ?? '').toString(),
-          photoURL: (m['photoURL'] ?? '').toString(),
+    // 2. ADIM: Hafızada yoksa, saniyelik boş kalmasın diye bildirimin içindeki eski/yedek veriyi ekrana bas
+    actor = _Actor(
+      uid: actorId,
+      displayName: m['actorName']?.toString(),
+      handle: m['actorHandle']?.toString(),
+      photoURL: m['actorPhotoURL']?.toString(),
+    );
+
+    // 3. ADIM: Arka planda sessizce en güncel resmi çek ve hafızayı güncelle
+    FirebaseFirestore.instance.collection('users').doc(actorId).get().then((u) {
+      if (u.exists && mounted) {
+        final data = u.data() ?? {};
+        final newActor = _Actor(
+          uid: actorId,
+          displayName: (data['displayName'] ?? data['name'] ?? m['actorName']).toString(),
+          handle: (data['username'] ?? data['handle'] ?? m['actorHandle']).toString(),
+          photoURL: (data['photoURL'] ?? m['actorPhotoURL']).toString(),
         );
+        _NotificationsSheetState._actorCache[actorId] = newActor; // Bir dahaki sefere anında gelmesi için kaydet
+        setState(() {
+          actor = newActor; // Ekranı yeni resimle güncelle
+        });
+      }
+    }).catchError((_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final m = widget.doc.data();
+    final type = (m['type'] ?? '').toString();
+    final actorId = (m['actorId'] ?? '').toString();
+    final count = (m['count'] as num?)?.toInt() ?? 1;
+    final createdAt = m['createdAt'] as Timestamp?;
+    final read = (m['read'] ?? false) == true;
+
+    final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
+    final title = _titleFor(type);
+    final subtitle = _subtitleFor(type, count);
+
+    void goToProfile() {
+      if (actorId.isNotEmpty) {
+        Navigator.pop(context);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: actorId)));
+      }
+    }
+
+    void goToContent() {
+      final postId = (m['postId'] ?? '').toString();
+      if (type == 'follow') {
+        goToProfile();
+      } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
+        Navigator.pop(context);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)));
+      } else if (type == 'club_request') {
+        final clubId = (m['clubId'] ?? '').toString();
+        final clubName = (m['clubName'] ?? '').toString();
+        if (clubId.isNotEmpty) {
+          Navigator.pop(context);
+          Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(
+            chatId: clubId, otherUid: '', otherTitle: clubName, isGroup: true, groupName: clubName,
+          )));
+        }
+      }
+    }
+
+    return ListTile(
+      onTap: () {
+        widget.doc.reference.update({'read': true});
+        goToContent(); 
+      },
+      leading: GestureDetector(
+        onTap: goToProfile,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _Avatar(url: actor?.photoURL, radius: 20),
+            if (type == 'like')
+              Positioned(
+                bottom: -4,
+                right: -4,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).scaffoldBackgroundColor, 
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.favorite, size: 12, color: Colors.red),
+                ),
+              ),
+          ],
+        ),
+      ),
+      title: GestureDetector(
+        onTap: goToProfile,
+        child: Text(
+          actor?.displayName ?? title, 
+          maxLines: 1, 
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w600), 
+        ),
+      ),
+      subtitle: Text('${actor?.handle ?? actor?.displayName ?? 'Kullanıcı'} $subtitle', maxLines: 2, overflow: TextOverflow.ellipsis),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 4),
+          if (!read) Container(width: 8, height: 8, decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle)),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// 2. ÇOKLU (GRUPLANMIŞ) BİLDİRİM KARTI
+// ============================================================================
+class _GroupedNotificationTile extends StatefulWidget {
+  final String postId;
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs;
+  
+  const _GroupedNotificationTile({required this.postId, required this.docs});
+
+  @override
+  State<_GroupedNotificationTile> createState() => _GroupedNotificationTileState();
+}
+
+class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
+  _Actor? actor1;
+  _Actor? actor2;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActors();
+  }
+
+  void _loadActors() async {
+    final firstData = widget.docs[0].data();
+    final secondData = widget.docs[1].data();
+    
+    final id1 = (firstData['actorId'] ?? '').toString();
+    final id2 = (secondData['actorId'] ?? '').toString();
+
+    actor1 = await _resolveActor(id1, firstData);
+    actor2 = await _resolveActor(id2, secondData);
+    
+    if (mounted) setState(() {});
+  }
+
+  Future<_Actor> _resolveActor(String actorId, Map<String, dynamic> m) async {
+    if (actorId.isEmpty) return _Actor(uid: actorId);
+    
+    // Hafızada varsa anında dön
+    if (_NotificationsSheetState._actorCache.containsKey(actorId)) {
+      return _NotificationsSheetState._actorCache[actorId]!;
+    }
+
+    final tempActor = _Actor(
+      uid: actorId,
+      displayName: m['actorName']?.toString(),
+      handle: m['actorHandle']?.toString(),
+      photoURL: m['actorPhotoURL']?.toString(),
+    );
+
+    try {
+      final u = await FirebaseFirestore.instance.collection('users').doc(actorId).get();
+      if (u.exists) {
+        final data = u.data() ?? {};
+        final newActor = _Actor(
+          uid: actorId,
+          displayName: (data['displayName'] ?? data['name'] ?? m['actorName']).toString(),
+          handle: (data['username'] ?? data['handle'] ?? m['actorHandle']).toString(),
+          photoURL: (data['photoURL'] ?? m['actorPhotoURL']).toString(),
+        );
+        _NotificationsSheetState._actorCache[actorId] = newActor;
+        return newActor;
       }
     } catch (_) {}
-    return _Actor(uid: uid);
+    return tempActor;
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final firstData = widget.docs[0].data();
+    final createdAt = firstData['createdAt'] as Timestamp?;
+    final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
+    final othersCount = widget.docs.length - 1;
+
+    final name = actor1?.handle ?? actor1?.displayName ?? 'Bir kullanıcı';
+
+    return ListTile(
+      onTap: () {
+        Navigator.pop(context);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: widget.postId)));
+      },
+      leading: SizedBox(
+        width: 52,
+        height: 42,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              right: 0,
+              top: 4,
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2.5),
+                ),
+                child: _Avatar(url: actor2?.photoURL, radius: 15),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              top: 0,
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2.5),
+                ),
+                child: _Avatar(url: actor1?.photoURL, radius: 18),
+              ),
+            ),
+            Positioned(
+              bottom: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.favorite, size: 12, color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+      ),
+      title: Text(
+        '$name ve $othersCount diğer kişi',
+        style: Theme.of(context).textTheme.titleSmall,
+      ),
+      subtitle: const Text('gönderini beğendi'),
+      trailing: Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
+    );
+  }
+}
+
+// ============================================================================
+// YARDIMCI FONKSİYONLAR
+// ============================================================================
+String _titleFor(String type) {
+  switch (type) {
+    case 'like': return 'Yeni beğeni';
+    case 'comment': return 'Yeni yorum';
+    case 'follow': return 'Yeni takipçi';
+    case 'club_request': return 'Kulüp İsteği';
+    default: return 'Bildirim';
+  }
+}
+
+String _subtitleFor(String type, int count) {
+  final suffix = count > 1 ? ' ve ${count - 1} diğer kişi' : '';
+  switch (type) {
+    case 'like': return '$suffix gönderinizi beğendi';
+    case 'comment': return '$suffix gönderinize yorum yaptı';
+    case 'follow': return 'sizi takip etmeye başladı';
+    case 'club_request': return 'kulübünüze katılmak istiyor';
+    default: return 'bir etkinlikte bulundu';
+  }
+}
+
+String _timeAgoShort(DateTime d) {
+  final diff = DateTime.now().difference(d);
+  if (diff.inDays > 365) return '${(diff.inDays / 365).floor()}y';
+  if (diff.inDays > 30) return '${(diff.inDays / 30).floor()}a';
+  if (diff.inDays > 0) return '${diff.inDays}g';
+  if (diff.inHours > 0) return '${diff.inHours}s';
+  if (diff.inMinutes > 0) return '${diff.inMinutes}d';
+  return 'Az önce';
 }
 
 class _Actor {
@@ -490,15 +586,3 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-String _timeAgoShort(DateTime dt) {
-  final now = DateTime.now();
-  final diff = now.difference(dt);
-
-  if (diff.inSeconds < 60) return '${diff.inSeconds}s';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-  if (diff.inHours < 24) return '${diff.inHours}h';
-  if (diff.inDays < 7) return '${diff.inDays}g';
-  if (diff.inDays < 30) return '${diff.inDays ~/ 7}hf'; 
-  if (diff.inDays < 365) return '${diff.inDays ~/ 30}a';
-  return '${diff.inDays ~/ 365}y';
-}
