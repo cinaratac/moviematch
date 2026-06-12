@@ -1,23 +1,15 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// Simple data model for a watchlist movie
+/// Watchlist filmi için basit veri modeli
 class WatchlistMovie {
   final String title;
   final String? posterUrl;
   final String? id;
-  const WatchlistMovie({required this.title, this.posterUrl,this.id,});
+  const WatchlistMovie({required this.title, this.posterUrl, this.id});
 }
 
-/// A fortune-style wheel for picking a movie from a watchlist.
-///
-/// Usage:
-/// ```dart
-/// WatchlistWheel(
-///   items: movies, // List<WatchlistMovie>
-///   onChosen: (m) => print('Seçilen: ${m.title}')
-/// )
-/// ```
+/// Watchlist'ten rastgele film seçmek için kullanılan Çark (Wheel) Widget'ı
 class WatchlistWheel extends StatefulWidget {
   final List<WatchlistMovie> items;
   final void Function(WatchlistMovie chosen)? onChosen;
@@ -42,7 +34,7 @@ class _WatchlistWheelState extends State<WatchlistWheel>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _anim;
-  double _angle = 0.0; // current rotation angle (radians)
+  double _angle = 0.0; // Mevcut dönüş açısı (radyan)
   bool _spinning = false;
   late math.Random _rng;
 
@@ -75,36 +67,27 @@ class _WatchlistWheelState extends State<WatchlistWheel>
     widget.onChosen?.call(widget.items[idx]);
   }
 
-  /// Spin the wheel with a bit of randomness.
+  /// Çarkı rastgelelik ekleyerek çevirir
   void spin() {
     if (widget.items.length <= 1 || _spinning) return;
     setState(() => _spinning = true);
 
-    // Current normalized angle
     final start = _angle;
-
-    // Target: 5–8 full turns plus an offset to land on a random slice
-    final fullTurns = 5 + _rng.nextInt(4); // 5..8
+    // Hedef: 5 ile 8 arası tam tur ve rastgele bir dilim seçimi
+    final fullTurns = 5 + _rng.nextInt(4); 
     final slice = (2 * math.pi) / widget.items.length;
     final offsetWithinSlice =
-        _rng.nextDouble() * (slice * 0.9) + slice * 0.05; // avoid edges
+        _rng.nextDouble() * (slice * 0.9) + slice * 0.05; // Kenarlardan kaçın
 
-    // Choose a random target slice index different from current selection
     final currentIdx = _indexForCurrentAngle(widget.items.length, start);
     int targetIdx = _rng.nextInt(widget.items.length);
     if (widget.items.length > 1 && targetIdx == currentIdx) {
-      targetIdx = (targetIdx + 1) % widget.items.length;
+      targetIdx = (targetIdx + 1) % widget.items.length; // Aynı film gelmesin
     }
 
-    // We want the pointer at 12 o'clock to land in the center of target slice.
-    // Angle increases clockwise in Transform.rotate (positive is clockwise),
-    // so to move the wheel under a fixed pointer we rotate by +(turns*2π + delta).
-    final pointerAngle = -math.pi / 2; // top
-    final targetAngleCenter =
-        targetIdx * slice + slice / 2.0; // in wheel coordinates
-    final delta = _normalizeAngle(
-      targetAngleCenter - pointerAngle,
-    ); // how much to rotate from 0
+    final pointerAngle = -math.pi / 2; // Tepe noktası (12 yönü)
+    final targetAngleCenter = targetIdx * slice + slice / 2.0; 
+    final delta = _normalizeAngle(targetAngleCenter - pointerAngle); 
 
     final end = start + fullTurns * 2 * math.pi + delta + offsetWithinSlice;
 
@@ -127,11 +110,9 @@ class _WatchlistWheelState extends State<WatchlistWheel>
 
   static int _indexForCurrentAngle(int itemCount, double angle) {
     if (itemCount == 0) return 0;
-    // Pointer is at 12 o'clock. Convert current wheel angle to a slice index under the pointer.
     final twoPi = 2 * math.pi;
     final slice = twoPi / itemCount;
     final normalized = _normalize(angle);
-    // Which angle sits under the pointer? We invert rotation because wheel rotates under fixed pointer
     final pointer = _normalize(-normalized - math.pi / 2);
     int idx = (pointer / slice).floor();
     if (idx < 0) idx = 0;
@@ -161,7 +142,7 @@ class _WatchlistWheelState extends State<WatchlistWheel>
         Stack(
           alignment: Alignment.center,
           children: [
-            // The wheel
+            // Dönen Çark
             SizedBox(
               width: size,
               height: size,
@@ -171,33 +152,57 @@ class _WatchlistWheelState extends State<WatchlistWheel>
               ),
             ),
 
-            // Center preview of selected item
+            // Seçili Filmin Ortadaki Önizlemesi
             if (widget.showCenterPreview && selected != null)
               _CenterBadge(movie: selected),
 
-            // Pointer at top (12 o'clock)
+            // Tepe Noktasındaki İşaretçi
             Positioned(top: 0, child: _Pointer()),
           ],
         ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            FilledButton.icon(
-              onPressed: (items.length > 1 && !_spinning) ? spin : null,
-              icon: const Icon(Icons.casino),
-              label: const Text('Çevir'),
-            ),
-            const SizedBox(width: 12),
-            if (selected != null)
-              Text(
-                selected.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium,
+        
+        const SizedBox(height: 24),
+        
+        // 1. Eğer birden fazla film varsa, çark dönerken seçili olanı şık bir şekilde yazdırır
+        if (selected != null && items.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16.0, left: 16, right: 16),
+            child: Text(
+              selected.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
               ),
-          ],
+            ),
+          ),
+
+        // 2. Aksiyon Butonu (Modernleştirilmiş)
+        SizedBox(
+          width: 220,
+          height: 52,
+          child: FilledButton.icon(
+            // Sadece 1 film varsa tıklandığında popup göster (onChosen), çok varsa çarkı çevir (spin)
+            onPressed: items.length == 1 
+                ? () => widget.onChosen?.call(items.first) 
+                : (items.length > 1 && !_spinning) ? spin : null,
+            icon: Icon(
+              items.length == 1 ? Icons.send_rounded : Icons.casino, 
+              size: 22
+            ),
+            label: Text(
+              items.length == 1 ? 'Direkt Gönder' : 'Çarkı Çevir',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32), // Uygulamanızın Tema Yeşili
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              elevation: 4,
+            ),
+          ),
         ),
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -226,10 +231,10 @@ class _WheelPainter extends CustomPainter {
 
     for (int i = 0; i < n; i++) {
       final start = i * sliceAngle;
-      // Alternate slice colors
+      // Dilim renklerini sırayla değiştir (Yeşil tonları)
       final c = i.isEven
-          ? const Color(0xFF4CAF50).withOpacity(0.85) // green-ish
-          : const Color(0xFF2E7D32).withOpacity(0.85); // darker green
+          ? const Color(0xFF4CAF50).withOpacity(0.85) // Açık Yeşil
+          : const Color(0xFF2E7D32).withOpacity(0.85); // Koyu Yeşil
       paint.color = c;
 
       canvas.drawArc(
@@ -240,7 +245,7 @@ class _WheelPainter extends CustomPainter {
         paint,
       );
 
-      // Label (movie title)
+      // Film adını yazdır
       final label = items.isNotEmpty ? items[i].title : '—';
       final tpStyle = const TextStyle(
         color: Colors.white,
@@ -250,7 +255,7 @@ class _WheelPainter extends CustomPainter {
       textPainter.text = TextSpan(text: label, style: tpStyle);
       textPainter.layout(maxWidth: radius * 0.9);
 
-      // Place along the middle radius of the slice
+      // Dilimin orta açısına hizala
       final theta = start + sliceAngle / 2;
       final r = radius * 0.65;
       final offset = center + Offset(math.cos(theta), math.sin(theta)) * r;
@@ -265,7 +270,7 @@ class _WheelPainter extends CustomPainter {
       canvas.restore();
     }
 
-    // Draw inner circle to make a donut style
+    // Donut efekti vermek için merkeze iç daire çiz
     final inner = Paint()..color = Colors.black.withOpacity(0.08);
     canvas.drawCircle(center, radius * 0.35, inner);
   }
@@ -325,6 +330,12 @@ class _CenterBadge extends StatelessWidget {
                 width: 80,
                 height: 80,
                 fit: BoxFit.cover,
+                // --- ÇÖZÜM BURADA: TARAYICI GİBİ DAVRAN ---
+                headers: const {
+                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                },
+                // ----------------------------------------
                 errorBuilder: (_, __, ___) => const SizedBox(
                   width: 80,
                   height: 80,
