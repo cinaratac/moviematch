@@ -9,7 +9,7 @@ import 'package:fluttergirdi/screens/messagesscreen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
-import 'package:fluttergirdi/services/tab_service.dart'; // EKLENDİ: TabService Importu
+import 'package:fluttergirdi/services/tab_service.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -19,40 +19,96 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int _index = 0; // Sizin değişkeniniz bu
+  int _index = 0; 
   late final AppLinks _appLinks; 
   StreamSubscription<Uri>? _linkSubscription;
+  Timer? _idlePreloadTimer; // EKLENDİ: Arka plan akıllı yükleme zamanlayıcısı
+
+  final List<Widget> _pages = [
+    const FeedPage(),
+    const MatchListScreen(),
+    const MessagesPage(),
+    const ProfilePage(),
+  ];
+  final List<bool> _loadedPages = [true, false, false, false];
 
   @override
   void initState() {
     super.initState();
     
-    // --- TAB SERVICE DİNLEYİCİSİ (EKLENDİ) ---
-    // Drawer'dan veya başka yerden sekme değiştirme isteği gelirse burası çalışır
-    TabService.instance.indexNotifier.addListener(() {
-      if (mounted) {
-        final newIndex = TabService.instance.indexNotifier.value;
-        setState(() {
-          _index = newIndex; // DÜZELTME: _selectedIndex yerine _index kullanıldı
-          _loadedPages[newIndex] = true;
-        });
-      }
-    });
+    // TabService Dinleyicisi
+    TabService.instance.indexNotifier.addListener(_onTabServiceIndexChanged);
 
     // Duyuru kontrolü
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
     });
 
-    // --- DEEP LINK BAŞLATMA ---
     _initDeepLinks();
+    
+    // Uygulama açıldığında ilk ekran yüklendikten sonra diğerlerini arkada yüklemeye başla
+    _startIdlePreloading();
+  }
+
+  // EKLENDİ: Drawer'dan vs. tetiklenen değişimleri yakalamak için
+  void _onTabServiceIndexChanged() {
+    if (mounted) {
+      final newIndex = TabService.instance.indexNotifier.value;
+      if (_index != newIndex) {
+        _switchToTab(newIndex);
+      }
+    }
+  }
+
+  // EKLENDİ: Merkezi Sekme Değiştirme ve Yükleme Kontrolcüsü
+  void _switchToTab(int targetIndex) {
+    // 1. Kullanıcı sekmeye aniden bastığı için arka plandaki gizli yüklemeleri hemen iptal et
+    _idlePreloadTimer?.cancel();
+
+    // 2. Hedef sekmeyi anında aktif et ve yüklenmesi için izin ver
+    setState(() {
+      _index = targetIndex;
+      _loadedPages[targetIndex] = true; 
+    });
+    
+    // 3. Geçiş anındaki kasmanın geçmesi için biraz bekle ve kalan sayfaları arkada yüklemeye devam et
+    _startIdlePreloading();
+  }
+
+  // EKLENDİ: Sistemi yormadan arka planda sayfaları teker teker yükleyen fonksiyon
+  void _startIdlePreloading() {
+    _idlePreloadTimer?.cancel();
+    
+    // Kullanıcının bulunduğu sayfayı rahatça görebilmesi için 1.5 saniye bekle
+    _idlePreloadTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+
+      // Yüklenmemiş olan ilk sekmeyi bul
+      int nextToLoad = -1;
+      for (int i = 0; i < _loadedPages.length; i++) {
+        if (!_loadedPages[i]) {
+          nextToLoad = i;
+          break;
+        }
+      }
+
+      // Eğer yüklenmemiş sayfa kaldıysa, sadece onu yükle
+      if (nextToLoad != -1) {
+        setState(() {
+          _loadedPages[nextToLoad] = true;
+        });
+        
+        // Bu sayfa yüklendikten sonra diğerine geçmek için döngüyü tekrar başlat (sistemi boğmamak için sırayla)
+        _startIdlePreloading();
+      }
+    });
   }
 
   @override
   void dispose() {
     _linkSubscription?.cancel();
-    // TabService dinleyicisini kaldırmaya gerek yok çünkü singleton, 
-    // ama best practice olarak dispose edilebilir. Şimdilik gerek yok.
+    _idlePreloadTimer?.cancel(); // Zamanlayıcıyı bellekten temizle
+    TabService.instance.indexNotifier.removeListener(_onTabServiceIndexChanged);
     super.dispose();
   }
 
@@ -91,31 +147,17 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  final List<Widget> _pages = [
-    const FeedPage(),
-    const MatchListScreen(),
-    const MessagesPage(),
-    const ProfilePage(),
-  ];
-  final List<bool> _loadedPages = [true, false, false, false];
-
   @override
   Widget build(BuildContext context) {
-    // PopScope: Telefonun fiziksel geri tuşunu dinler ve kontrol eder
     return PopScope(
-      // Sadece Feed sekmesindeyken (index == 0) uygulamadan çıkışa izin ver
       canPop: _index == 0, 
       onPopInvokedWithResult: (bool didPop, Object? result) {
-        // Eğer sistem zaten geri gittiyse (uygulamadan çıktıysa) hiçbir şey yapma
         if (didPop) {
           return;
         }
         
-        // Eğer Feed (Ana) ekranda değilsek, çıkmak yerine Feed ekranına dön
         if (_index != 0) {
-          setState(() {
-            _index = 0;
-          });
+          _switchToTab(0);
           TabService.instance.changeTab(0); 
         }
       },
@@ -124,9 +166,6 @@ class _HomeShellState extends State<HomeShell> {
         body: IndexedStack(
           index: _index,
           children: List.generate(_pages.length, (index) {
-            // Eğer sayfa henüz hiç ziyaret edilmediyse hafızada yer kaplamaması
-            // ve gereksiz yükleme yapmaması için boş bir kutu (SizedBox) koyuyoruz.
-            // Sayfaya tıklandığı an asıl sayfa oluşturulup veriler çekilecek.
             return _loadedPages[index] ? _pages[index] : const SizedBox.shrink();
           }),
         ),
@@ -140,7 +179,7 @@ class _HomeShellState extends State<HomeShell> {
     
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.6), // Saydamlık için opacity ayarı
+        color: Colors.black.withOpacity(0.6),
         boxShadow: const [], 
       ),
       child: SafeArea(
@@ -148,7 +187,7 @@ class _HomeShellState extends State<HomeShell> {
         child: NavigationBarTheme(
           data: NavigationBarThemeData(
             height: 52,
-            backgroundColor: Colors.transparent, // Arka planı saydam yap
+            backgroundColor: Colors.transparent, 
             indicatorColor: cs.primary.withOpacity(0.14),
             indicatorShape: const StadiumBorder(),
             labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
@@ -156,7 +195,7 @@ class _HomeShellState extends State<HomeShell> {
               final selected = states.contains(WidgetState.selected);
               return IconThemeData(
                 size: 20,
-                color: selected ?const Color.fromARGB(253, 97, 202, 101)  : Colors.white70,
+                color: selected ? const Color.fromARGB(253, 97, 202, 101) : Colors.white70,
               );
             }),
             labelTextStyle: WidgetStateProperty.resolveWith((states) {
@@ -171,10 +210,7 @@ class _HomeShellState extends State<HomeShell> {
           child: NavigationBar(
             selectedIndex: _index,
             onDestinationSelected: (i) {
-             setState(() {
-                _index = i;
-                _loadedPages[i] = true; // SEKMEYE TIKLANINCA YÜKLEMEYE İZİN VER
-              });
+              _switchToTab(i); // EKLENDİ: Merkezi metodu çağır
               TabService.instance.changeTab(i); 
             },
             destinations: [
@@ -184,8 +220,8 @@ class _HomeShellState extends State<HomeShell> {
                 label: 'Feed',
               ),
               const NavigationDestination(
-               icon: Icon(Icons.person_search_outlined),
-  selectedIcon: Icon(Icons.person_search),
+                icon: Icon(Icons.person_search_outlined),
+                selectedIcon: Icon(Icons.person_search),
                 label: 'Cinephiles',
               ),
               NavigationDestination(

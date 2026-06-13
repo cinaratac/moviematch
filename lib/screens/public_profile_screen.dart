@@ -19,6 +19,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/services/blocking_service.dart';
+import 'package:fluttergirdi/widgets/report_user_sheet.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
@@ -532,83 +533,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     super.dispose();
   }
 
- void _showReportDialog(String myUid, String targetUid) {
-    String selectedReason = 'Spam';
-    final TextEditingController detailsCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Kullanıcıyı Bildir'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Bu kullanıcıyı neden bildiriyorsunuz?'),
-                    const SizedBox(height: 10),
-                    RadioListTile<String>(
-                      title: const Text('Spam veya Yanıltıcı'),
-                      value: 'Spam',
-                      groupValue: selectedReason,
-                      onChanged: (v) => setDialogState(() => selectedReason = v!),
-                    ),
-                    RadioListTile<String>(
-                      title: const Text('Hakaret / Zorbalık'),
-                      value: 'Harassment',
-                      groupValue: selectedReason,
-                      onChanged: (v) => setDialogState(() => selectedReason = v!),
-                    ),
-                    RadioListTile<String>(
-                      title: const Text('Uygunsuz İçerik'),
-                      value: 'Inappropriate',
-                      groupValue: selectedReason,
-                      onChanged: (v) => setDialogState(() => selectedReason = v!),
-                    ),
-                    RadioListTile<String>(
-                      title: const Text('Diğer'),
-                      value: 'Other',
-                      groupValue: selectedReason,
-                      onChanged: (v) => setDialogState(() => selectedReason = v!),
-                    ),
-                    if (selectedReason == 'Other')
-                      TextField(
-                        controller: detailsCtrl,
-                        decoration: const InputDecoration(
-                          hintText: 'Lütfen açıklayın...',
-                          labelText: 'Açıklama',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 3,
-                      ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('İptal'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    // Firebase'e raporu gönderme işlemi yapılabilir
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Şikayetiniz incelemeye alınmıştır.')),
-                    );
-                  },
-                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                  child: const Text('Bildir'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+ 
 
   @override
   Widget build(BuildContext context) {
@@ -699,7 +624,8 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                             if (myUid == null) return;
 
                             if (value == 'report') {
-                              _showReportDialog(myUid, widget.uid);
+                              // YENİ KODUMUZ BURASI: Artık alttan modern menü açılacak
+                              ReportUserSheet.show(context, widget.uid, titleText);
                             } else if (value == 'block') {
                               await BlockingService.instance.blockUser(
                                 currentUserId: myUid,
