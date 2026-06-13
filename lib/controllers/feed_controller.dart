@@ -11,19 +11,19 @@ class FeedController extends ChangeNotifier {
   bool isLoadingMore = false;
   bool hasMore = true;
 
-  // DÜZELTME BURADA: Listeyi ve _lastDoc'u spesifik tipte tanımlıyoruz
   List<DocumentSnapshot<Map<String, dynamic>>> posts = [];
 
   // Etkileşim verileri
   Set<String> myLikedPostIds = {};
   Set<String> myFollowingUserIds = {};
 
-  // DÜZELTME BURADA: <Map<String, dynamic>> ekledik
+  // YENİ EKLENEN: Sadece ilk açılışta çekilecek
+  Set<String> _blockedUserIds = {};
+
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
 
   final int _pageSize = 20;
 
-  // Başlatıcı
   Future<void> init() async {
     isLoading = true;
     notifyListeners();
@@ -44,8 +44,6 @@ class FeedController extends ChangeNotifier {
   Future<void> _loadData({required bool initial}) async {
     try {
       final userId = FirebaseAuth.instance.currentUser?.uid;
-      // Yeni: Engellenenleri tutacağımız değişken
-      Set<String> blockedUserIds = {};
 
       QuerySnapshot<Map<String, dynamic>> postSnapshot;
       if (initial) {
@@ -54,35 +52,29 @@ class FeedController extends ChangeNotifier {
             FeedService.instance.fetchInitial(limit: _pageSize),
             FeedService.instance.fetchUserLikedPostIds(userId),
             FeedService.instance.fetchUserFollowingIds(userId),
-            // YENİ SERVİS KULLANIMI: Engellenen ID'leri çek
             BlockingService.instance.getBlockedAndBlockerIds(userId),
           ]);
           
           postSnapshot = results[0] as QuerySnapshot<Map<String, dynamic>>;
           myLikedPostIds = results[1] as Set<String>;
           myFollowingUserIds = results[2] as Set<String>;
-          blockedUserIds = results[3] as Set<String>; // Listeyi aldık
+          _blockedUserIds = results[3] as Set<String>; // Sadece ilk yüklemede çek
         } else {
           postSnapshot = await FeedService.instance.fetchInitial(limit: _pageSize);
         }
       } else {
+        // LOAD MORE KISMI (Engellenenleri tekrar çekmiyoruz)
         postSnapshot = await FeedService.instance.fetchMore(
           lastDoc: _lastDoc!,
           limit: _pageSize,
         );
-        // Sayfalama (loadMore) durumunda da engellenenleri tekrar çekmek isteyebilirsin
-        // veya sınıf değişkeni olarak tutup orada saklayabilirsin.
-        if (userId != null) {
-            blockedUserIds = await BlockingService.instance.getBlockedAndBlockerIds(userId);
-        }
       }
 
-      // YENİ: Engellenen kullanıcıların gönderilerini filtrele
       var newDocs = postSnapshot.docs;
-      if (blockedUserIds.isNotEmpty) {
+      if (_blockedUserIds.isNotEmpty) {
         newDocs = newDocs.where((doc) {
           final authorId = doc.data()['authorId'] as String?;
-          return !blockedUserIds.contains(authorId);
+          return !_blockedUserIds.contains(authorId);
         }).toList();
       }
 
@@ -104,6 +96,7 @@ class FeedController extends ChangeNotifier {
       _lastDoc = newDocs.isNotEmpty ? newDocs.last : _lastDoc;
       hasMore = newDocs.length == _pageSize;
     } catch (e) {
+      debugPrint("LoadData Error: $e");
     } finally {
       isLoading = false;
       isLoadingMore = false;
@@ -111,13 +104,12 @@ class FeedController extends ChangeNotifier {
     }
   }
 
-  // UI'dan gelen aksiyonlar
   void toggleLike(String postId, bool isLiked) {
-    if (isLiked)
+    if (isLiked) {
       myLikedPostIds.add(postId);
-    else
+    } else {
       myLikedPostIds.remove(postId);
-
+    }
     FeedService.instance.toggleLike(postId: postId, like: isLiked);
   }
 

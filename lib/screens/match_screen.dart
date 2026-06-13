@@ -76,12 +76,14 @@ class MatchListScreen extends StatefulWidget {
   @override
   State<MatchListScreen> createState() => _MatchListScreenState();
 }
-StreamSubscription<List<global_match.MatchResult>>? _matchSubscription;
 
 class _MatchListScreenState extends State<MatchListScreen> {
   List<global_match.MatchResult> _all = [];
   bool _loading = true;
   final PageController _pageController = PageController();
+  
+  // DÜZELTME BURADA: StreamSubscription sınıfın İÇİNE taşındı
+  StreamSubscription<List<global_match.MatchResult>>? _matchSubscription;
 
   @override
   void initState() {
@@ -91,6 +93,8 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
   @override
   void dispose() {
+    // DÜZELTME BURADA: Sayfa kapanırken Firebase dinlemesi İPTAL EDİLİYOR
+    _matchSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -391,7 +395,6 @@ class _VerticalUserCardState extends State<_VerticalUserCard> with AutomaticKeep
 
   @override
   Widget build(BuildContext context) {
-    // MIXIN'İN ÇALIŞMASI İÇİN ZORUNLU KOD:
     super.build(context);
 
     final m = widget.result;

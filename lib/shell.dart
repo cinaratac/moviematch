@@ -22,7 +22,7 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0; 
   late final AppLinks _appLinks; 
   StreamSubscription<Uri>? _linkSubscription;
-  Timer? _idlePreloadTimer; // EKLENDİ: Arka plan akıllı yükleme zamanlayıcısı
+  Timer? _idlePreloadTimer; 
 
   final List<Widget> _pages = [
     const FeedPage(),
@@ -30,27 +30,26 @@ class _HomeShellState extends State<HomeShell> {
     const MessagesPage(),
     const ProfilePage(),
   ];
+  
+  // Sadece Feed açık başlar, diğerleri akıllı sistemle yüklenecek.
   final List<bool> _loadedPages = [true, false, false, false];
 
   @override
   void initState() {
     super.initState();
     
-    // TabService Dinleyicisi
     TabService.instance.indexNotifier.addListener(_onTabServiceIndexChanged);
 
-    // Duyuru kontrolü
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
     });
 
     _initDeepLinks();
     
-    // Uygulama açıldığında ilk ekran yüklendikten sonra diğerlerini arkada yüklemeye başla
+    // Uygulama açıldıktan sonra akıllı yüklemeyi başlat
     _startIdlePreloading();
   }
 
-  // EKLENDİ: Drawer'dan vs. tetiklenen değişimleri yakalamak için
   void _onTabServiceIndexChanged() {
     if (mounted) {
       final newIndex = TabService.instance.indexNotifier.value;
@@ -60,45 +59,48 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  // EKLENDİ: Merkezi Sekme Değiştirme ve Yükleme Kontrolcüsü
   void _switchToTab(int targetIndex) {
-    // 1. Kullanıcı sekmeye aniden bastığı için arka plandaki gizli yüklemeleri hemen iptal et
+    if (_index == targetIndex) return;
+
+    // Geçiş yapılırken anlık duraksamayı önlemek için timer'ı sıfırla
     _idlePreloadTimer?.cancel();
 
-    // 2. Hedef sekmeyi anında aktif et ve yüklenmesi için izin ver
     setState(() {
       _index = targetIndex;
-      _loadedPages[targetIndex] = true; 
+      _loadedPages[targetIndex] = true;
     });
-    
-    // 3. Geçiş anındaki kasmanın geçmesi için biraz bekle ve kalan sayfaları arkada yüklemeye devam et
+
+    // Sekme geçişi bitince arka plan yüklemelerine kaldığı yerden devam et
     _startIdlePreloading();
   }
 
-  // EKLENDİ: Sistemi yormadan arka planda sayfaları teker teker yükleyen fonksiyon
+  // --- İŞTE SİHİRLİ KISIM (AKILLI YÜKLEME) ---
   void _startIdlePreloading() {
     _idlePreloadTimer?.cancel();
     
-    // Kullanıcının bulunduğu sayfayı rahatça görebilmesi için 1.5 saniye bekle
-    _idlePreloadTimer = Timer(const Duration(milliseconds: 1500), () {
+    // Her bir sayfa yüklemesi arasına 2 saniyelik nefes alma payı koyuyoruz (UI donmasın diye)
+    _idlePreloadTimer = Timer(const Duration(seconds: 2), () {
       if (!mounted) return;
 
-      // Yüklenmemiş olan ilk sekmeyi bul
-      int nextToLoad = -1;
-      for (int i = 0; i < _loadedPages.length; i++) {
-        if (!_loadedPages[i]) {
-          nextToLoad = i;
-          break;
-        }
+      // KRİTİK KONTROL: Kullanıcı şu an ana ekranda (menüde) mi?
+      // Eğer bir sohbete (Chat Room) girdiyse burası "false" döner.
+      final isCurrentScreen = ModalRoute.of(context)?.isCurrent ?? false;
+
+      if (!isCurrentScreen) {
+        // Kullanıcı başka sayfada işlem yapıyor, işlemciyi yormamak için 
+        // yükleme YAPMA, ama geri dönerse diye döngüyü sürdür.
+        _startIdlePreloading();
+        return;
       }
 
-      // Eğer yüklenmemiş sayfa kaldıysa, sadece onu yükle
+      // Kullanıcı menüdeyse sıradaki yüklenmemiş sayfayı bul ve yükle
+      int nextToLoad = _loadedPages.indexOf(false);
       if (nextToLoad != -1) {
         setState(() {
           _loadedPages[nextToLoad] = true;
         });
         
-        // Bu sayfa yüklendikten sonra diğerine geçmek için döngüyü tekrar başlat (sistemi boğmamak için sırayla)
+        // Kalanlar için sistemi tekrar tetikle
         _startIdlePreloading();
       }
     });
@@ -106,13 +108,12 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    _idlePreloadTimer?.cancel(); 
     _linkSubscription?.cancel();
-    _idlePreloadTimer?.cancel(); // Zamanlayıcıyı bellekten temizle
     TabService.instance.indexNotifier.removeListener(_onTabServiceIndexChanged);
     super.dispose();
   }
 
-  // Linkleri dinleyen fonksiyon
   Future<void> _initDeepLinks() async {
     _appLinks = AppLinks();
 
@@ -210,7 +211,7 @@ class _HomeShellState extends State<HomeShell> {
           child: NavigationBar(
             selectedIndex: _index,
             onDestinationSelected: (i) {
-              _switchToTab(i); // EKLENDİ: Merkezi metodu çağır
+              _switchToTab(i); 
               TabService.instance.changeTab(i); 
             },
             destinations: [

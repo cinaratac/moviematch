@@ -1,10 +1,10 @@
 // Dosya: lib/widgets/background_3d_posters.dart
 
-import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/scheduler.dart'; // Ticker için EKLENDİ
 
 class Background3DPosters extends StatefulWidget {
   const Background3DPosters({super.key});
@@ -16,7 +16,9 @@ class Background3DPosters extends StatefulWidget {
 // Global cache: Uygulama açık kaldığı sürece veriyi hafızada tutar
 List<String> _globalCachedPosters = []; 
 
-class _Background3DPostersState extends State<Background3DPosters> with SingleTickerProviderStateMixin {
+// SingleTickerProviderStateMixin yerine TickerProviderStateMixin kullanıldı
+// Çünkü artık hem AnimationController hem de kendi Ticker'ımız var.
+class _Background3DPostersState extends State<Background3DPosters> with TickerProviderStateMixin {
   List<String> _posterUrls = [];
   bool _isLoading = true;
 
@@ -24,11 +26,11 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
   final ScrollController _scrollController2 = ScrollController();
   final ScrollController _scrollController3 = ScrollController();
   
-  // --- YENİ EKLENEN ANİMASYON DEĞİŞKENLERİ ---
   late AnimationController _entranceController;
   late Animation<Offset> _entranceAnimation;
 
-  Timer? _timer;
+  // YENİ: Timer yerine Ticker kullanıyoruz (Sıfır kasma garantili)
+  late Ticker _ticker;
 
   @override
   void initState() {
@@ -37,23 +39,30 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
     // 1. Giriş Animasyonu Tanımları
     _entranceController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1800), // 1.8 saniyede yavaşça gelsin
+      duration: const Duration(milliseconds: 1800), 
     );
 
-    // Aşağıdan (y ekseni 1.0) -> Yukarıya (y ekseni 0.0)
     _entranceAnimation = Tween<Offset>(
-      begin: const Offset(0, 1.0), // Tamamen ekranın altından başla
-      end: Offset.zero,            // Kendi yerine otur
+      begin: const Offset(0, 1.0), 
+      end: Offset.zero,            
     ).animate(CurvedAnimation(
       parent: _entranceController,
-      curve: Curves.easeOutQuart,  // Sonlara doğru yavaşlayan yumuşak bir fizik
+      curve: Curves.easeOutQuart,  
     ));
+
+    // 2. Ticker (Ekran yenileme hızına senkronize döngü)
+    _ticker = createTicker((elapsed) {
+      if (!mounted) return;
+      // Timer (30ms) yerine Ticker (16ms) kullandığımız için hızları yarıya indirdik
+      _scroll(_scrollController1, 0.5);
+      _scroll(_scrollController2, 0.75);
+      _scroll(_scrollController3, 0.4);
+    });
 
     _fetchPosters();
   }
 
   Future<void> _fetchPosters() async {
-    // A) HAFİZA KONTROLÜ
     if (_globalCachedPosters.isNotEmpty) {
       if (mounted) {
         setState(() {
@@ -61,12 +70,11 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
           _isLoading = false;
         });
         _startAutoScroll();
-        _entranceController.forward(); // Veri hazır, animasyonu başlat!
+        _entranceController.forward(); 
       }
       return;
     }
 
-    // B) İLK YÜKLEME (Firebase'den çek)
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('catalog_films')
@@ -86,7 +94,6 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
         _globalCachedPosters = urls;
       }
 
-      // Listeyi karıştır
       urls.shuffle(Random());
 
       if (mounted) {
@@ -95,22 +102,19 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
           _isLoading = false;
         });
         _startAutoScroll();
-        _entranceController.forward(); // Veri geldi, sahneye alalım!
+        _entranceController.forward(); 
       }
     } catch (e) {
       debugPrint("Poster fetch error: $e");
-      // Hata olsa bile loading'i kapat ki sonsuz döngüde kalmasın
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _startAutoScroll() {
-    _timer = Timer.periodic(const Duration(milliseconds: 30), (timer) {
-      if (!mounted) return;
-      _scroll(_scrollController1, 1.0);
-      _scroll(_scrollController2, 1.5);
-      _scroll(_scrollController3, 0.8);
-    });
+    // Ticker çalışmıyorsa başlat
+    if (!_ticker.isTicking) {
+      _ticker.start();
+    }
   }
 
   void _scroll(ScrollController controller, double speed) {
@@ -128,8 +132,8 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
 
   @override
   void dispose() {
-    _timer?.cancel();
-    _entranceController.dispose(); // Controller'ı temizlemeyi unutmayalım
+    _ticker.dispose(); // Timer.cancel() yerine Ticker'ı yok ediyoruz
+    _entranceController.dispose(); 
     _scrollController1.dispose();
     _scrollController2.dispose();
     _scrollController3.dispose();
@@ -138,13 +142,10 @@ class _Background3DPostersState extends State<Background3DPosters> with SingleTi
 
   @override
   Widget build(BuildContext context) {
-    // Veri yokken siyah ekran göster (Animasyon siyah ekranın üstüne çıkacak)
     if (_isLoading || _posterUrls.isEmpty) {
       return Container(color: Colors.black); 
     }
 
-    // --- ANİMASYONLU GÖSTERİM ---
-    // SlideTransition ile tüm Row'u aşağıdan yukarı kaydırıyoruz
     return SlideTransition(
       position: _entranceAnimation,
       child: Row(

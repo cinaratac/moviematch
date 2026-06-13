@@ -6,7 +6,9 @@ import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/club_sheets.dart';
-import 'package:fluttergirdi/screens/movie_detail_screen.dart';
+
+// --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
+import '../services/user_cache_service.dart';
 
 // --- HAFTANIN FİLMİ BANNERI ---
 class FeaturedMovieBannerWidget extends StatelessWidget {
@@ -15,7 +17,6 @@ class FeaturedMovieBannerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Tema Ayarları
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? const Color(0xFF252525) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black;
@@ -151,7 +152,6 @@ class MessageRow extends StatelessWidget {
 }
 
 // --- MESAJ BALONU (STANDART) ---
-// --- MESAJ BALONU (STANDART) ---
 class MessageBubble extends StatelessWidget {
   final String text;
   final dynamic movie;
@@ -178,7 +178,6 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Tema
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     String posterUrl = '';
@@ -191,19 +190,17 @@ class MessageBubble extends StatelessWidget {
       posterUrl = (mm['poster'] ?? mm['posterUrl'] ?? '').toString();
       movieTitle = (mm['title'] ?? mm['name'] ?? '').toString();
       
-      // Veritabanından gelen film objesi içindeki ID'yi olası tüm anahtarlarla arıyoruz
       final possibleKeys = ['id', 'tmdbId', 'movieId', 'movie_id'];
       for (String key in possibleKeys) {
         if (mm[key] != null) {
           parsedMovieId = int.tryParse(mm[key].toString());
-          if (parsedMovieId != null) break; // Geçerli bir ID bulduysak döngüden çık
+          if (parsedMovieId != null) break; 
         }
       }
       
       hasMovie = true;
     }
 
-    // Renkler
     final myGradient = LinearGradient(
       colors: [
         Theme.of(context).colorScheme.primary,
@@ -212,7 +209,6 @@ class MessageBubble extends StatelessWidget {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
-    // Karşı tarafın mesajı: Dark -> Koyu Gri, Light -> Açık Gri (Neredeyse beyaz)
     final otherColor = isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade200;
     final textColor = isMine ? Colors.white : (isDark ? Colors.white : Colors.black87);
     final timeColor = isMine ? Colors.white70 : (isDark ? Colors.white60 : Colors.black54);
@@ -255,7 +251,6 @@ class MessageBubble extends StatelessWidget {
                     color: Colors.black26,
                   ),
                   clipBehavior: Clip.antiAlias,
-                  // BURAYA MATERIAL VE INKWELL EKLENDİ (TIKLAMA VE ANİMASYON İÇİN)
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
@@ -272,7 +267,6 @@ class MessageBubble extends StatelessWidget {
                             ),
                           );
                         } else {
-                          // BURAYI GÜNCELLEDİK: $mm yerine $movie kullanıyoruz
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('ID Bulunamadı! Gelen Veri: $movie'), 
@@ -342,7 +336,7 @@ class MessageBubble extends StatelessWidget {
   }
 }
 
-// --- KULLANICI AVATARI (PERFORMANS İÇİN STATEFUL + KEEP ALIVE) ---
+// --- KULLANICI AVATARI (YENİ: MERKEZİ CACHE İLE YÜKSEK PERFORMANS) ---
 class UserAvatar extends StatefulWidget {
   final String uid;
   final double size;
@@ -353,47 +347,54 @@ class UserAvatar extends StatefulWidget {
 }
 
 class _UserAvatarState extends State<UserAvatar> with AutomaticKeepAliveClientMixin {
-  Stream<DocumentSnapshot>? _userStream;
+  CachedUser? _user;
 
   @override
-  bool get wantKeepAlive => true; // Listeden çıkınca hafızadan silinmesin (Titremeyi önler)
+  bool get wantKeepAlive => true; 
 
   @override
   void initState() {
     super.initState();
-    _userStream = FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots();
+    _loadUser();
+  }
+
+  void _loadUser() async {
+    // Önce anında RAM'den almayı dene
+    final cached = UserCacheService.instance.getFromCache(widget.uid);
+    if (cached != null) {
+      if (mounted) setState(() => _user = cached);
+      return;
+    }
+    
+    // RAM'de yoksa sunucudan bekle
+    final fetched = await UserCacheService.instance.getUser(widget.uid);
+    if (mounted && fetched != null) {
+      setState(() => _user = fetched);
+    }
   }
 
   @override
   void didUpdateWidget(covariant UserAvatar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.uid != oldWidget.uid) {
-      _userStream = FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots();
+      _loadUser();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // KeepAlive için gerekli
-    return StreamBuilder<DocumentSnapshot>(
-      stream: _userStream,
-      builder: (context, snap) {
-        String? url;
-        if (snap.hasData && snap.data!.exists) {
-          final data = snap.data!.data() as Map<String, dynamic>;
-          url = data['photoURL'];
-        }
-        return CircleAvatar(
-          radius: widget.size,
-          backgroundImage: (url != null && url.isNotEmpty) ? NetworkImage(url) : null,
-          child: (url == null || url.isEmpty) ? Icon(Icons.person, size: widget.size) : null,
-        );
-      },
+    super.build(context);
+    final url = _user?.photoURL;
+
+    return CircleAvatar(
+      radius: widget.size,
+      backgroundImage: (url != null && url.isNotEmpty) ? NetworkImage(url) : null,
+      child: (url == null || url.isEmpty) ? Icon(Icons.person, size: widget.size) : null,
     );
   }
 }
 
-// --- ETKİNLİK KARTI (Stateful + KeepAlive + Theme) ---
+// --- ETKİNLİK KARTI ---
 class _EventMessageBubble extends StatefulWidget {
   final Map<String, dynamic> data;
   final bool isMine;
@@ -415,7 +416,7 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
   Stream<DocumentSnapshot>? _eventStream;
 
   @override
-  bool get wantKeepAlive => true; // Titremeyi önler
+  bool get wantKeepAlive => true; 
 
   @override
   void initState() {
@@ -449,7 +450,6 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
   Widget build(BuildContext context) {
     super.build(context);
 
-    // Stream henüz yoksa veya yükleniyorsa, eldeki veriyi kullan
     if (_eventStream == null) {
       return _buildEventContent(context, widget.data, null, false);
     }
@@ -457,7 +457,6 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
     return StreamBuilder<DocumentSnapshot>(
       stream: _eventStream,
       builder: (context, snap) {
-        // Hata veya silinme durumu
         if (snap.connectionState == ConnectionState.active && !snap.data!.exists) {
           return Container(
             padding: const EdgeInsets.all(12),
@@ -466,7 +465,6 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
           );
         }
 
-        // Bekleme durumunda flickering olmaması için widget.data'yı (mesajdaki statik veri) kullan
         final liveData = (snap.hasData && snap.data!.exists)
             ? snap.data!.data() as Map<String, dynamic>
             : widget.data; 
@@ -482,9 +480,8 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
   }
 
   Widget _buildEventContent(BuildContext context, Map<String, dynamic> eventMap, String? eventId, bool isJoined) {
-    // Tema
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white; // Light modda beyaz
+    final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white; 
     final borderColor = isDark ? Colors.white10 : Colors.black12;
     final primaryTextColor = isDark ? Colors.white : Colors.black;
     final subTextColor = isDark ? Colors.white70 : Colors.black54;
@@ -569,7 +566,7 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: cardBg.withValues(alpha: 0.5), // Arka planla uyumlu
+                    color: cardBg.withValues(alpha: 0.5), 
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: statusColor),
                   ),
@@ -627,7 +624,7 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
   }
 }
 
-// --- ANKET KARTI (Stateful + KeepAlive + Theme) ---
+// --- ANKET KARTI ---
 class _PollMessageBubble extends StatefulWidget {
   final Map<String, dynamic> initialData;
   final bool isMine;
@@ -709,7 +706,6 @@ class _PollMessageBubbleState extends State<_PollMessageBubble> with AutomaticKe
   }
 
   Widget _buildPollContent(BuildContext context, Map<String, dynamic> data, String? pollId) {
-    // Tema
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final borderColor = isDark ? Colors.white10 : Colors.black12;
@@ -831,17 +827,15 @@ class _PollMessageBubbleState extends State<_PollMessageBubble> with AutomaticKe
     );
   }
 }
-class ChatAppBarTitle extends StatelessWidget {
+
+// --- SOHBET BAŞLIĞI (YENİ: MERKEZİ CACHE İLE YÜKSEK PERFORMANS) ---
+class ChatAppBarTitle extends StatefulWidget {
   final String chatId;
   final String otherUid;
   final String? initialTitle;
   final bool isGroup;
   final String? groupName;
 
-  // --- 1. ADIM: ÖNBELLEK İÇİN STATİK HARİTALAR EKLENDİ ---
-  static final Map<String, Map<String, dynamic>> _groupCache = {};
-  static final Map<String, Map<String, dynamic>> _userCache = {};
-  
   const ChatAppBarTitle({
     super.key,
     required this.chatId,
@@ -851,34 +845,57 @@ class ChatAppBarTitle extends StatelessWidget {
     this.groupName,
   });
 
+  @override
+  State<ChatAppBarTitle> createState() => _ChatAppBarTitleState();
+}
+
+class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
+  static final Map<String, Map<String, dynamic>> _groupCache = {};
+  CachedUser? _cachedUser;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.isGroup) _loadUser();
+  }
+
+  void _loadUser() async {
+    final cached = UserCacheService.instance.getFromCache(widget.otherUid);
+    if (cached != null) {
+      if (mounted) setState(() => _cachedUser = cached);
+      return;
+    }
+    
+    final fetched = await UserCacheService.instance.getUser(widget.otherUid);
+    if (mounted && fetched != null) {
+      setState(() => _cachedUser = fetched);
+    }
+  }
+
   void _openClubDetails(BuildContext context) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => ClubDetailSheet(clubId: chatId),
+      builder: (ctx) => ClubDetailSheet(clubId: widget.chatId),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // --- GRUP SOHBETİ BAŞLIĞI ---
-    if (isGroup) {
+    if (widget.isGroup) {
       return StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('clubs').doc(chatId).snapshots(),
+        stream: FirebaseFirestore.instance.collection('clubs').doc(widget.chatId).snapshots(),
         builder: (context, snap) {
-          
-          // 2. Yeni veri geldiyse önbelleğe kaydet
           if (snap.hasData && snap.data!.exists) {
-            _groupCache[chatId] = snap.data!.data() as Map<String, dynamic>;
+            _groupCache[widget.chatId] = snap.data!.data() as Map<String, dynamic>;
           }
 
-          // 3. Ekranı önbellekteki veriyle çiz (Stream beklerken bile boş kalmaz)
-          final cachedData = _groupCache[chatId];
+          final cachedData = _groupCache[widget.chatId];
           
           String? imageUrl;
-          String displayName = groupName ?? 'Kulüp Sohbeti';
+          String displayName = widget.groupName ?? 'Kulüp Sohbeti';
 
           if (cachedData != null) {
             imageUrl = cachedData['imageUrl'];
@@ -912,49 +929,35 @@ class ChatAppBarTitle extends StatelessWidget {
       );
     }
 
-    // --- KİŞİSEL SOHBET BAŞLIĞI ---
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance.collection('users').doc(otherUid).snapshots(),
-      builder: (context, uSnap) {
-        
-        // 2. Yeni veri geldiyse önbelleğe kaydet
-        if (uSnap.hasData && uSnap.data!.exists) {
-          _userCache[otherUid] = uSnap.data!.data()!;
-        }
+    // Kişisel Sohbet Başlığı (Artık Stream Kullanmıyor, Merkezi Hafızadan Alıyor)
+    String title = widget.initialTitle ?? 'Kullanıcı';
+    String photo = '';
+    
+    if (_cachedUser != null) {
+      final handle = _cachedUser!.handle;
+      final disp = _cachedUser!.displayName;
+      photo = _cachedUser!.photoURL;
+      title = handle.isNotEmpty ? handle : (disp.isNotEmpty ? disp : title);
+    }
 
-        // 3. Ekranı önbellekteki veriyle çiz (Flickering/Titremeyi engeller)
-        final cachedUser = _userCache[otherUid];
-        
-        String title = initialTitle ?? 'Kullanıcı';
-        String photo = '';
-        
-        if (cachedUser != null) {
-          final username = (cachedUser['username'] ?? '') as String;
-          final disp = (cachedUser['displayName'] ?? '') as String;
-          photo = (cachedUser['photoURL'] ?? '') as String;
-          title = username.isNotEmpty ? username : (disp.isNotEmpty ? disp : title);
-        }
-
-        return InkWell(
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid))),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: Colors.grey.shade800,
-                backgroundImage: (photo.isNotEmpty) ? NetworkImage(photo) : null,
-                child: (photo.isEmpty) ? Text(title.isNotEmpty ? title[0] : '?', style: const TextStyle(color: Colors.white)) : null,
-              ),
-              const SizedBox(width: 10),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 180),
-                child: Text(title, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-              ),
-            ],
+    return InkWell(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: widget.otherUid))),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.grey.shade800,
+            backgroundImage: (photo.isNotEmpty) ? NetworkImage(photo) : null,
+            child: (photo.isEmpty) ? Text(title.isNotEmpty ? title[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white)) : null,
           ),
-        );
-      },
+          const SizedBox(width: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180),
+            child: Text(title, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 }

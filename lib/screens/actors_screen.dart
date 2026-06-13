@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'movie_detail_screen.dart'; // Yönlendirme için
+import 'movie_detail_screen.dart'; 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+// --- YENİ EKLENEN: GLOBAL HAFIZA (RAM CACHE) ---
+class _ActorCacheData {
+  final Map<String, dynamic> details;
+  final List<dynamic> movies;
+  _ActorCacheData(this.details, this.movies);
+}
+final Map<int, _ActorCacheData> _globalActorCache = {};
+// ------------------------------------------------
 
 class ActorScreen extends StatefulWidget {
   final int actorId;
@@ -27,34 +36,44 @@ class _ActorScreenState extends State<ActorScreen> {
     _fetchActorData();
     _checkIfFavorited(); 
   }
+  
   Future<void> _checkIfFavorited() async {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
 
-  final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
-  if (doc.exists) {
-    final List favActors = doc.data()?['favActors'] ?? [];
-    if (mounted) {
-      setState(() {
-        // Liste içinde hem Map hem String olabilir, her iki durumu da kontrol eder
-        _isFavorited = favActors.any((item) {
-          if (item is Map) return item['id'] == widget.actorId;
-          return item == widget.actorName;
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    if (doc.exists) {
+      final List favActors = doc.data()?['favActors'] ?? [];
+      if (mounted) {
+        setState(() {
+          _isFavorited = favActors.any((item) {
+            if (item is Map) return item['id'] == widget.actorId;
+            return item == widget.actorName;
+          });
         });
-      });
+      }
     }
   }
-}
 
   Future<void> _fetchActorData() async {
+    // --- YENİ EKLENEN: EĞER HAFIZADA VARSA İNTERNETE GİTME, DİREKT GÖSTER ---
+    if (_globalActorCache.containsKey(widget.actorId)) {
+      if (mounted) {
+        setState(() {
+          _actorDetails = _globalActorCache[widget.actorId]!.details;
+          _movies = _globalActorCache[widget.actorId]!.movies;
+          _loading = false;
+        });
+      }
+      return;
+    }
+
     try {
-      // 1. Oyuncu Detayları (Biyografi vs)
       final detailsResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
         'endpoint': '/3/person/${widget.actorId}',
         'params': {'language': 'tr-TR'}
       });
 
-      // 2. Oyuncunun Filmleri (Movie Credits)
       final moviesResult = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
         'endpoint': '/3/person/${widget.actorId}/movie_credits',
         'params': {'language': 'tr-TR'}
@@ -64,10 +83,12 @@ class _ActorScreenState extends State<ActorScreen> {
         setState(() {
           _actorDetails = Map<String, dynamic>.from(detailsResult.data as Map);
           _movies = (moviesResult.data['cast'] as List);
-          // Filmleri popülerliğe göre sıralayalım
           _movies.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
           _loading = false;
         });
+
+        // Veriyi internetten çektikten sonra bir dahaki sefer için hafızaya kaydet
+        _globalActorCache[widget.actorId] = _ActorCacheData(_actorDetails!, _movies);
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
@@ -85,12 +106,9 @@ class _ActorScreenState extends State<ActorScreen> {
         ? const Center(child: CircularProgressIndicator())
         : CustomScrollView(
             slivers: [
-              // Üst Kısım: Fotoğraf ve İsim
-              // Üst Kısım: Fotoğraf ve İsim
               SliverAppBar(
                 expandedHeight: 300,
                 pinned: true,
-                // --- YENİ EKLENEN: Sağ Üstteki Favori Butonu ---
                 actions: [
                   IconButton(
                     icon: Container(
@@ -98,59 +116,55 @@ class _ActorScreenState extends State<ActorScreen> {
                       decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
                       child: Icon(
                         _isFavorited ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                        color: _isFavorited ? Colors.green : Colors.white, // Like'lanmışsa YEŞİL
+                        color: _isFavorited ? Colors.green : Colors.white, 
                         size: 22,
                       ),
                     ),
                    onPressed: () async {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return;
-  final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+                      final uid = FirebaseAuth.instance.currentUser?.uid;
+                      if (uid == null) return;
+                      final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
 
-  // Kaydedilecek veri formatı
-  final actorData = {
-    'name': widget.actorName,
-    'id': widget.actorId,
-  };
+                      final actorData = {
+                        'name': widget.actorName,
+                        'id': widget.actorId,
+                      };
 
-  try {
-    if (_isFavorited) {
-      // Favoriden çıkarırken listenin tamamını filtrelemek daha güvenlidir
-      final doc = await userRef.get();
-      List favs = List.from(doc.data()?['favActors'] ?? []);
-      favs.removeWhere((item) {
-        if (item is Map) return item['id'] == widget.actorId;
-        return item == widget.actorName;
-      });
-      await userRef.update({'favActors': favs});
-    } else {
-      // Favoriye eklerken Map olarak ekle
-      await userRef.set({
-        'favActors': FieldValue.arrayUnion([actorData]),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
+                      try {
+                        if (_isFavorited) {
+                          final doc = await userRef.get();
+                          List favs = List.from(doc.data()?['favActors'] ?? []);
+                          favs.removeWhere((item) {
+                            if (item is Map) return item['id'] == widget.actorId;
+                            return item == widget.actorName;
+                          });
+                          await userRef.update({'favActors': favs});
+                        } else {
+                          await userRef.set({
+                            'favActors': FieldValue.arrayUnion([actorData]),
+                            'updatedAt': FieldValue.serverTimestamp(),
+                          }, SetOptions(merge: true));
+                        }
 
-    if (mounted) {
-      setState(() => _isFavorited = !_isFavorited);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isFavorited 
-              ? '${widget.actorName} favorilere eklendi!' 
-              : '${widget.actorName} favorilerden çıkarıldı!'),
-          backgroundColor: _isFavorited ? Colors.green.shade700 : Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        )
-      );
-    }
-  } catch (e) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
-  }
-},
+                        if (mounted) {
+                          setState(() => _isFavorited = !_isFavorited);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(_isFavorited 
+                                  ? '${widget.actorName} favorilere eklendi!' 
+                                  : '${widget.actorName} favorilerden çıkarıldı!'),
+                              backgroundColor: _isFavorited ? Colors.green.shade700 : Colors.redAccent,
+                              behavior: SnackBarBehavior.floating,
+                            )
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+                      }
+                    },
                   ),
                   const SizedBox(width: 8),
                 ],
-                // ------------------------------------------------
                 flexibleSpace: FlexibleSpaceBar(
                   title: Text(widget.actorName, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                   background: _actorDetails?['profile_path'] != null
@@ -161,8 +175,6 @@ class _ActorScreenState extends State<ActorScreen> {
                       : Container(color: Colors.grey),
                 ),
               ),
-
-              // Oyuncu Bilgileri ve Filmografisi
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
@@ -184,8 +196,6 @@ class _ActorScreenState extends State<ActorScreen> {
                   ),
                 ),
               ),
-
-              // Film Izgarası (Grid)
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverGrid(
@@ -231,7 +241,7 @@ class _ActorScreenState extends State<ActorScreen> {
                         ),
                       );
                     },
-                    childCount: _movies.length > 30 ? 30 : _movies.length, // Performans için ilk 30 film
+                    childCount: _movies.length > 30 ? 30 : _movies.length, 
                   ),
                 ),
               ),

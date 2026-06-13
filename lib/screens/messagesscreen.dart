@@ -11,6 +11,9 @@ import 'package:fluttergirdi/widgets/club_card.dart';
 import 'package:fluttergirdi/screens/create_club_screen.dart'; 
 import 'package:fluttergirdi/widgets/messages_skeleton.dart';
 
+// --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
+import 'package:fluttergirdi/services/user_cache_service.dart';
+
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
 
@@ -178,7 +181,6 @@ class _ChatsView extends StatefulWidget {
 }
 
 class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMixin {
-  final Map<String, Map<String, dynamic>> _userCache = {};
   late Stream<QuerySnapshot<Map<String, dynamic>>> _chatsStream;
 
   @override
@@ -194,7 +196,6 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   void didUpdateWidget(covariant _ChatsView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.uid != widget.uid) {
-      _userCache.clear();
       _initStream();
     }
   }
@@ -206,39 +207,11 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
         .snapshots();
   }
 
-  Future<void> _fetchMissingUsers(List<String> uids) async {
-    final missing = uids.where((id) => !_userCache.containsKey(id)).toSet().toList();
-    if (missing.isEmpty) return;
-
-    for (final id in missing) {
-      _userCache[id] = {}; 
-    }
-
-    for (var i = 0; i < missing.length; i += 10) {
-      final chunk = missing.sublist(i, i + 10 > missing.length ? missing.length : i + 10);
-      try {
-        final qs = await FirebaseFirestore.instance
-            .collection('users')
-            .where(FieldPath.documentId, whereIn: chunk)
-            .get();
-        
-        for (var doc in qs.docs) {
-          _userCache[doc.id] = doc.data();
-        }
-      } catch (e) {
-        debugPrint('');
-      }
-    }
-    
-    if (mounted) setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
     
     return Scaffold(
-      // FAB (Çöp Kutusu) TAMAMEN KALDIRILDI
       body: Column(
         children: [
           if (widget.filterText.isEmpty) 
@@ -258,19 +231,8 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                    final data = doc.data();
                    final parts = List.from(data['participants'] ?? []);
 
-                   // Katılımcı kontrolü: Eğer ben yoksam (silindiyse), anında at.
                    if (!parts.contains(widget.uid)) return true;
-                   
-                   // Sadece grup kontrolü kaldı, gereksiz visibleFor kontrolü çöpe atıldı.
                    if (data['isGroup'] == true) return true;
-
-                   final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
-                   if (otherId == null) return true; 
-
-                   final cached = _userCache[otherId];
-                   if (cached != null && cached.isEmpty) {
-                       return true; 
-                   }
 
                    return false;
                 });
@@ -282,9 +244,15 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                   if (other != null) otherUids.add(other.toString());
                 }
 
-                if (otherUids.isNotEmpty) {
-                  Future.microtask(() => _fetchMissingUsers(otherUids.toList()));
+                // --- MERKEZİ CACHE KULLANIMI ---
+                final missingUids = otherUids.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
+                if (missingUids.isNotEmpty) {
+                  Future.microtask(() async {
+                    await UserCacheService.instance.fetchUsers(missingUids);
+                    if (mounted) setState(() {}); // Veriler geldiğinde ekranı yenile
+                  });
                 }
+                // --------------------------------
 
                 if (widget.filterText.isNotEmpty) {
                   docs = docs.where((doc) {
@@ -294,10 +262,11 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                     
                     if (otherId == null) return false;
 
-                    final cachedUser = _userCache[otherId];
-                    if (cachedUser != null && cachedUser.isNotEmpty) {
-                      final name = (cachedUser['displayName'] ?? '').toString().toLowerCase();
-                      final username = (cachedUser['username'] ?? '').toString().toLowerCase();
+                    // Aramayı merkezi cache üzerinden yap
+                    final cachedUser = UserCacheService.instance.getFromCache(otherId);
+                    if (cachedUser != null) {
+                      final name = cachedUser.displayName.toLowerCase();
+                      final username = cachedUser.handle.toLowerCase();
                       return name.contains(widget.filterText) || username.contains(widget.filterText);
                     }
                     
@@ -331,13 +300,13 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                     final parts = List.from(doc.data()['participants'] ?? []);
                     final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
                     
-                    final cachedData = (otherId != null) ? _userCache[otherId] : null;
+                    final cachedUser = (otherId != null) ? UserCacheService.instance.getFromCache(otherId) : null;
 
                     return ChatListTile(
                       key: ValueKey(doc.id),
                       chatDoc: doc,
                       currentUid: widget.uid,
-                      cachedUserData: cachedData,
+                      cachedUser: cachedUser, // Artık özel Map yerine CachedUser objesi gidiyor
                     );
                   },
                 );
@@ -354,13 +323,13 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
 class ChatListTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
   final String currentUid;
-  final Map<String, dynamic>? cachedUserData; 
+  final CachedUser? cachedUser; 
 
   const ChatListTile({
     super.key,
     required this.chatDoc,
     required this.currentUid,
-    this.cachedUserData, 
+    this.cachedUser, 
   });
   
   Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime) {
@@ -373,7 +342,7 @@ class ChatListTile extends StatelessWidget {
             Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(chatId: chatDoc.id, otherUid: otherUid, otherTitle: displayName)));
             ChatService.instance.markAsRead(chatDoc.id, currentUid);
         },
-        onLongPress: () => _showDeleteDialog(context, chatDoc.id), // Kalıcı silme diyaloğu eklendi
+        onLongPress: () => _showDeleteDialog(context, chatDoc.id), 
         leading: InkWell(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid))),
             child: CircleAvatar(
@@ -441,15 +410,15 @@ class ChatListTile extends StatelessWidget {
 
     String? cachedName;
     String? cachedPhoto;
-    if (cachedUserData != null && cachedUserData!.isNotEmpty) {
-        cachedName = cachedUserData!['displayName'] ?? cachedUserData!['username'];
-        cachedPhoto = cachedUserData!['photoURL'];
+    if (cachedUser != null) {
+        cachedName = cachedUser!.displayName;
+        cachedPhoto = cachedUser!.photoURL;
     }
 
     String finalName = (denormName != null && denormName.isNotEmpty) ? denormName : (cachedName ?? 'Kullanıcı');
     String? finalPhoto = (denormPhoto != null && denormPhoto.isNotEmpty) ? denormPhoto : cachedPhoto;
 
-    if (finalName != 'Kullanıcı' || (cachedUserData != null && cachedUserData!.isNotEmpty)) {
+    if (finalName != 'Kullanıcı' || cachedUser != null) {
         return _buildTile(context, otherUid, finalName, finalPhoto, lastMsg, lastMsgTime);
     }
     
@@ -478,7 +447,6 @@ class ChatListTile extends StatelessWidget {
     );
   }
   
-  // YENİ KALICI SİLME FONKSİYONU
   Future<void> _showDeleteDialog(BuildContext context, String docId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -497,7 +465,6 @@ class ChatListTile extends StatelessWidget {
     );
 
     if (confirm == true) {
-      // Sohbet dokümanını doğrudan ve kalıcı olarak veritabanından uçururuz.
       await FirebaseFirestore.instance.collection('chats').doc(docId).delete();
     }
   }

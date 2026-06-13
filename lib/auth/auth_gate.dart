@@ -24,7 +24,16 @@ class AuthGate extends StatelessWidget {
           final user = snapshot.data!;
           
           return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-            future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
+            // 1. Önce cihazın kendi hafızasındaki (cache) veriyi okumayı dener (Anında yanıt verir)
+            // 2. Eğer cihazda veri yoksa (ilk giriş veya cache temizlenmişse) server'dan çeker.
+            future: FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .get(const GetOptions(source: Source.cache))
+                .catchError((_) => FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(user.uid)
+                    .get()),
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
                 return const Scaffold(body: Center(child: CircularProgressIndicator()));

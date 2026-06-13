@@ -13,6 +13,9 @@ import 'package:fluttergirdi/widgets/chat_ui_components.dart';
 import 'package:fluttergirdi/widgets/chat_sheets.dart';
 import 'package:fluttergirdi/services/blocking_service.dart';
 
+// --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
+import '../services/user_cache_service.dart';
+
 class ChatRoomScreen extends StatefulWidget {
   final String chatId;
   final String otherUid;
@@ -63,10 +66,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         targetUserId: widget.otherUid,
       );
       
-      // --- EKLENEN KISIM: Sunucudan gelen sonucu önbelleğe kaydet ---
       _blockedCache[widget.otherUid] = status['iBlockedThem'] ?? false;
       _blockedMeCache[widget.otherUid] = status['theyBlockedMe'] ?? false;
-      // --------------------------------------------------------------
 
       if (mounted) {
         setState(() {
@@ -87,7 +88,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (_blockedCache.containsKey(widget.otherUid)) {
       _isBlocked = _blockedCache[widget.otherUid]!;
       _hasBlockedMe = _blockedMeCache[widget.otherUid] ?? false;
-      _isLoadingBlock = false; // SAYFAYI DİREKT AÇ
+      _isLoadingBlock = false; 
     }
 
     _messagesStream = FirebaseFirestore.instance
@@ -160,10 +161,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
       _ctrl.clear();
       
-      // 1. Mesajı Gönder
       await _svc.send(widget.chatId, myUid, txt, otherUid: widget.otherUid);
 
-      // 2. Yavaşça en aşağı kaydır (Reverse listede 0 en alt demektir)
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           0.0,
@@ -171,7 +170,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           curve: Curves.easeOut,
         );
       }
-
     } catch (e) {
       if (!mounted) return;
       _showError('Gönderilemedi: $e');
@@ -185,7 +183,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _openFilmPicker() async {
-    // 1. FilmPickerSheet yerine SearchMoviePage'i "Seçim Modunda" açıyoruz
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
@@ -193,12 +190,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
     );
 
-    // 2. Kullanıcı film seçmeden geri döndüyse işlemi iptal et
     if (!mounted || result == null) return;
 
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     try {
-      // 3. Mesajı, arama ekranından dönen garantili ID ile gönder
       await _svc.send(
         widget.chatId,
         myUid,
@@ -207,11 +202,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         movie: {
           'title': result['title'],
           'poster': result['poster'],
-          'id': result['id'].toString(), // TMDB ID'sini garanti altına alıyoruz
+          'id': result['id'].toString(), 
         },
       );
       
-      // 4. Film gönderince ekranı aşağı kaydır
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           0.0, 
@@ -282,7 +276,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ),
       );
     }
-    // Tema kontrolü
+    
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inputBg = isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200;
     final hintColor = isDark ? Colors.white38 : Colors.black38;
@@ -410,20 +404,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                         stream: _messagesStream,
                         builder: (context, snap) {
-                          // 1. EĞER STREAM'DEN YENİ VERİ GELDİYSE, ÖNBELLEĞİ GÜNCELLE
                           if (snap.hasData && snap.data != null) {
                             _messageCache[widget.chatId] = snap.data!.docs;
                           }
 
-                          // 2. EKRANDA GÖSTERİLECEK VERİYİ BELİRLE (Önce yeni veri, yoksa önbellekteki veri)
                           final docs = snap.data?.docs ?? _messageCache[widget.chatId] ?? [];
 
-                          // 3. EĞER HEM ÖNBELLEK BOŞ HEM DE STREAM BEKLİYORSA YÜKLENİYOR GÖSTER
+                          // --- MERKEZİ CACHE KULLANIMI: Sohbet edenleri anında RAM'e al ---
+                          final Set<String> authorIds = {widget.otherUid};
+                          for (var doc in docs) {
+                            final m = doc.data();
+                            final aId = (m['authorId'] ?? m['from'])?.toString();
+                            if (aId != null && aId.isNotEmpty) {
+                              authorIds.add(aId);
+                            }
+                          }
+                          final missingIds = authorIds.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
+                          if (missingIds.isNotEmpty) {
+                            Future.microtask(() async {
+                              await UserCacheService.instance.fetchUsers(missingIds);
+                              if (mounted) setState(() {}); 
+                            });
+                          }
+                          // ---------------------------------------------------------------
+
                           if (snap.connectionState == ConnectionState.waiting && docs.isEmpty) {
                             return const Center(
                               child: CircularProgressIndicator(), 
-                              // Not: Projendeki "lib/widgets/messages_skeleton.dart" dosyasını
-                              // import edip burada "return const MessagesSkeleton();" da kullanabilirsin.
                             );
                           }
 
@@ -477,8 +484,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 builder: (context, isVisible, child) {
                   if (!isVisible) return const SizedBox.shrink();
                   return GuideCharacterOverlay(
-                    message:
-                        "Beraber film izlemek için watchlist çarkını deneyebilirsin",
+                    message: "Beraber film izlemek için watchlist çarkını deneyebilirsin",
                     isVisible: isVisible,
                     onClose: () => _showGuideNotifier.value = false,
                   );

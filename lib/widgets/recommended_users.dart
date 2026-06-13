@@ -3,17 +3,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:cached_network_image/cached_network_image.dart'; // EKLENDİ
 
-/// Feed içinde postların arasına yerleştirilebilen önerilen kullanıcılar şeridi.
-/// Yan yana avatar + altında isim gösterir; dokununca profil sayfasına gider.
-class RecommendedUsers extends StatelessWidget {
-  /// Kaç kullanıcı gösterileceği
+class RecommendedUsers extends StatefulWidget {
   final int limit;
-
-  /// Zorunlu değil ama istersen başlık gösterebilirsin
   final String? title;
-
-  /// İstenmeyen kullanıcı id'leri (örn. zaten listede görünen yazarlar)
   final Set<String> excludeUserIds;
 
   const RecommendedUsers({
@@ -23,48 +17,77 @@ class RecommendedUsers extends StatelessWidget {
     this.excludeUserIds = const {},
   });
 
-  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _fetch() async {
-    final me = FirebaseAuth.instance.currentUser?.uid;
-
-    // Pull a broader pool (server first, fallback to cache), then pick random `limit` users.
-    final pullSize = math.min(100, limit * 8); // cap to avoid big downloads
-
-    QuerySnapshot<Map<String, dynamic>> qs;
-    try {
-      qs = await FirebaseFirestore.instance
-          .collection('users')
-          .limit(pullSize)
-          .get(const GetOptions(source: Source.server));
-    } catch (_) {
-      qs = await FirebaseFirestore.instance
-          .collection('users')
-          .limit(pullSize)
-          .get(const GetOptions(source: Source.cache));
-    }
-
-    // Filter out current user and excluded IDs
-    final pool = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-    for (final d in qs.docs) {
-  final uid = d.id;
-  final data = d.data();
-
-  // KRİTİK DEĞİŞİKLİK: Sadece username alanı olan ve boş olmayan kullanıcıları al
-  final username = data['username'] as String?;
-  if (username == null || username.trim().isEmpty) {
-    continue; // Username yoksa bu kullanıcıyı atla
-  }
-
-  if (uid == me) continue;
-  if (excludeUserIds.contains(uid)) continue;
-  pool.add(d);
+  @override
+  State<RecommendedUsers> createState() => _RecommendedUsersState();
 }
 
-    // Shuffle randomly and take `limit`
-    pool.shuffle(math.Random());
-    if (pool.length > limit) {
-      return pool.take(limit).toList();
+class _RecommendedUsersState extends State<RecommendedUsers> {
+  // GLOBAL RAM CACHE: Bu sayede scroll yaparken tekrar tekrar internete gitmez!
+  static List<Map<String, dynamic>>? _globalCachedUsers;
+  
+  bool _loading = true;
+  List<Map<String, dynamic>> _users = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchUsers();
+  }
+
+  Future<void> _fetchUsers() async {
+    // 1. Hafızada varsa beklemeden (0 saniye) anında çiz!
+    if (_globalCachedUsers != null && _globalCachedUsers!.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _users = _globalCachedUsers!;
+          _loading = false;
+        });
+      }
+      return;
     }
-    return pool;
+
+    final me = FirebaseAuth.instance.currentUser?.uid;
+    final pullSize = math.min(100, widget.limit * 8); 
+
+    try {
+      // 2. Gereksiz yere "Source.server" zorlamasını kaldırdık, çok daha hızlı çalışır.
+      final qs = await FirebaseFirestore.instance
+          .collection('users')
+          .limit(pullSize)
+          .get();
+
+      final pool = <Map<String, dynamic>>[];
+      for (final d in qs.docs) {
+        final uid = d.id;
+        final data = d.data();
+
+        final username = data['username'] as String?;
+        if (username == null || username.trim().isEmpty) continue;
+
+        if (uid == me) continue;
+        if (widget.excludeUserIds.contains(uid)) continue;
+        
+        // UID'yi kolay erişim için datanın içine ekliyoruz
+        data['uid'] = uid;
+        pool.add(data);
+      }
+
+      pool.shuffle(math.Random());
+      
+      final finalUsers = pool.length > widget.limit ? pool.take(widget.limit).toList() : pool;
+      
+      // 3. Bir dahaki sefere anında açılsın diye RAM'e kaydet
+      _globalCachedUsers = finalUsers;
+
+      if (mounted) {
+        setState(() {
+          _users = finalUsers;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -72,79 +95,67 @@ class RecommendedUsers extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    return FutureBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-      future: _fetch(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return SizedBox(
-            height: 122,
-            child: Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation(cs.primary),
+    if (_loading) {
+      return SizedBox(
+        height: 122,
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation(cs.primary),
+          ),
+        ),
+      );
+    }
+
+    if (_users.isEmpty) {
+      return const SizedBox(height: 8);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.title != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Text(
+              widget.title!,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w400,
               ),
             ),
-          );
-        }
-        if (snap.hasError) {
-          return const SizedBox(height: 1);
-        }
-        if (!snap.hasData || (snap.data?.isEmpty ?? true)) {
-          // En azından küçük bir boş alan bırak ki feed içine yerleştiği görülsün
-          return const SizedBox(height: 8);
-        }
+          ),
+        if (widget.title != null) const SizedBox(height: 6),
+        SizedBox(
+          height: 150,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            scrollDirection: Axis.horizontal,
+            itemBuilder: (context, index) {
+              final u = _users[index];
+              final uid = u['uid'] as String;
+              final displayName = (u['displayName'] ?? '') as String;
+              final username = (u['username'] ?? '') as String;
+              final lb = (u['letterboxdUsername'] ?? '') as String;
+              final photoURL = (u['photoURL'] ?? '') as String;
 
-        final users = snap.data!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (title != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-                child: Text(
-                  title!,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
-              ),
-            if (title != null) const SizedBox(height: 6),
-            SizedBox(
-              height: 150,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                scrollDirection: Axis.horizontal,
-                itemBuilder: (context, index) {
-                  final u = users[index].data();
-                  final uid = users[index].id;
-                  final displayName = (u['displayName'] ?? '') as String;
-                  final username = (u['username'] ?? '') as String;
-                  final lb = (u['letterboxdUsername'] ?? '') as String;
-                  final photoURL = (u['photoURL'] ?? '') as String;
+              final subtitle = username.isNotEmpty
+                  ? '@$username'
+                  : (lb.isNotEmpty ? '@$lb' : '');
 
-                  final subtitle = username.isNotEmpty
-                      ? '@$username'
-                      : (lb.isNotEmpty ? '@$lb' : '');
-
-                  return _UserChip(
-                    uid: uid,
-                    name: displayName.isNotEmpty
-                        ? displayName
-                        : (username.isNotEmpty ? username : 'Kullanıcı'),
-                    subtitle: subtitle,
-                    photoURL: photoURL,
-                  );
-                },
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemCount: users.length,
-              ),
-            ),
-          ],
-        );
-      },
+              return _UserChip(
+                uid: uid,
+                name: displayName.isNotEmpty
+                    ? displayName
+                    : (username.isNotEmpty ? username : 'Kullanıcı'),
+                subtitle: subtitle,
+                photoURL: photoURL,
+              );
+            },
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemCount: _users.length,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -184,12 +195,29 @@ class _UserChip extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.start,
           children: [
-            CircleAvatar(
-              radius: 38,
-              backgroundImage: photoURL.isNotEmpty
-                  ? NetworkImage(photoURL)
-                  : null,
-              child: photoURL.isEmpty ? const Icon(Icons.person) : null,
+            // PERFORMANS İÇİN DÜZELTİLDİ: NetworkImage yerine CachedNetworkImage kullanıldı
+            ClipOval(
+              child: SizedBox(
+                width: 76, // radius 38 * 2
+                height: 76,
+                child: photoURL.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: photoURL,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          child: const Icon(Icons.person, color: Colors.grey),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          child: const Icon(Icons.person, color: Colors.grey),
+                        ),
+                      )
+                    : Container(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        child: const Icon(Icons.person, color: Colors.grey, size: 40),
+                      ),
+              ),
             ),
             const SizedBox(height: 8),
             Text(

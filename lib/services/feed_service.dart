@@ -2,12 +2,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class FeedService {
-  FeedService._();
-  static final FeedService instance = FeedService._();
   FeedService._internal();
-  static final FeedService _instance = FeedService._internal();
-  factory FeedService() => _instance;
-  static FeedService get I => _instance;
+  
+  // Bellekteki TEK ve yegane kopya
+  static final FeedService instance = FeedService._internal();
+  
+  // Geriye dönük uyumluluk: Uygulamanın diğer yerlerinde hata vermemesi için
+  // diğer erişim yöntemlerini de bu TEK kopyaya yönlendiriyoruz.
+  factory FeedService() => instance;
+  static FeedService get I => instance;
 
   final FirebaseFirestore _fs = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;

@@ -6,6 +6,15 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+// --- YENİ EKLENEN: GLOBAL HAFIZA (RAM CACHE) ---
+class _DirectorCacheData {
+  final Map<String, dynamic> details;
+  final List<dynamic> movies;
+  _DirectorCacheData(this.details, this.movies);
+}
+final Map<int, _DirectorCacheData> _globalDirectorCache = {};
+// ------------------------------------------------
+
 class DirectorScreen extends StatefulWidget {
   final int directorId;
   final String directorName;
@@ -37,10 +46,7 @@ class _DirectorScreenState extends State<DirectorScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .get();
+    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
     if (doc.exists) {
       final List favDirectors = doc.data()?['favDirectors'] ?? [];
       if (mounted) {
@@ -55,16 +61,26 @@ class _DirectorScreenState extends State<DirectorScreen> {
   }
 
   Future<void> _fetchDirectorData() async {
+    // --- YENİ EKLENEN: EĞER HAFIZADA VARSA İNTERNETE GİTME, DİREKT GÖSTER ---
+    if (_globalDirectorCache.containsKey(widget.directorId)) {
+      if (mounted) {
+        setState(() {
+          _directorDetails = _globalDirectorCache[widget.directorId]!.details;
+          _directedMovies = _globalDirectorCache[widget.directorId]!.movies;
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
     try {
       final functions = FirebaseFunctions.instance;
 
-      // 1. Yönetmen Detaylarını (Biyografi vb.) Çek
       final detailsRes = await functions.httpsCallable('callTMDB').call({
         'endpoint': '/3/person/${widget.directorId}',
         'params': {'language': 'tr-TR'},
       });
 
-      // 2. Yönetmenin Filmografisini Çek
       final creditsRes = await functions.httpsCallable('callTMDB').call({
         'endpoint': '/3/person/${widget.directorId}/movie_credits',
         'params': {'language': 'tr-TR'},
@@ -73,19 +89,14 @@ class _DirectorScreenState extends State<DirectorScreen> {
       final creditsData = creditsRes.data;
       final List<dynamic> crew = creditsData['crew'] ?? [];
 
-      // Sadece 'Director' (Yönetmen) olarak görev aldığı filmleri filtrele
-      List<dynamic> directed = crew
-          .where((c) => c['job'] == 'Director')
-          .toList();
+      List<dynamic> directed = crew.where((c) => c['job'] == 'Director').toList();
 
-      // Filmleri popülerliğe veya çıkış tarihine göre sırala (Popülerlik daha iyidir)
       directed.sort((a, b) {
         final popA = (a['popularity'] as num?) ?? 0;
         final popB = (b['popularity'] as num?) ?? 0;
         return popB.compareTo(popA);
       });
 
-      // Aynı filmin birden fazla kez gelmesini engellemek için (bazen API çift gönderebilir)
       final seenIds = <int>{};
       _directedMovies = directed.where((movie) {
         final id = movie['id'] as int;
@@ -94,12 +105,16 @@ class _DirectorScreenState extends State<DirectorScreen> {
         return true;
       }).toList();
 
-      setState(() {
-        _directorDetails = detailsRes.data;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _directorDetails = detailsRes.data;
+          _isLoading = false;
+        });
+        
+        // Veriyi internetten çektikten sonra hafızaya kaydet
+        _globalDirectorCache[widget.directorId] = _DirectorCacheData(_directorDetails!, _directedMovies);
+      }
     } catch (e) {
-      debugPrint('Yönetmen verisi çekilirken hata: $e');
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -133,9 +148,7 @@ class _DirectorScreenState extends State<DirectorScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                _isFavorited
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
+                _isFavorited ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                 color: _isFavorited ? Colors.green : Colors.grey,
                 size: 22,
               ),
@@ -144,24 +157,19 @@ class _DirectorScreenState extends State<DirectorScreen> {
               final uid = FirebaseAuth.instance.currentUser?.uid;
               if (uid == null) return;
 
-              // 1. OPTIMISTIC UI: Arayüzü anında güncelle (Kullanıcı beklemesin)
               final bool wasFavorited = _isFavorited;
               setState(() {
                 _isFavorited = !wasFavorited;
               });
 
-              final userRef = FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(uid);
+              final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
               final directorData = {
                 'name': widget.directorName,
                 'id': widget.directorId,
               };
 
               try {
-                // 2. Arka planda Firestore işlemlerini yap
                 if (wasFavorited) {
-                  // Eskiden favoriydi, şimdi çıkarıyoruz
                   final doc = await userRef.get();
                   List favs = List.from(doc.data()?['favDirectors'] ?? []);
                   favs.removeWhere((item) {
@@ -170,14 +178,12 @@ class _DirectorScreenState extends State<DirectorScreen> {
                   });
                   await userRef.update({'favDirectors': favs});
                 } else {
-                  // Eskiden favori değildi, şimdi ekliyoruz
                   await userRef.set({
                     'favDirectors': FieldValue.arrayUnion([directorData]),
                     'updatedAt': FieldValue.serverTimestamp(),
                   }, SetOptions(merge: true));
                 }
 
-                // 3. Başarılı Snackbar'ı göster
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -186,18 +192,13 @@ class _DirectorScreenState extends State<DirectorScreen> {
                             ? '${widget.directorName} favorilere eklendi!'
                             : '${widget.directorName} favorilerden çıkarıldı!',
                       ),
-                      backgroundColor: !wasFavorited
-                          ? Colors.green.shade700
-                          : Colors.redAccent,
+                      backgroundColor: !wasFavorited ? Colors.green.shade700 : Colors.redAccent,
                       behavior: SnackBarBehavior.floating,
-                      duration: const Duration(
-                        seconds: 1,
-                      ), // Çok ekranda kalmasın
+                      duration: const Duration(seconds: 1), 
                     ),
                   );
                 }
               } catch (e) {
-                // 4. HATA DURUMU: Eğer internet kopuksa vs. işlemi geri al (Revert)
                 if (mounted) {
                   setState(() {
                     _isFavorited = wasFavorited;
@@ -218,20 +219,17 @@ class _DirectorScreenState extends State<DirectorScreen> {
           ? const Center(child: Text('Veri bulunamadı.'))
           : CustomScrollView(
               slivers: [
-                // --- ÜST KISIM: FOTOĞRAF VE BİLGİLER ---
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Yönetmen Fotoğrafı
                         ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: _directorDetails!['profile_path'] != null
                               ? CachedNetworkImage(
-                                  imageUrl:
-                                      'https://image.tmdb.org/t/p/w500${_directorDetails!['profile_path']}',
+                                  imageUrl: 'https://image.tmdb.org/t/p/w500${_directorDetails!['profile_path']}',
                                   width: 120,
                                   height: 180,
                                   fit: BoxFit.cover,
@@ -240,60 +238,36 @@ class _DirectorScreenState extends State<DirectorScreen> {
                                   width: 120,
                                   height: 180,
                                   color: cs.surfaceContainerHighest,
-                                  child: const Icon(
-                                    Icons.person,
-                                    size: 50,
-                                    color: Colors.grey,
-                                  ),
+                                  child: const Icon(Icons.person, size: 50, color: Colors.grey),
                                 ),
                         ),
                         const SizedBox(width: 16),
-                        // Kişisel Bilgiler
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 widget.directorName,
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 8),
                               if (_directorDetails!['birthday'] != null)
-                                _buildInfoRow(
-                                  'Doğum',
-                                  _directorDetails!['birthday'],
-                                ),
+                                _buildInfoRow('Doğum', _directorDetails!['birthday']),
                               if (_directorDetails!['place_of_birth'] != null)
-                                _buildInfoRow(
-                                  'Yer',
-                                  _directorDetails!['place_of_birth'],
-                                ),
+                                _buildInfoRow('Yer', _directorDetails!['place_of_birth']),
                               if (_directorDetails!['deathday'] != null)
-                                _buildInfoRow(
-                                  'Ölüm',
-                                  _directorDetails!['deathday'],
-                                ),
+                                _buildInfoRow('Ölüm', _directorDetails!['deathday']),
 
                               const SizedBox(height: 12),
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: const Color(
-                                    0xFF2E7D32,
-                                  ).withOpacity(0.1),
+                                  color: const Color(0xFF2E7D32).withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Text(
                                   'Yönetmen',
-                                  style: TextStyle(
-                                    color: Color(0xFF2E7D32),
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ],
@@ -303,71 +277,44 @@ class _DirectorScreenState extends State<DirectorScreen> {
                     ),
                   ),
                 ),
-
-                // --- BİYOGRAFİ ---
-                if (_directorDetails!['biography'] != null &&
-                    _directorDetails!['biography'].toString().isNotEmpty)
+                if (_directorDetails!['biography'] != null && _directorDetails!['biography'].toString().isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16.0,
-                        vertical: 8.0,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Biyografi',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          const Text('Biyografi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           Text(
                             _directorDetails!['biography'],
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              height: 1.5,
-                            ),
+                            style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
                           ),
                         ],
                       ),
                     ),
                   ),
-
-                // --- YÖNETTİĞİ FİLMLER BAŞLIĞI ---
                 if (_directedMovies.isNotEmpty)
                   const SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
-                      child: Text(
-                        'Yönettiği Filmler',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: Text('Yönettiği Filmler', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                   ),
-
-                // --- FİLMLER GRID LİSTESİ ---
                 if (_directedMovies.isNotEmpty)
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     sliver: SliverGrid(
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 3,
-                            childAspectRatio: 0.65, // Afiş oranı
+                            childAspectRatio: 0.65, 
                             crossAxisSpacing: 10,
                             mainAxisSpacing: 10,
                           ),
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final movie = _directedMovies[index];
                         final posterPath = movie['poster_path'];
-                        final fullPosterUrl = posterPath != null
-                            ? 'https://image.tmdb.org/t/p/w500$posterPath'
-                            : '';
+                        final fullPosterUrl = posterPath != null ? 'https://image.tmdb.org/t/p/w500$posterPath' : '';
 
                         return GestureDetector(
                           onTap: () {
@@ -399,10 +346,7 @@ class _DirectorScreenState extends State<DirectorScreen> {
                                 movie['title'] ?? 'Film',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                                 textAlign: TextAlign.center,
                               ),
                             ],
@@ -411,10 +355,7 @@ class _DirectorScreenState extends State<DirectorScreen> {
                       }, childCount: _directedMovies.length),
                     ),
                   ),
-
-                const SliverToBoxAdapter(
-                  child: SizedBox(height: 40),
-                ), // En alta boşluk
+                const SliverToBoxAdapter(child: SizedBox(height: 40)),
               ],
             ),
     );
@@ -426,16 +367,8 @@ class _DirectorScreenState extends State<DirectorScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '$title: ',
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.grey,
-            ),
-          ),
-          Expanded(
-            child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis),
-          ),
+          Text('$title: ', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+          Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
         ],
       ),
     );

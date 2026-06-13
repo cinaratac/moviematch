@@ -196,4 +196,40 @@ exports.findMatchesCallable = functions.https.onCall(async (data, context) => {
   if (searchKeys.length === 0) return { results: [] };
   const query = await db.collection('users').where('fiveStarKeys', 'array-contains-any', searchKeys.slice(0, 10)).limit(20).get();
   return { results: query.docs.map(doc => ({ uid: doc.id, ...doc.data() })).filter(c => c.uid !== context.auth.uid) };
-});
+}); 
+// ==================================================================
+// 7. FANOUT FEED (Takip Edilenler Akışı Optimizasyonu)
+// ==================================================================
+exports.fanoutPostToFollowers = functions.firestore
+  .document("posts/{postId}")
+  .onCreate(async (snapshot, context) => {
+    const postData = snapshot.data();
+    const authorId = postData.authorId;
+    const postId = context.params.postId;
+
+    const db = admin.firestore();
+    
+    // Yazarın takipçilerini bul (collectionGroup kullanarak)
+    const followersSnap = await db.collectionGroup("following")
+      .where("to", "==", authorId)
+      .get();
+
+    if (followersSnap.empty) return null;
+
+    const batch = db.batch();
+    
+    // Post referansını her bir takipçinin özel feed kutusuna ekle
+    followersSnap.forEach((doc) => {
+      const followerId = doc.data().by;
+      if (followerId) {
+        const feedRef = db.collection("feeds").doc(followerId).collection("user_feed").doc(postId);
+        batch.set(feedRef, {
+          postId: postId,
+          authorId: authorId,
+          createdAt: postData.createdAt
+        });
+      }
+    });
+
+    return batch.commit();
+  });

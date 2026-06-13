@@ -7,6 +7,9 @@ import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 
+// --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
+import '../services/user_cache_service.dart';
+
 /// AppBar içinde kullan: NotificationsButton()
 class NotificationsButton extends StatelessWidget {
   const NotificationsButton({super.key});
@@ -95,12 +98,9 @@ class _NotificationsSheet extends StatefulWidget {
 
 class _NotificationsSheetState extends State<_NotificationsSheet> {
   late final Query<Map<String, dynamic>> _q;
-  
-  // YENİ VE KRİTİK EKLENTİ: Akışı (Stream) hafızada tutacağımız sabit değişken
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _notificationsStream;
-  
-  // Profil resimleri hafızası (Bir önceki adımdan kalma)
-  static final Map<String, _Actor> _actorCache = {};
+
+  // NOT: Özel _actorCache tamamen silindi. Artık UserCacheService kullanıyoruz.
 
   @override
   void initState() {
@@ -115,7 +115,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
         .orderBy('createdAt', descending: true)
         .limit(100);
 
-    // KİLİT ÇÖZÜM: Stream'i sadece sayfa ilk açıldığında 1 kere oluşturup hafızaya alıyoruz!
     _notificationsStream = _q.snapshots();
 
     NotificationService.I.markAllAsRead(widget.uid);
@@ -151,7 +150,6 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
             const Divider(height: 1),
             Expanded(
               child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                // DİKKAT: Artık _q.snapshots() yerine, hafızadaki sabit stream'i kullanıyoruz
                 stream: _notificationsStream,
                 builder: (context, snap) {
                   if (snap.connectionState == ConnectionState.waiting) {
@@ -166,6 +164,23 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                       )
                     );
                   }
+
+                  // --- MERKEZİ CACHE KULLANIMI: Eksik kullanıcıları toplu olarak arka planda çek ---
+                  final Set<String> actorIds = {};
+                  for (var doc in docs) {
+                    final aId = doc.data()['actorId'];
+                    if (aId != null && aId.toString().isNotEmpty) {
+                      actorIds.add(aId.toString());
+                    }
+                  }
+                  final missingIds = actorIds.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
+                  if (missingIds.isNotEmpty) {
+                    Future.microtask(() async {
+                      await UserCacheService.instance.fetchUsers(missingIds);
+                      if (mounted) setState(() {}); // Veriler geldiğinde ekranı pürüzsüz yenile
+                    });
+                  }
+                  // ----------------------------------------------------------------------------------
 
                   // BEĞENİLERİ GRUPLA
                   final List<dynamic> displayItems = [];
@@ -209,7 +224,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
                   });
 
                   return ListView.separated(
-                    controller: controller, // Kaydırma controller'ı burada sabit çalışacak
+                    controller: controller,
                     itemCount: displayItems.length,
                     separatorBuilder: (context, index) => const Divider(height: 1),
                     itemBuilder: (context, i) {
@@ -249,7 +264,7 @@ class _SingleNotificationTile extends StatefulWidget {
 }
 
 class _SingleNotificationTileState extends State<_SingleNotificationTile> {
-  _Actor? actor;
+  CachedUser? actor;
 
   @override
   void initState() {
@@ -257,42 +272,33 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
     _loadActor();
   }
 
-  void _loadActor() {
+  void _loadActor() async {
     final m = widget.doc.data();
     final actorId = (m['actorId'] ?? '').toString();
     
     if (actorId.isEmpty) return;
 
-    // 1. ADIM: Daha önce yüklendiyse direkt RAM'den al (Anında görünür, yükleniyor ekranı çıkmaz)
-    if (_NotificationsSheetState._actorCache.containsKey(actorId)) {
-      actor = _NotificationsSheetState._actorCache[actorId];
+    // 1. ADIM: Daha önce yüklendiyse direkt RAM'den al
+    final cached = UserCacheService.instance.getFromCache(actorId);
+    if (cached != null) {
+      if (mounted) setState(() => actor = cached);
       return; 
     }
 
-    // 2. ADIM: Hafızada yoksa, saniyelik boş kalmasın diye bildirimin içindeki eski/yedek veriyi ekrana bas
-    actor = _Actor(
+    // 2. ADIM: Hafızada yoksa, bildirimin içindeki eski/yedek veriyi ekrana bas (Fallback)
+    final fallback = CachedUser(
       uid: actorId,
-      displayName: m['actorName']?.toString(),
-      handle: m['actorHandle']?.toString(),
-      photoURL: m['actorPhotoURL']?.toString(),
+      displayName: (m['actorName'] ?? '').toString(),
+      handle: (m['actorHandle'] ?? '').toString(),
+      photoURL: (m['actorPhotoURL'] ?? '').toString(),
     );
+    if (mounted) setState(() => actor = fallback);
 
-    // 3. ADIM: Arka planda sessizce en güncel resmi çek ve hafızayı güncelle
-    FirebaseFirestore.instance.collection('users').doc(actorId).get().then((u) {
-      if (u.exists && mounted) {
-        final data = u.data() ?? {};
-        final newActor = _Actor(
-          uid: actorId,
-          displayName: (data['displayName'] ?? data['name'] ?? m['actorName']).toString(),
-          handle: (data['username'] ?? data['handle'] ?? m['actorHandle']).toString(),
-          photoURL: (data['photoURL'] ?? m['actorPhotoURL']).toString(),
-        );
-        _NotificationsSheetState._actorCache[actorId] = newActor; // Bir dahaki sefere anında gelmesi için kaydet
-        setState(() {
-          actor = newActor; // Ekranı yeni resimle güncelle
-        });
-      }
-    }).catchError((_) {});
+    // 3. ADIM: Merkezi servisten en güncelini bekle
+    final fetched = await UserCacheService.instance.getUser(actorId);
+    if (fetched != null && mounted) {
+      setState(() => actor = fetched);
+    }
   }
 
   @override
@@ -335,6 +341,9 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
       }
     }
 
+    final displayName = actor?.displayName.isNotEmpty == true ? actor!.displayName : title;
+    final handle = actor?.handle.isNotEmpty == true ? actor!.handle : (actor?.displayName.isNotEmpty == true ? actor!.displayName : 'Kullanıcı');
+
     return ListTile(
       onTap: () {
         widget.doc.reference.update({'read': true});
@@ -365,13 +374,13 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
       title: GestureDetector(
         onTap: goToProfile,
         child: Text(
-          actor?.displayName ?? title, 
+          displayName, 
           maxLines: 1, 
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontWeight: FontWeight.w600), 
         ),
       ),
-      subtitle: Text('${actor?.handle ?? actor?.displayName ?? 'Kullanıcı'} $subtitle', maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text('$handle $subtitle', maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -398,8 +407,8 @@ class _GroupedNotificationTile extends StatefulWidget {
 }
 
 class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
-  _Actor? actor1;
-  _Actor? actor2;
+  CachedUser? actor1;
+  CachedUser? actor2;
 
   @override
   void initState() {
@@ -420,34 +429,23 @@ class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
     if (mounted) setState(() {});
   }
 
-  Future<_Actor> _resolveActor(String actorId, Map<String, dynamic> m) async {
-    if (actorId.isEmpty) return _Actor(uid: actorId);
+  Future<CachedUser> _resolveActor(String actorId, Map<String, dynamic> m) async {
+    if (actorId.isEmpty) return CachedUser(uid: '', displayName: '', handle: '', photoURL: '');
     
     // Hafızada varsa anında dön
-    if (_NotificationsSheetState._actorCache.containsKey(actorId)) {
-      return _NotificationsSheetState._actorCache[actorId]!;
-    }
+    final cached = UserCacheService.instance.getFromCache(actorId);
+    if (cached != null) return cached;
 
-    final tempActor = _Actor(
+    final tempActor = CachedUser(
       uid: actorId,
-      displayName: m['actorName']?.toString(),
-      handle: m['actorHandle']?.toString(),
-      photoURL: m['actorPhotoURL']?.toString(),
+      displayName: (m['actorName'] ?? '').toString(),
+      handle: (m['actorHandle'] ?? '').toString(),
+      photoURL: (m['actorPhotoURL'] ?? '').toString(),
     );
 
     try {
-      final u = await FirebaseFirestore.instance.collection('users').doc(actorId).get();
-      if (u.exists) {
-        final data = u.data() ?? {};
-        final newActor = _Actor(
-          uid: actorId,
-          displayName: (data['displayName'] ?? data['name'] ?? m['actorName']).toString(),
-          handle: (data['username'] ?? data['handle'] ?? m['actorHandle']).toString(),
-          photoURL: (data['photoURL'] ?? m['actorPhotoURL']).toString(),
-        );
-        _NotificationsSheetState._actorCache[actorId] = newActor;
-        return newActor;
-      }
+      final fetched = await UserCacheService.instance.getUser(actorId);
+      if (fetched != null) return fetched;
     } catch (_) {}
     return tempActor;
   }
@@ -459,7 +457,11 @@ class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
     final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
     final othersCount = widget.docs.length - 1;
 
-    final name = actor1?.handle ?? actor1?.displayName ?? 'Bir kullanıcı';
+    String name = 'Bir kullanıcı';
+    if (actor1 != null) {
+      if (actor1!.handle.isNotEmpty) name = actor1!.handle;
+      else if (actor1!.displayName.isNotEmpty) name = actor1!.displayName;
+    }
 
     return ListTile(
       onTap: () {
@@ -553,15 +555,7 @@ String _timeAgoShort(DateTime d) {
   return 'Az önce';
 }
 
-class _Actor {
-  final String uid;
-  final String? displayName;
-  final String? handle;
-  final String? photoURL;
-  const _Actor({required this.uid, this.displayName, this.handle, this.photoURL});
-}
-
-// Avatar widgetı boyutlandırma desteği ile güncellendi
+// Avatar widgetı boyutlandırma desteği ile
 class _Avatar extends StatelessWidget {
   final String? url;
   final double radius;
@@ -585,4 +579,3 @@ class _Avatar extends StatelessWidget {
     return CircleAvatar(radius: radius, child: Icon(Icons.person, size: radius));
   }
 }
-

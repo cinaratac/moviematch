@@ -30,13 +30,14 @@ class FeedPage extends StatefulWidget {
 class _FeedPageState extends State<FeedPage> {
   final FeedController _controller = FeedController();
   final ScrollController _scrollController = ScrollController();
-
+  void _onControllerUpdate() {
+    if (mounted) setState(() {});
+  }
   @override
   void initState() {
     super.initState();
-    _controller.addListener(() {
-      if (mounted) setState(() {});
-    });
+    // Artık isimlendirdiğimiz fonksiyonu veriyoruz
+    _controller.addListener(_onControllerUpdate);
     
     _controller.init();
     _scrollController.addListener(_onScroll);
@@ -44,7 +45,8 @@ class _FeedPageState extends State<FeedPage> {
 
   @override
   void dispose() {
-    _controller.removeListener(() {}); 
+    // Aynı isimli fonksiyonu kaldırarak referansın eşleşmesini sağlıyoruz
+    _controller.removeListener(_onControllerUpdate); 
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -55,7 +57,9 @@ class _FeedPageState extends State<FeedPage> {
     final maxScroll = _scrollController.position.maxScrollExtent;
     final currentScroll = _scrollController.position.pixels;
     
-    if (maxScroll - currentScroll <= 200) {
+    // Kullanıcı sayfanın sonuna 1500 piksel (yaklaşık 3-4 post) yaklaştığında 
+    // sessizce yeni verileri çekmeye başla.
+    if (maxScroll - currentScroll <= 1500) {
       _controller.loadMore();
     }
   }
@@ -387,51 +391,81 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         FeedService.instance.fetchUserFollowingIds(me),
       ]);
 
-      final followingQs = await FirebaseFirestore.instance
-          .collection('users')
+      // YENİ MİMARİ: Fanout feed'den sadece bu kullanıcıya özel post ID'lerini çek (TEK SORGU!)
+      final feedQs = await FirebaseFirestore.instance
+          .collection('feeds')
           .doc(me)
-          .collection('following')
-          .limit(200) 
+          .collection('user_feed')
+          .orderBy('createdAt', descending: true)
+          .limit(20)
           .get();
-          
-      final uids = followingQs.docs.map((d) => d.id).toList();
 
-      if (uids.isEmpty) {
-        if(mounted) setState(() { _items = []; _loading = false; });
-        return;
-      }
+      List<DocumentSnapshot<Map<String, dynamic>>> finalItems = [];
 
-      List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
-      
-      for (var i = 0; i < uids.length; i += 10) {
-        final end = (i + 10 < uids.length) ? i + 10 : uids.length;
-        final chunk = uids.sublist(i, end);
+      if (feedQs.docs.isNotEmpty) {
+        // SUNUCU KUTUMUZU DOLDURMUŞ: Postları hızlıca getir
+        final postIds = feedQs.docs.map((d) => d.data()['postId'] as String).toList();
         
-        futures.add(
-          FirebaseFirestore.instance
-            .collection('posts')
-            .where('authorId', whereIn: chunk)
-            .orderBy('createdAt', descending: true)
-            .limit(5)
-            .get() 
-        );
+        if (postIds.isNotEmpty) {
+           List<Future<QuerySnapshot<Map<String, dynamic>>>> postFutures = [];
+           for (var i = 0; i < postIds.length; i += 10) {
+              final chunk = postIds.sublist(i, (i + 10 > postIds.length) ? postIds.length : i + 10);
+              postFutures.add(FirebaseFirestore.instance
+                  .collection('posts')
+                  .where(FieldPath.documentId, whereIn: chunk)
+                  .get());
+           }
+           
+           final postResults = await Future.wait(postFutures);
+           for (var qs in postResults) {
+             finalItems.addAll(qs.docs);
+           }
+           
+           // DocumentID ile çektiğimiz için sıralama bozulabilir, tekrar feed sırasına diziyoruz
+           finalItems.sort((a, b) {
+              final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
+              final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
+              if (ta == null) return 1; if (tb == null) return -1;
+              return tb.compareTo(ta); 
+           });
+        }
+      } else {
+        // ESKİ MİMARİ FALLBACK (Eski postlar kaybolmasın diye sistem yavaş yavaş yeniye geçene kadar çalışacak yedek plan)
+        final followingQs = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(me)
+            .collection('following')
+            .limit(200) 
+            .get();
+            
+        final uids = followingQs.docs.map((d) => d.id).toList();
+
+        if (uids.isNotEmpty) {
+          List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
+          for (var i = 0; i < uids.length; i += 10) {
+            final chunk = uids.sublist(i, (i + 10 > uids.length) ? uids.length : i + 10);
+            futures.add(
+              FirebaseFirestore.instance
+                .collection('posts')
+                .where('authorId', whereIn: chunk)
+                .orderBy('createdAt', descending: true)
+                .limit(5)
+                .get() 
+            );
+          }
+          final results = await Future.wait(futures);
+          for (var qs in results) {
+            finalItems.addAll(qs.docs);
+          }
+          finalItems.sort((a, b) {
+            final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
+            final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
+            if (ta == null) return 1; if (tb == null) return -1;
+            return tb.compareTo(ta); 
+          });
+          finalItems = finalItems.take(20).toList();
+        }
       }
-
-      final results = await Future.wait(futures);
-      
-      final List<DocumentSnapshot<Map<String, dynamic>>> allPosts = [];
-      for (var qs in results) {
-        allPosts.addAll(qs.docs);
-      }
-
-      allPosts.sort((a, b) {
-        final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
-        final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
-        if (ta == null) return 1; if (tb == null) return -1;
-        return tb.compareTo(ta); 
-      });
-
-      final finalItems = allPosts.take(50).toList();
 
       await _fetchAuthors(finalItems);
 
@@ -443,7 +477,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
         setState(() { _items = finalItems; _loading = false; });
       }
     } catch (e) {
-
       if (mounted) setState(() => _loading = false);
     }
   }
