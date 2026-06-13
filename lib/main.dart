@@ -50,14 +50,17 @@ Future<void> main() async {
   }
 
   // --- APP CHECK AKTİVASYONU (GEÇİCİ OLARAK KAPATILDI) ---
-  /*
+  
   await FirebaseAppCheck.instance.activate(
+    // Release modunda Play Integrity, test modunda Debug kullanılır
     androidProvider: kReleaseMode
         ? AndroidProvider.playIntegrity
         : AndroidProvider.debug,
-    appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
+    appleProvider: kReleaseMode 
+        ? AppleProvider.appAttest 
+        : AppleProvider.debug,
   );
-  */
+ 
   // Firestore Ayarları
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,

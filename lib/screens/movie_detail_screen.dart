@@ -39,6 +39,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   List<dynamic> _crew = [];
   bool _loading = true;
   bool _hasError = false;
+  
+  String? _catalogDocId; 
 
   @override
   void initState() {
@@ -67,7 +69,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
   Future<void> _fetchDetails() async {
     try {
-      // YENİ: Cloud Functions Kullanımı
       final result = await FirebaseFunctions.instance
           .httpsCallable('callTMDB')
           .call({
@@ -83,12 +84,14 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       if (mounted) {
         setState(() {
           _movieData = data;
-          // Credits verisi de bir Map olduğu için onu da güvenli almak gerekebilir:
           final Map credits = data['credits'] ?? {};
           _cast = credits['cast'] ?? [];
           _crew = credits['crew'] ?? [];
           _loading = false;
         });
+        
+        _catalogDocId = await _registerMovieToCatalog();
+        if (mounted) setState(() {});
       }
     } catch (e) {
       if (mounted) {
@@ -107,7 +110,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       MaterialPageRoute(
         builder: (_) => ComposePostPage(
           maxChars: 280,
-          // Film verilerini buradaki yapıya göre gönderiyoruz
           initialMovie: {
             'id': widget.tmdbId,
             'title': _movieData!['title'],
@@ -128,7 +130,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
                 List<String> postImageUrls = [];
 
-                // 1. Resimleri Firebase Storage'a yükle
                 if (images != null && images.isNotEmpty) {
                   for (var i = 0; i < images.length; i++) {
                     final image = images[i];
@@ -144,7 +145,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   }
                 }
 
-                // 2. FeedService üzerinden gönderiyi oluştur
                 await FeedService.instance.createPost(
                   text: text,
                   movie: movie,
@@ -161,7 +161,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                 );
 
                 if (context.mounted) {
-                  Navigator.pop(context); // Paylaşım sayfasını kapat
+                  Navigator.pop(context); 
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Gönderiniz Paylaşıldı!'),
@@ -174,73 +174,116 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       ),
     );
   }
-  // --- KATALOG VE LİSTE İŞLEMLERİ ---
 
   Future<String?> _registerMovieToCatalog() async {
     if (_movieData == null) return null;
-    return await CatalogService().upsertFromTmdb(_movieData!); // ID'yi döndür
+    return await CatalogService().upsertFromTmdb(_movieData!); 
   }
 
-  Future<void> _addToStandardList(ShelfTarget target) async {
+  // --- HIZLANDIRILMIŞ VE ANINDA KAPANAN EKLE/ÇIKAR FONKSİYONU ---
+  Future<void> _toggleStandardList(ShelfTarget target, bool isCurrentlyAdded) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _movieData == null) return;
 
-    // Önce kataloğa kaydet ve sistemdeki gerçek ID'yi (primaryKey) al
-    final String? primaryKey = await _registerMovieToCatalog();
-    if (primaryKey == null) return;
+    // KULLANICIYI BEKLETMEMEK İÇİN: İşlemler başlamadan menüyü ANINDA kapatıyoruz.
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.pop(context);
 
-    // 1. Yeni yazdığımız servisi çağır (Hem ekler, hem diğer listeden siler)
-    final previousList = await UserProfileService.instance.moveMovieToTarget(
-      uid: user.uid,
-      movieId: primaryKey,
-      target: target,
-      posterUrl:
-          widget.posterUrl ??
-          (_movieData!['poster_path'] != null
-              ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}'
-              : null),
-    );
+    String targetName = '';
+    String shelfKey = '';
+    switch (target) {
+      case ShelfTarget.fiveStar:
+        targetName = 'Sevdiklerim';
+        shelfKey = 'fiveStar';
+        break;
+      case ShelfTarget.disliked:
+        targetName = 'Sevmedim';
+        shelfKey = 'disliked';
+        break;
+      case ShelfTarget.favorites:
+        targetName = 'Favoriler';
+        shelfKey = 'favorites';
+        break;
+      case ShelfTarget.watchlist:
+        targetName = 'İzlenecekler';
+        shelfKey = 'watchlist';
+        break;
+    }
 
-    if (mounted) {
-      Navigator.pop(context); // Sheet'i kapat
+    try {
+      if (isCurrentlyAdded) {
+        // --- LİSTEDEN ÇIKARMA ---
+        final fs = FirebaseFirestore.instance;
+        
+        // Zaten sileceğimiz için TMDB'ye gidip filmi kontrol etmeye (vakit kaybetmeye) gerek yok.
+        final String primaryKey = _catalogDocId ?? widget.tmdbId.toString();
+        
+        await fs.collection('users').doc(user.uid).collection('shelves').doc(shelfKey).collection('items').doc(primaryKey).delete();
+        await fs.collection('users').doc(user.uid).collection('shelves').doc(shelfKey).collection('items').doc(widget.tmdbId.toString()).delete();
 
-      // 2. Hangi listeye eklendiğinin Türkçe adını belirle
-      String targetName = '';
-      switch (target) {
-        case ShelfTarget.fiveStar:
-          targetName = 'Sevdiklerim';
-          break;
-        case ShelfTarget.disliked:
-          targetName = 'Sevmedim';
-          break;
-        case ShelfTarget.favorites:
-          targetName = 'Favoriler';
-          break;
-        case ShelfTarget.watchlist:
-          targetName = 'İzlenecekler';
-          break;
+        await fs.collection('users').doc(user.uid).set({
+          '${shelfKey}Keys': FieldValue.arrayRemove([primaryKey, widget.tmdbId, widget.tmdbId.toString()])
+        }, SetOptions(merge: true));
+
+        if (shelfKey == 'fiveStar') {
+          await fs.collection('userTasteProfiles').doc(user.uid).set({
+            'fiveStars': FieldValue.arrayRemove([primaryKey, widget.tmdbId, widget.tmdbId.toString()])
+          }, SetOptions(merge: true));
+        } else if (shelfKey == 'disliked') {
+          await fs.collection('userTasteProfiles').doc(user.uid).set({
+            'lowRatings': FieldValue.arrayRemove([primaryKey, widget.tmdbId, widget.tmdbId.toString()])
+          }, SetOptions(merge: true));
+        }
+
+        // Arka plandaki işlem bitince Snackbar göster
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text("'${_movieData!['title']}', $targetName listesinden çıkartıldı."),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        
+      } else {
+        // --- LİSTEYE EKLEME ---
+        // Sadece eklerken kataloğa kaydettiriyoruz
+        final String? primaryKey = await _registerMovieToCatalog();
+        if (primaryKey == null) return;
+
+        final previousList = await UserProfileService.instance.moveMovieToTarget(
+          uid: user.uid,
+          movieId: primaryKey,
+          target: target,
+          posterUrl: widget.posterUrl ??
+              (_movieData!['poster_path'] != null
+                  ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}'
+                  : null),
+        );
+
+        String message = previousList != null
+            ? "'${_movieData!['title']}', $previousList listesinden çıkarılıp $targetName listesine eklendi."
+            : "'${_movieData!['title']}', $targetName listesine eklendi.";
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.green.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
-
-      // 3. Ekranda gösterilecek dinamik mesajı oluştur
-      String message = previousList != null
-          ? "'${_movieData!['title']}', $previousList listesinden çıkarılıp $targetName listesine eklendi."
-          : "'${_movieData!['title']}', $targetName listesine eklendi.";
-
-      // 4. Snackbar'ı göster
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.green.shade700,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    } catch (e) {
+      messenger.showSnackBar(const SnackBar(content: Text('Bir hata oluştu.')));
     }
   }
 
   Future<void> _addToCustomList(String listId, String listTitle) async {
     if (_movieData == null) return;
 
-    // CustomList servisi movie map'i bekler
+    // ANINDA KAPATMA
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.pop(context); 
+
     final movieMap = {
       'id': widget.tmdbId,
       'title': _movieData!['title'],
@@ -251,17 +294,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
     await CustomListService.instance.addMovieToList(listId, movieMap);
 
-    if (mounted) {
-      Navigator.pop(context); // Sheet'i kapat
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${_movieData!['title']}, "$listTitle" listesine eklendi.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('${_movieData!['title']}, "$listTitle" listesine eklendi.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _showAddSheet() {
@@ -305,7 +343,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // STANDART LİSTELER (Grid)
                 const Text(
                   'Profil Listeleri',
                   style: TextStyle(
@@ -315,43 +352,57 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 4,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  children: [
-                    _buildQuickAction(
-                      Icons.bookmark_add_rounded,
-                      'İzlenecekler',
-                      Colors.blue,
-                      () => _addToStandardList(ShelfTarget.watchlist),
-                    ),
-                    _buildQuickAction(
-                      Icons.favorite_rounded,
-                      'Favoriler',
-                      Colors.pink,
-                      () => _addToStandardList(ShelfTarget.favorites),
-                    ),
-                    _buildQuickAction(
-                      Icons.star_rounded,
-                      'Sevdiklerim',
-                      Colors.amber,
-                      () => _addToStandardList(ShelfTarget.fiveStar),
-                    ),
-                    _buildQuickAction(
-                      Icons.thumb_down_rounded,
-                      'Sevmedim',
-                      Colors.redAccent,
-                      () => _addToStandardList(ShelfTarget.disliked),
-                    ),
-                  ],
+                
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+                  builder: (context, snapshot) {
+                    
+                    // EKRANIN KİLİTLENMEMESİ İÇİN: Yükleme ekranı kaldırıldı! 
+                    // Veri gelene kadar boş kabul edip butonları direkt çizdiriyoruz.
+                    final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+
+                    bool checkIsAdded(String listKey) {
+                      final dbKeys = List<dynamic>.from(data[listKey] ?? []).map((e) => e.toString()).toList();
+                      if (dbKeys.contains(widget.tmdbId.toString())) return true;
+                      if (_catalogDocId != null && dbKeys.contains(_catalogDocId)) return true;
+                      return false;
+                    }
+
+                    final inWatchlist = checkIsAdded('watchlistKeys');
+                    final inFavorites = checkIsAdded('favoritesKeys');
+                    final inFiveStar = checkIsAdded('fiveStarKeys');
+                    final inDisliked = checkIsAdded('dislikedKeys');
+
+                    return GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 4,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      children: [
+                        _buildQuickAction(
+                          Icons.bookmark_add_rounded, 'İzlenecekler', Colors.blue, inWatchlist,
+                          () => _toggleStandardList(ShelfTarget.watchlist, inWatchlist),
+                        ),
+                        _buildQuickAction(
+                          Icons.favorite_rounded, 'Favoriler', Colors.pink, inFavorites,
+                          () => _toggleStandardList(ShelfTarget.favorites, inFavorites),
+                        ),
+                        _buildQuickAction(
+                          Icons.star_rounded, 'Sevdiklerim', Colors.amber, inFiveStar,
+                          () => _toggleStandardList(ShelfTarget.fiveStar, inFiveStar),
+                        ),
+                        _buildQuickAction(
+                          Icons.thumb_down_rounded, 'Sevmedim', Colors.redAccent, inDisliked,
+                          () => _toggleStandardList(ShelfTarget.disliked, inDisliked),
+                        ),
+                      ],
+                    );
+                  },
                 ),
 
                 const Divider(height: 40),
 
-                // ÖZEL LİSTELER
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -369,10 +420,13 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                 StreamBuilder<List<CustomList>>(
                   stream: CustomListService.instance.getUserLists(uid),
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
                     final lists = snapshot.data ?? [];
+                    
+                    // Özel listeler için de kilitlenmeyi önledik
+                    if (snapshot.connectionState == ConnectionState.waiting && lists.isEmpty) {
+                      return const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
+                    }
+                    
                     if (lists.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20),
@@ -438,6 +492,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     IconData icon,
     String label,
     Color color,
+    bool isAdded,
     VoidCallback onTap,
   ) {
     return InkWell(
@@ -449,16 +504,26 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
+              color: isAdded ? color : color.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: color, size: 28),
+            child: Icon(
+              isAdded ? Icons.check_rounded : icon,
+              color: isAdded ? Colors.white : color,
+              size: 28,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isAdded ? FontWeight.bold : FontWeight.w600,
+              color: isAdded ? color : Colors.grey.shade600,
+            ),
             textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -466,7 +531,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   }
 
   // --- GETTERS ---
-  /// 1. Yazı olarak isim döndüren metot (Hatanı bu çözecek)
   String get _director {
     final d = _crew.firstWhere(
       (m) => m['job'] == 'Director',
@@ -475,12 +539,9 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     return d != null ? d['name'] : 'Bilinmiyor';
   }
 
-  // 2. Tıklanma ve detaylar için tüm veriyi döndüren metot
-  // 2. Tıklanma ve detaylar için tüm veriyi döndüren metot
   Map<String, dynamic>? get _directorData {
     if (_crew.isEmpty) return null;
     try {
-      // BURASI KRİTİK: Firebase'den gelen veriyi güvenli Map formatına çeviriyoruz
       final d = _crew.firstWhere((m) => m['job'] == 'Director');
       return Map<String, dynamic>.from(d as Map);
     } catch (e) {
@@ -577,7 +638,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
             )
           else
             SingleChildScrollView(
-              // KRİTİK: Yanlardaki 20 padding'i kaldırdık (Sadece üst ve alt kaldı)
               padding: EdgeInsets.fromLTRB(
                 0,
                 MediaQuery.of(context).padding.top + 60,
@@ -587,7 +647,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- 1. POSTER & BAŞLIK (Padding eklendi) ---
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
@@ -651,14 +710,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                               GestureDetector(
                                 onTap: () {
                                   final director = _directorData;
-                                  // Güvenlik kontrolü yapıyoruz
                                   if (director != null &&
                                       director['id'] != null) {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => DirectorScreen(
-                                          // ACTOR DEĞİL DIRECTOR OLACAK
                                           directorId: director['id'] as int,
                                           directorName:
                                               director['name'] ?? 'Bilinmiyor',
@@ -666,7 +723,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                                       ),
                                     );
                                   } else {
-                                    // Veri yoksa kullanıcıyı uyar
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                         content: Text(
@@ -713,7 +769,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
                   const SizedBox(height: 30),
 
-                  // --- 2. ÖZET (Padding eklendi) ---
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
@@ -742,7 +797,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
                   const SizedBox(height: 30),
 
-                  // --- 3. OYUNCULAR (Padding eklendi) ---
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Text(
@@ -761,14 +815,13 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
-                      ), // ListView içi padding
+                      ), 
                       itemCount: _cast.length > 10 ? 10 : _cast.length,
                       separatorBuilder: (_, __) => const SizedBox(width: 16),
                       itemBuilder: (context, index) {
                         final actor = _cast[index];
                         return GestureDetector(
                           onTap: () {
-                            // OYUNCU SAYFASINA GİT
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -816,7 +869,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
                   const SizedBox(height: 30),
 
-                  // --- 4. GÖNDERİLER BÖLÜMÜ (KENARA SIFIR ARKA PLAN) ---
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collection('posts')
@@ -841,7 +893,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(vertical: 30),
                         decoration: BoxDecoration(
-                          // POST VARSA: Yanlardaki boşluğu kapatmak için tam tema rengi
                           color: hasPosts ? bgColor : Colors.transparent,
                         ),
                         child: Column(
@@ -866,11 +917,10 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                                 ConnectionState.waiting)
                               const Center(child: CircularProgressIndicator())
                             else if (!hasPosts)
-                              // --- BOŞ DURUM: PAYLAŞIMA YÖNLENDİREN KUTU ---
                               GestureDetector(
                                 onTap: () => _navigateToCompose(
                                   context,
-                                ), // <--- BURASI GÜNCELLENDİ
+                                ), 
                                 child: Container(
                                   width: double.infinity,
                                   margin: const EdgeInsets.symmetric(
@@ -910,7 +960,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                                 ),
                               )
                             else
-                              // --- POST LİSTESİ ---
                               ListView.separated(
                                 shrinkWrap: true,
                                 physics: const NeverScrollableScrollPhysics(),

@@ -347,10 +347,12 @@ class _ProfilePageState extends State<ProfilePage> {
   int? _followingCount;
   StreamSubscription<FollowEvent>? _followSub;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
+  late Stream<User?> _userStream;
 
   @override
   void initState() {
     super.initState();
+    _userStream = FirebaseAuth.instance.userChanges();
     UserShelfCache.clear();
     _loadPrefs();
     _bindLbFromFirestore();
@@ -1182,7 +1184,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
 
     return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.userChanges(),
+      stream: _userStream, 
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return Scaffold(
