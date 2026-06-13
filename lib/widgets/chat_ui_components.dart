@@ -837,6 +837,10 @@ class ChatAppBarTitle extends StatelessWidget {
   final String? initialTitle;
   final bool isGroup;
   final String? groupName;
+
+  // --- 1. ADIM: ÖNBELLEK İÇİN STATİK HARİTALAR EKLENDİ ---
+  static final Map<String, Map<String, dynamic>> _groupCache = {};
+  static final Map<String, Map<String, dynamic>> _userCache = {};
   
   const ChatAppBarTitle({
     super.key,
@@ -859,17 +863,26 @@ class ChatAppBarTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // --- GRUP SOHBETİ BAŞLIĞI ---
     if (isGroup) {
       return StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance.collection('clubs').doc(chatId).snapshots(),
         builder: (context, snap) {
+          
+          // 2. Yeni veri geldiyse önbelleğe kaydet
+          if (snap.hasData && snap.data!.exists) {
+            _groupCache[chatId] = snap.data!.data() as Map<String, dynamic>;
+          }
+
+          // 3. Ekranı önbellekteki veriyle çiz (Stream beklerken bile boş kalmaz)
+          final cachedData = _groupCache[chatId];
+          
           String? imageUrl;
           String displayName = groupName ?? 'Kulüp Sohbeti';
 
-          if (snap.hasData && snap.data!.exists) {
-            final data = snap.data!.data() as Map<String, dynamic>;
-            imageUrl = data['imageUrl'];
-            if(data['name'] != null) displayName = data['name'];
+          if (cachedData != null) {
+            imageUrl = cachedData['imageUrl'];
+            if(cachedData['name'] != null) displayName = cachedData['name'];
           }
 
           return InkWell(
@@ -889,7 +902,6 @@ class ChatAppBarTitle extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(displayName, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                      
                     ],
                   ),
                 ),
@@ -900,18 +912,26 @@ class ChatAppBarTitle extends StatelessWidget {
       );
     }
 
-    // Kişisel Sohbet Başlığı
+    // --- KİŞİSEL SOHBET BAŞLIĞI ---
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance.collection('users').doc(otherUid).snapshots(),
       builder: (context, uSnap) {
+        
+        // 2. Yeni veri geldiyse önbelleğe kaydet
+        if (uSnap.hasData && uSnap.data!.exists) {
+          _userCache[otherUid] = uSnap.data!.data()!;
+        }
+
+        // 3. Ekranı önbellekteki veriyle çiz (Flickering/Titremeyi engeller)
+        final cachedUser = _userCache[otherUid];
+        
         String title = initialTitle ?? 'Kullanıcı';
         String photo = '';
         
-        if (uSnap.hasData && uSnap.data!.exists) {
-          final u = uSnap.data!.data()!;
-          final username = (u['username'] ?? '') as String;
-          final disp = (u['displayName'] ?? '') as String;
-          photo = (u['photoURL'] ?? '') as String;
+        if (cachedUser != null) {
+          final username = (cachedUser['username'] ?? '') as String;
+          final disp = (cachedUser['displayName'] ?? '') as String;
+          photo = (cachedUser['photoURL'] ?? '') as String;
           title = username.isNotEmpty ? username : (disp.isNotEmpty ? disp : title);
         }
 

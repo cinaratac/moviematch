@@ -34,6 +34,9 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
+  static final Map<String, bool> _blockedCache = {};
+  static final Map<String, bool> _blockedMeCache = {};
+  static final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _messageCache = {};
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
   final _svc = ChatService.instance;
   final _ctrl = TextEditingController();
@@ -46,7 +49,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isLoadingBlock = true;
 
   Future<void> _loadBlockStatus() async {
-    // Grup sohbetlerinde bu engelleme mantığı farklı işleyebilir, birebir sohbetler için:
     if (widget.isGroup) {
       if (mounted) setState(() => _isLoadingBlock = false);
       return;
@@ -61,6 +63,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         targetUserId: widget.otherUid,
       );
       
+      // --- EKLENEN KISIM: Sunucudan gelen sonucu önbelleğe kaydet ---
+      _blockedCache[widget.otherUid] = status['iBlockedThem'] ?? false;
+      _blockedMeCache[widget.otherUid] = status['theyBlockedMe'] ?? false;
+      // --------------------------------------------------------------
+
       if (mounted) {
         setState(() {
           _isBlocked = status['iBlockedThem'] ?? false;
@@ -77,6 +84,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void initState() {
     super.initState();
     final myUid = FirebaseAuth.instance.currentUser!.uid;
+    if (_blockedCache.containsKey(widget.otherUid)) {
+      _isBlocked = _blockedCache[widget.otherUid]!;
+      _hasBlockedMe = _blockedMeCache[widget.otherUid] ?? false;
+      _isLoadingBlock = false; // SAYFAYI DİREKT AÇ
+    }
 
     _messagesStream = FirebaseFirestore.instance
         .collection('chats')
@@ -398,12 +410,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                         stream: _messagesStream,
                         builder: (context, snap) {
-                          if (snap.connectionState == ConnectionState.waiting) {
+                          // 1. EĞER STREAM'DEN YENİ VERİ GELDİYSE, ÖNBELLEĞİ GÜNCELLE
+                          if (snap.hasData && snap.data != null) {
+                            _messageCache[widget.chatId] = snap.data!.docs;
+                          }
+
+                          // 2. EKRANDA GÖSTERİLECEK VERİYİ BELİRLE (Önce yeni veri, yoksa önbellekteki veri)
+                          final docs = snap.data?.docs ?? _messageCache[widget.chatId] ?? [];
+
+                          // 3. EĞER HEM ÖNBELLEK BOŞ HEM DE STREAM BEKLİYORSA YÜKLENİYOR GÖSTER
+                          if (snap.connectionState == ConnectionState.waiting && docs.isEmpty) {
                             return const Center(
-                              child: CircularProgressIndicator(),
+                              child: CircularProgressIndicator(), 
+                              // Not: Projendeki "lib/widgets/messages_skeleton.dart" dosyasını
+                              // import edip burada "return const MessagesSkeleton();" da kullanabilirsin.
                             );
                           }
-                          final docs = snap.data?.docs ?? [];
+
                           if (docs.isEmpty) {
                             return const EmptyChatView();
                           }
@@ -419,18 +442,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                             itemBuilder: (context, i) {
                               final doc = docs[i];
                               final m = doc.data();
-                              final author = (m['authorId'] ??
-                                  m['from'] ??
-                                  '') as String;
+                              final author = (m['authorId'] ?? m['from'] ?? '') as String;
                               final mine = author == myUid;
                               final text = (m['text'] ?? '') as String;
                               final ts = (m['createdAt'] as Timestamp?);
-
+                              
                               final type = m['type'] as String?;
-                              final eventData =
-                                  m['event'] as Map<String, dynamic>?;
-                              final pollData =
-                                  m['poll'] as Map<String, dynamic>?;
+                              final eventData = m['event'] as Map<String, dynamic>?;
+                              final pollData = m['poll'] as Map<String, dynamic>?;
 
                               return MessageRow(
                                 key: ValueKey(doc.id),
