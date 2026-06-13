@@ -347,12 +347,14 @@ class _ProfilePageState extends State<ProfilePage> {
   int? _followingCount;
   StreamSubscription<FollowEvent>? _followSub;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
+
   late Stream<User?> _userStream;
 
   @override
   void initState() {
     super.initState();
     _userStream = FirebaseAuth.instance.userChanges();
+    
     UserShelfCache.clear();
     _loadPrefs();
     _bindLbFromFirestore();
@@ -510,7 +512,6 @@ class _ProfilePageState extends State<ProfilePage> {
           if (!snap.exists) return;
           final data = snap.data() ?? const {};
 
-          // GÜNCELLEME: Veri geldiğinde setState ile TÜM ekranın yenilenmesini sağlıyoruz.
           if (mounted) {
             setState(() {
               _lastUserData = Map<String, dynamic>.from(data);
@@ -573,7 +574,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
-  // Helper to extract TMDB ID safely
   int? _extractTmdbId(Map<String, dynamic> m) {
     final val = m['tmdbId'];
     if (val is int) return val;
@@ -608,16 +608,18 @@ class _ProfilePageState extends State<ProfilePage> {
     if (keys.isEmpty) {
       return SizedBox(
         height: 140,
-        child: ListView.separated(
+        child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          itemCount: 1,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (context, i) => AspectRatio(
-            aspectRatio: 2 / 3,
-            child: _AddPosterTile(
-              target: ShelfTarget.watchlist,
-              onRefresh: onReturnFromSearch,
-            ),
+          child: Row(
+            children: [
+              AspectRatio(
+                aspectRatio: 2 / 3,
+                child: _AddPosterTile(
+                  target: ShelfTarget.watchlist,
+                  onRefresh: onReturnFromSearch,
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -626,9 +628,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final hash = limited.join('|');
     final future = _watchlistFutureCache[hash] ??= Future.wait(
       limited.map((k) async {
-        final col = FirebaseFirestore.instance
-            .collection('catalog_films')
-            .doc(k);
+        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
         try {
           final c = await col.get(const GetOptions(source: Source.cache));
           if (c.exists) {
@@ -658,6 +658,8 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
+        
+        // EKSİK OLAN SATIRLAR BURADAYDI (films değişkeni tanımlanıyor)
         final films = (filmSnap.data ?? [])
             .where((m) => m != null)
             .map((m) => m!)
@@ -666,81 +668,79 @@ class _ProfilePageState extends State<ProfilePage> {
 
         return SizedBox(
           height: 140,
-          child: ListView.separated(
+          child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            itemCount: films.length + 1,
-            separatorBuilder: (_, __) => const SizedBox(width: 12),
-            itemBuilder: (context, i) {
-              if (i == films.length)
-                return AspectRatio(
+            child: Row(
+              children: [
+                for (int i = 0; i < films.length; i++) ...[
+                  Builder(builder: (context) {
+                    final film = films[i];
+                    final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
+                    final title = (film['title'] ?? '') as String;
+                    final docId = (film['docId'] ?? '').toString();
+                    final tmdbId = _extractTmdbId(film);
+
+                    return GestureDetector(
+                      onTap: () {
+                        if (title.isNotEmpty) {
+                          MovieActionHelper.show(
+                            context,
+                            title: title,
+                            posterUrl: poster,
+                            docId: docId,
+                            tmdbId: tmdbId,
+                            target: ShelfTarget.watchlist,
+                            onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
+                          );
+                        }
+                      },
+                      child: AspectRatio(
+                        aspectRatio: 2 / 3,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              PosterImage(
+                                posterUrl: poster,
+                                title: title,
+                                tmdbId: tmdbId,
+                                fit: BoxFit.cover,
+                              ),
+                              if (title.isNotEmpty)
+                                Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                    color: Colors.black54,
+                                    width: double.infinity,
+                                    child: Text(
+                                      _noYear(title),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(width: 12),
+                ],
+                // Ekleme Butonu
+                AspectRatio(
                   aspectRatio: 2 / 3,
                   child: _AddPosterTile(
                     target: ShelfTarget.watchlist,
                     onRefresh: onReturnFromSearch,
                   ),
-                );
-
-              final film = films[i];
-              final poster =
-                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
-                      .toString();
-              final title = (film['title'] ?? '') as String;
-              final docId = (film['docId'] ?? '').toString();
-              final tmdbId = _extractTmdbId(film); // TMDB ID Extraction
-
-              return GestureDetector(
-                onTap: () {
-                  if (title.isNotEmpty)
-                    MovieActionHelper.show(
-                      context,
-                      title: title,
-                      posterUrl: poster,
-                      docId: docId,
-                      target: ShelfTarget.watchlist,
-                      onItemDeleted: () =>
-                          setState(() => _watchlistFutureCache.clear()),
-                    );
-                },
-                child: AspectRatio(
-                  aspectRatio: 2 / 3,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        PosterImage(
-                          posterUrl: poster,
-                          title: title,
-                          tmdbId: tmdbId,
-                          fit: BoxFit.cover,
-                        ), // Passed tmdbId
-                        if (title.isNotEmpty)
-                          Align(
-                            alignment: Alignment.bottomCenter,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 4,
-                              ),
-                              color: Colors.black54,
-                              child: Text(
-                                _noYear(title),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.white,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
         );
       },
@@ -842,7 +842,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       .toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
-              final tmdbId = _extractTmdbId(film); // TMDB ID Extraction
+              final tmdbId = _extractTmdbId(film); 
 
               return GestureDetector(
                 onTap: () {
@@ -852,6 +852,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       title: title,
                       posterUrl: poster,
                       docId: docId,
+                      tmdbId: tmdbId, // <-- TMDB ID BURAYA EKLENDİ
                       target: target,
                       onItemDeleted: () =>
                           setState(() => _watchlistFutureCache.clear()),
@@ -869,7 +870,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           title: title,
                           tmdbId: tmdbId,
                           fit: BoxFit.cover,
-                        ), // Passed tmdbId
+                        ),
                         if (title.isNotEmpty)
                           Align(
                             alignment: Alignment.bottomCenter,
@@ -1133,7 +1134,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _shelfSectionFromUserField(
           'favoritesKeys',
           emptyText: 'Favori film bulunamadı.',
-          maxItems: 10,
+          maxItems: 20,
         ),
 
         // Sevdiği Filmler
@@ -1145,7 +1146,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _shelfSectionFromUserField(
           'fiveStarKeys',
           emptyText: '5★ film bulunamadı.',
-          maxItems: 10,
+          maxItems: 20,
         ),
 
         // Sevmediği Filmler
@@ -1157,7 +1158,7 @@ class _ProfilePageState extends State<ProfilePage> {
         _shelfSectionFromUserField(
           'dislikedKeys',
           emptyText: 'Sevmediği film bulunamadı.',
-          maxItems: 10,
+          maxItems: 20,
         ),
 
         // Watchlist
@@ -1166,7 +1167,7 @@ class _ProfilePageState extends State<ProfilePage> {
           watchlistKeys,
           ShelfTarget.watchlist,
         ), // ShelfTarget.watchlist eklendi
-        _watchlistSectionFromKeys(watchlistKeys, maxItems: 10),
+        _watchlistSectionFromKeys(watchlistKeys, maxItems: 20),
 
         const SizedBox(height: 52),
       ],
@@ -1246,9 +1247,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                       ? const Color.fromARGB(255, 255, 255, 255)
                                       : const Color.fromARGB(255, 0, 0, 0),
                                 ),
-                                // --- BURAYI GÜNCELLEYİN ---
                                 onPressed: () async {
-                                  // 1. Edit sayfasına git ve sonucu bekle
                                   final bool? result =
                                       await Navigator.of(context).push(
                                         MaterialPageRoute(
@@ -1258,12 +1257,9 @@ class _ProfilePageState extends State<ProfilePage> {
                                         ),
                                       );
 
-                                  // 2. Eğer 'true' döndüyse (kayıt yapıldıysa)
                                   if (result == true && mounted) {
-                                    // A) Önce mevcut ekranı bir yenile (loading gösterebilir veya bekleyebilirsin)
                                     setState(() {});
 
-                                    // B) Firestore'dan güncel veriyi MANUEL olarak hemen çek (Stream'i bekleme)
                                     final uid =
                                         FirebaseAuth.instance.currentUser?.uid;
                                     if (uid != null) {
@@ -1275,16 +1271,13 @@ class _ProfilePageState extends State<ProfilePage> {
                                             .get();
                                         if (doc.exists && mounted) {
                                           final data = doc.data()!;
-                                          // C) Değişkenleri güncelle ki ekran hemen değişsin
                                           setState(() {
                                             _lastUserData = data;
-                                            // Header'da kullanılan değişkeni güncelle
                                             _appUsername =
                                                 (data['displayName'] ??
                                                         data['username'] ??
                                                         '')
                                                     .toString();
-                                            // Varsa diğer alanlar da güncellenebilir
                                             _lbUsername =
                                                 (data['letterboxdUsername'] ??
                                                         '')
@@ -1292,7 +1285,6 @@ class _ProfilePageState extends State<ProfilePage> {
                                           });
                                         }
                                       } catch (_) {
-                                        // Hata olursa zaten stream (listener) arkadan gelip düzeltecektir.
                                       }
                                     }
                                   }
@@ -1324,9 +1316,6 @@ class _ProfilePageState extends State<ProfilePage> {
                         SliverToBoxAdapter(
                           child: Stack(
                             children: [
-                              // Blur Arka Plan (Yine de tutuyoruz, üst kısım için güzel)
-
-                              // İçerik
                               Column(
                                 children: [
                                   _profileHeaderSection(

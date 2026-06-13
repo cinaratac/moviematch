@@ -3,11 +3,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/services/poster_fallback_service.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
+// CacheManager ayarlarını daha agresif hale getirdik
 final customCacheManager = CacheManager(
   Config(
     'moviePosterCache',
-    stalePeriod: const Duration(days: 7),
-    maxNrOfCacheObjects: 200,
+    stalePeriod: const Duration(days: 30), // 7 günden 30 güne çıkardık
+    maxNrOfCacheObjects: 1000, // Daha fazla poster tutabilmesi için kapasiteyi artırdık
+    repo: JsonCacheInfoRepository(databaseName: 'moviePosterCache_db'),
   ),
 );
 
@@ -46,8 +48,9 @@ class _PosterImageState extends State<PosterImage> {
     super.initState();
     _currentUrl = widget.posterUrl;
 
-    // Eğer URL baştan boşsa hemen fallback dene
-    if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
+    if (_currentUrl != null && _currentUrl!.contains('ltrbxd.com')) {
+      _tryFallback(force: true);
+    } else if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
       _tryFallback(force: true);
     }
   }
@@ -65,7 +68,9 @@ class _PosterImageState extends State<PosterImage> {
         _retryCount = 0;
       });
 
-      if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
+      if (_currentUrl != null && _currentUrl!.contains('ltrbxd.com')) {
+        _tryFallback(force: true);
+      } else if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
         _tryFallback(force: true);
       }
     }
@@ -73,7 +78,6 @@ class _PosterImageState extends State<PosterImage> {
 
   bool _isEmpty(String? s) => s == null || s.trim().isEmpty;
 
-  // force: true ise mevcut URL'yi kontrol etmeden direkt TMDB'ye gider
   Future<void> _tryFallback({bool force = false}) async {
     if (_isLoadingFallback || _isEmpty(widget.title) || _retryCount >= 3) {
       if (mounted && _retryCount >= 3) setState(() => _failed = true);
@@ -91,7 +95,7 @@ class _PosterImageState extends State<PosterImage> {
         title: widget.title,
         tmdbId: widget.tmdbId,
         existing: widget.posterUrl,
-        ignoreExisting: force, // KRİTİK DEĞİŞİKLİK
+        ignoreExisting: force,
       );
 
       if (mounted) {
@@ -111,6 +115,14 @@ class _PosterImageState extends State<PosterImage> {
     }
   }
 
+  // URL'nin sonundaki gereksiz parametreleri (?v=123 gibi) temizleyerek sabit bir anahtar üretir
+  String _generateCacheKey(String url) {
+    if (url.contains('?')) {
+      return url.split('?').first;
+    }
+    return url;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_failed || (_isEmpty(_currentUrl) && !_isLoadingFallback)) {
@@ -121,28 +133,30 @@ class _PosterImageState extends State<PosterImage> {
       return _buildLoading();
     }
 
-    final int? optimalMemCacheWidth =
-        widget.cacheWidth ??
-        (widget.width != null &&
-                !widget.width!.isInfinite &&
-                !widget.width!.isNaN
-            ? (widget.width! * 2.5).toInt()
-            : 300); // Sonsuzluk gelirse varsayılan olarak 300 kullan
-
     return CachedNetworkImage(
       imageUrl: _currentUrl!,
-      httpHeaders: const {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-  },
+      // --- KÖKTEN ÇÖZÜM 1: SABİT CACHE KEY ---
+      // Sunucu URL'yi ufak tefek değiştirse bile biz resmi hep aynı isimle kaydedip çağıracağız.
+      cacheKey: _generateCacheKey(_currentUrl!),
+      
       cacheManager: customCacheManager,
-      memCacheWidth: optimalMemCacheWidth,
+      
+      // --- KÖKTEN ÇÖZÜM 2: memCacheWidth İPTALİ ---
+      // Bazı poster formatları (webp/avif) sıkıştırılırken sessizce hata verip cache'e yazılmayı reddediyordu. Bunu kaldırarak orijinal haliyle kaydedilmesini zorluyoruz.
+      // memCacheWidth: optimalMemCacheWidth, 
+      
+      httpHeaders: const {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Cache-Control': 'max-age=2592000, public', // Sunucuya "Bana ne dersen de, ben bunu kaydedeceğim" diyoruz.
+      },
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
       errorWidget: (context, url, error) {
-        // CachedNetworkImage yükleyemediyse URL bozuktur.
-        // Bu yüzden force: true ile çağırıyoruz.
+        // Eğer resim hatalıysa (Örn: 404), cache'i temizle ki sonsuza dek bozuk resim göstermesin
+        customCacheManager.removeFile(_generateCacheKey(url));
+        
         if (!_isLoadingFallback && !_failed) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) _tryFallback(force: true);

@@ -128,80 +128,90 @@ class _FullShelfScreenState extends State<FullShelfScreen> {
         elevation: 0,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       ),
-      body: widget.filmKeys.isEmpty
-          ? const Center(child: Text("Liste boş."))
-          : Column(
-              children: [
-                Expanded(
-                  child: GridView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 0.67, // Poster oranı
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                    ),
-                    // Yükleniyor göstergesi için +1 ekliyoruz (eğer daha veri varsa)
-                    itemCount: _loadedFilms.length + (_hasMore ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      // Eğer son elemandaysak ve daha veri varsa loading göster
-                      if (index == _loadedFilms.length) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(8.0),
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-                      }
+      body: _loadedFilms.isEmpty && _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : widget.filmKeys.isEmpty
+              ? const Center(child: Text("Liste boş."))
+              : Column(
+                  children: [
+                    Expanded(
+                      child: GridView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          childAspectRatio: 0.67, // Poster oranı
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                        ),
+                        itemCount: _loadedFilms.length + (_hasMore ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == _loadedFilms.length) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(8.0),
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          }
 
-                      final movie = _loadedFilms[index];
-                      final posterUrl = movie['posterUrl'] ?? movie['poster'] ?? '';
-                      final title = movie['title'] ?? '';
-                      final tmdbId = movie['tmdbId'];
+                          final movie = _loadedFilms[index];
+                          final posterUrl = movie['posterUrl'] ?? movie['poster'] ?? '';
+                          final title = movie['title'] ?? '';
 
-                        // FullShelfScreen içindeki itemBuilder
-                        return GestureDetector(
-                          // GridView içindeki film kartının onTap kısmı
-onTap: () {
-  if (widget.target == null) {
-    // Başkasının profili (target null ise): Doğrudan detay sayfasına git
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MovieDetailScreen(
-          tmdbId: tmdbId,
-          title: title,
-          posterUrl: posterUrl,
-        ),
-      ),
-    );
-  } else {
-    // Kendi profilimiz (target dolu ise): MovieActionHelper menüsünü aç
-    MovieActionHelper.show(
-      context,
-      title: title,
-      posterUrl: posterUrl,
-      docId: movie['docId'] ?? movie['id'],
-      target: widget.target,
-      onItemDeleted: () => setState(() => _loadedFilms.removeAt(index)),
-    );
-  }
-},
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: PosterImage(
-                              posterUrl: posterUrl,
-                              title: title,
-                              fit: BoxFit.cover,
+                          // --- DÜZELTİLEN GÜVENLİ VERİ TİPİ DÖNÜŞTÜRÜCÜ ---
+                          // Eğer ID bozuksa 0 verme, null bırak ki isim üzerinden önbelleğe alsın.
+                          final rawTmdbId = movie['tmdbId'];
+                          int? tmdbId;
+                          if (rawTmdbId is int) {
+                            tmdbId = rawTmdbId;
+                          } else if (rawTmdbId is num) {
+                            tmdbId = rawTmdbId.toInt();
+                          } else if (rawTmdbId is String) {
+                            tmdbId = int.tryParse(rawTmdbId);
+                          }
+                          if (tmdbId == 0) tmdbId = null;
+
+                          return GestureDetector(
+                            onTap: () {
+                              if (widget.target == null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => MovieDetailScreen(
+                                      tmdbId: tmdbId ?? 0,
+                                      title: title,
+                                      posterUrl: posterUrl,
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                MovieActionHelper.show(
+                                  context,
+                                  title: title,
+                                  posterUrl: posterUrl,
+                                  docId: movie['docId'] ?? movie['id'],
+                                  tmdbId: tmdbId,
+                                  target: widget.target,
+                                  onItemDeleted: () => setState(() => _loadedFilms.removeAt(index)),
+                                );
+                              }
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: PosterImage(
+                                posterUrl: posterUrl,
+                                title: title,
+                                tmdbId: tmdbId,
+                                fit: BoxFit.cover,
+                              ),
                             ),
-                          ),
-                        );
-                    },
-                  ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
     );
   }
 }

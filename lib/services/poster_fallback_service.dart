@@ -7,12 +7,21 @@ class PosterFallbackService {
   PosterFallbackService._();
   static final PosterFallbackService instance = PosterFallbackService._();
 
+  // --- 1. EKLENEN KISIM: RAM ÖNBELLEĞİ ---
+  // Çözümlenen URL'leri hafızada tutarak aynı filmi tekrar aratmayı engeller
+  final Map<String, String> _resolvedCache = {};
+
   // URL format kontrolü
   bool _looksValid(String? url) {
     if (url == null || url.trim().isEmpty) return false;
     final u = url.trim();
     if (!(u.startsWith('http://') || u.startsWith('https://'))) return false;
     if (u.contains('empty-poster') || u.contains('null')) return false; 
+    
+    // --- 2. EKLENEN KISIM: Letterboxd linklerini baştan reddet ---
+    // Böylece vakit kaybetmeden direkt TMDB aramasına geçer
+    if (u.contains('ltrbxd.com')) return false; 
+
     return true;
   }
 
@@ -20,11 +29,14 @@ class PosterFallbackService {
   Future<bool> _isReachable(String url) async {
     try {
       final uri = Uri.parse(url);
+      final headers = {
+        'Accept': 'image/*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      };
       final head = await http
-          .head(uri, headers: {'Accept': 'image/*'})
+          .head(uri, headers: headers)
           .timeout(const Duration(seconds: 3));
       
-      // İçerik tipi resim değilse başarısız say
       if (head.headers['content-type'] != null && 
           !head.headers['content-type']!.contains('image')) {
         return false;
@@ -34,7 +46,7 @@ class PosterFallbackService {
       
       if (head.statusCode == 403 || head.statusCode == 404 || head.statusCode == 405) {
         final get = await http
-            .get(uri, headers: {'Range': 'bytes=0-10'}) 
+            .get(uri, headers: headers) 
             .timeout(const Duration(seconds: 4));
             
         if (get.headers['content-type'] != null && 
@@ -60,16 +72,21 @@ class PosterFallbackService {
     bool ignoreExisting = false,
   }) async {
     
+    // --- 3. EKLENEN KISIM: CACHE KONTROLÜ ---
+    final cacheKey = tmdbId?.toString() ?? title?.toLowerCase().trim() ?? existing ?? '';
+    if (cacheKey.isNotEmpty && _resolvedCache.containsKey(cacheKey)) {
+      return _resolvedCache[cacheKey]; // İnternete hiç gitmeden saniyesinde hafızadan döndür
+    }
+
     // 1. Mevcut URL kontrolü
     if (!ignoreExisting && _looksValid(existing)) {
       final works = await _isReachable(existing!.trim());
       if (works) {
+        if (cacheKey.isNotEmpty) _resolvedCache[cacheKey] = existing;
         return existing; 
       }
     }
 
-    // Konsola bilgi bas (Debug için)
-  
     String? found;
 
     // 2. TMDB ID ile çağır
@@ -92,6 +109,11 @@ class PosterFallbackService {
       _updateCatalog(found, tmdbId, imdbId, title, year);
     }
 
+    // BULUNAN TEMİZ LİNKİ HAFIZAYA KAYDET
+    if (found != null && cacheKey.isNotEmpty) {
+       _resolvedCache[cacheKey] = found;
+    }
+
     return found;
   }
 
@@ -101,10 +123,8 @@ class PosterFallbackService {
         QuerySnapshot? q;
 
         if (tmdbId != null && tmdbId > 0) {
-          // ID ile bul ve güncelle
           q = await db.collection('catalog_films').where('tmdbId', isEqualTo: tmdbId).limit(1).get();
         } else if (title != null) {
-          // İsim ve yıla göre bul
            q = await db.collection('catalog_films')
               .where('titleLc', isEqualTo: title.toLowerCase())
               .where('year', isEqualTo: year).limit(1).get();
@@ -112,11 +132,8 @@ class PosterFallbackService {
 
         if (q != null && q.docs.isNotEmpty) {
           await q.docs.first.reference.set({'posterUrl': newUrl}, SetOptions(merge: true));
-        
         }
-      } catch (e) {
-      
-      }
+      } catch (e) {}
   }
 
   // --- CLOUD FUNCTIONS ---
@@ -127,15 +144,12 @@ class PosterFallbackService {
         'endpoint': '/3/movie/$tmdbId',
         'params': {'language': 'tr-TR'}
       });
-      
-      // DÜZELTME: Güvenli tip dönüşümü
       final map = Map<String, dynamic>.from(result.data as Map);
       final p = (map['poster_path'] ?? '') as String;
       
       if (p.isEmpty) return null;
       return 'https://image.tmdb.org/t/p/w500$p';
     } catch (e) {
-      
       return null;
     }
   }
@@ -149,8 +163,6 @@ class PosterFallbackService {
           'language': 'en-US',
         }
       });
-      
-      // DÜZELTME: Güvenli tip dönüşümü
       final map = Map<String, dynamic>.from(result.data as Map);
       final List results = (map['movie_results'] ?? []) as List;
       if (results.isEmpty) return null;
@@ -161,7 +173,6 @@ class PosterFallbackService {
       
       return 'https://image.tmdb.org/t/p/w500$p';
     } catch (e) {
-    
       return null;
     }
   }
@@ -183,9 +194,7 @@ class PosterFallbackService {
         'params': params
       });
       
-      // DÜZELTME: Güvenli tip dönüşümü (Map<Object?, Object?> -> Map<String, dynamic>)
       final map = Map<String, dynamic>.from(result.data as Map);
-      
       final List results = (map['results'] ?? []) as List;
       if (results.isEmpty) return null;
       
@@ -195,7 +204,6 @@ class PosterFallbackService {
       
       return 'https://image.tmdb.org/t/p/w500$p';
     } catch (e) {
-  
       return null;
     }
   }
