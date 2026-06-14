@@ -447,14 +447,18 @@ class CustomListDetailScreen extends StatelessWidget {
       // 3. Kullanıcının halihazırda var olan Sevdiklerini/Favorilerini tek seferde çek
       Set<String> myWatchedIds = {};
       final userDoc = await _fs.collection('users').doc(uid).get();
-      
       if (userDoc.exists) {
         final data = userDoc.data() ?? {};
-        final fiveStar = List<dynamic>.from(data['fiveStarKeys'] ?? []);
-        final disliked = List<dynamic>.from(data['dislikedKeys'] ?? []);
-        final favorites = List<dynamic>.from(data['favoritesKeys'] ?? []);
         
-        for (var id in [...fiveStar, ...disliked, ...favorites]) {
+        // Buraya sistemdeki tüm 'izlenmiş sayılan' koleksiyonları ekliyoruz
+        final keysList = [
+          ...List<dynamic>.from(data['favoritesKeys'] ?? []),
+          ...List<dynamic>.from(data['fiveStarKeys'] ?? []),
+          ...List<dynamic>.from(data['dislikedKeys'] ?? []), // <-- Sevmediklerim eklendi
+          ...List<dynamic>.from(data['watchedKeys'] ?? []),   // <-- Sadece izledim butonu eklendi
+        ];
+        
+        for (var id in keysList) {
           if (id != null) myWatchedIds.add(id.toString().trim().toLowerCase());
         }
       }

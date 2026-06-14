@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/shelf_target.dart';
 import 'watched_movies_service.dart';
+import 'package:fluttergirdi/services/catalog_service.dart';
 /// Stores a user's film taste signals that we compute from Letterboxd and in‑app actions.
 /// Keep this model intentionally permissive so we can evolve it without schema migrations.
 class TasteProfile {
@@ -773,10 +774,105 @@ class UserProfileService {
 
     // Tüm işlemleri tek seferde (1 Write) veritabanına yaz
     await batch.commit();
+    
     if (target != ShelfTarget.watchlist) {
       WatchedMoviesService.instance.logMovieAsWatched(key);
     }
     return previousListName; 
+  }
+  // =======================================================================
+  // OPTIMISTIC UI (HIZLI ARAYÜZ) İÇİN YAZILMIŞ VERİTABANI İŞLEMLERİ
+  // =======================================================================
+
+  Future<void> fastToggleWatched({
+    required String uid,
+    required Map<String, dynamic> movieData,
+    required int tmdbId,
+    required String? catalogDocId,
+    required bool isCurrentlyAdded,
+  }) async {
+    final fs = FirebaseFirestore.instance;
+    final String primaryKey = catalogDocId ?? tmdbId.toString();
+    final userRef = fs.collection('users').doc(uid);
+
+    if (isCurrentlyAdded) {
+      userRef.set({
+        'watchedKeys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbId.toString()])
+      }, SetOptions(merge: true));
+    } else {
+      userRef.set({
+        'watchedKeys': FieldValue.arrayUnion([primaryKey, tmdbId.toString()]),
+        'watchlistKeys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbId.toString()])
+      }, SetOptions(merge: true));
+
+      // Kataloğa ekle ve ardından watchlist klasörünü temizle (Arka planda çalışır)
+      CatalogService().upsertFromTmdb(movieData).then((_) {
+        userRef.collection('shelves').doc('watchlist').collection('items').doc(primaryKey).delete().catchError((_) {});
+      });
+    }
+  }
+
+  Future<void> fastToggleStandardList({
+    required String uid,
+    required Map<String, dynamic> movieData,
+    required int tmdbId,
+    required String? catalogDocId,
+    required ShelfTarget target,
+    required bool isCurrentlyAdded,
+    String? posterUrl,
+  }) async {
+    final fs = FirebaseFirestore.instance;
+    final String primaryKey = catalogDocId ?? tmdbId.toString();
+    final userRef = fs.collection('users').doc(uid);
+
+    String shelfKey = '';
+    switch (target) {
+      case ShelfTarget.fiveStar: shelfKey = 'fiveStar'; break;
+      case ShelfTarget.disliked: shelfKey = 'disliked'; break;
+      case ShelfTarget.favorites: shelfKey = 'favorites'; break;
+      case ShelfTarget.watchlist: shelfKey = 'watchlist'; break;
+    }
+
+    if (isCurrentlyAdded) {
+      userRef.set({
+        '${shelfKey}Keys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbId.toString()])
+      }, SetOptions(merge: true));
+
+      if (shelfKey == 'fiveStar') {
+        fs.collection('userTasteProfiles').doc(uid).set({'fiveStars': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbId.toString()])}, SetOptions(merge: true));
+      } else if (shelfKey == 'disliked') {
+        fs.collection('userTasteProfiles').doc(uid).set({'lowRatings': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbId.toString()])}, SetOptions(merge: true));
+      }
+
+      userRef.collection('shelves').doc(shelfKey).collection('items').doc(primaryKey).delete().catchError((_) {});
+      userRef.collection('shelves').doc(shelfKey).collection('items').doc(tmdbId.toString()).delete().catchError((_) {});
+    } else {
+      Map<String, dynamic> updates = {
+        '${shelfKey}Keys': FieldValue.arrayUnion([primaryKey])
+      };
+
+      if (target != ShelfTarget.watchlist) {
+        updates['watchedKeys'] = FieldValue.arrayUnion([primaryKey]);
+        updates['watchlistKeys'] = FieldValue.arrayRemove([primaryKey, tmdbId, tmdbId.toString()]);
+      }
+
+      userRef.set(updates, SetOptions(merge: true));
+
+      // Arka planda kataloğa ekle ve orijinal taşıma fonksiyonunu çalıştır
+      CatalogService().upsertFromTmdb(movieData).then((fetchedKey) {
+        final finalKey = fetchedKey ?? primaryKey;
+        moveMovieToTarget(
+          uid: uid,
+          movieId: finalKey,
+          target: target,
+          posterUrl: posterUrl ?? (movieData['poster_path'] != null ? 'https://image.tmdb.org/t/p/w500${movieData['poster_path']}' : null),
+        );
+
+        if (target != ShelfTarget.watchlist) {
+           userRef.collection('shelves').doc('watchlist').collection('items').doc(finalKey).delete().catchError((_) {});
+        }
+      });
+    }
   }
 
 }

@@ -7,7 +7,6 @@ import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
 import 'package:fluttergirdi/services/feed_service.dart';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/models/shelf_target.dart';
@@ -42,10 +41,40 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   
   String? _catalogDocId; 
 
+  Stream<DocumentSnapshot>? _userProfileStream;
+  Stream<List<CustomList>>? _customListsStream;
+
+  // --- YENİ EKLENEN: ARAYÜZÜ IŞIK HIZINA ÇIKARAN ANLIK HAFIZA (CACHE) ---
+  Map<String, dynamic>? _userProfileCache;
+  List<CustomList>? _customListsCache;
+
   @override
   void initState() {
     super.initState();
     _fetchDetails();
+    
+    // Film sayfası açılır açılmaz verileri dinlemeye başlıyoruz ki 
+    // menüye tıklandığında bekleme olmasın
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _userProfileStream = FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
+      _userProfileStream!.listen((snap) {
+        if (mounted) {
+          setState(() {
+            _userProfileCache = snap.data() as Map<String, dynamic>?;
+          });
+        }
+      });
+
+      _customListsStream = CustomListService.instance.getUserLists(uid);
+      _customListsStream!.listen((lists) {
+        if (mounted) {
+          setState(() {
+            _customListsCache = lists;
+          });
+        }
+      });
+    }
   }
 
   String _timeAgo(DateTime dt) {
@@ -180,123 +209,104 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     return await CatalogService().upsertFromTmdb(_movieData!); 
   }
 
-  // --- HIZLANDIRILMIŞ VE ANINDA KAPANAN EKLE/ÇIKAR FONKSİYONU ---
+  Future<void> _toggleWatched(bool isCurrentlyAdded) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || _movieData == null) return;
+
+    final title = _movieData!['title'];
+    Navigator.pop(context); // Menüyü kapat
+
+    // SADECE BİLDİRİMİ GÖSTER
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isCurrentlyAdded ? "'$title', izlediklerimden çıkarıldı." : "'$title', izledim olarak işaretlendi."), 
+      backgroundColor: isCurrentlyAdded ? Colors.redAccent : Colors.teal, 
+      behavior: SnackBarBehavior.floating
+    ));
+
+    // VERİTABANI İŞİNİ SERVİSE DEVRET (Arayüz burada işini bitirir)
+    UserProfileService.instance.fastToggleWatched(
+      uid: user.uid,
+      movieData: _movieData!,
+      tmdbId: widget.tmdbId,
+      catalogDocId: _catalogDocId,
+      isCurrentlyAdded: isCurrentlyAdded,
+    );
+  }
+
   Future<void> _toggleStandardList(ShelfTarget target, bool isCurrentlyAdded) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _movieData == null) return;
 
-    // KULLANICIYI BEKLETMEMEK İÇİN: İşlemler başlamadan menüyü ANINDA kapatıyoruz.
-    final messenger = ScaffoldMessenger.of(context);
-    Navigator.pop(context);
+    final title = _movieData!['title'];
+    Navigator.pop(context); // Menüyü kapat
 
     String targetName = '';
-    String shelfKey = '';
     switch (target) {
-      case ShelfTarget.fiveStar:
-        targetName = 'Sevdiklerim';
-        shelfKey = 'fiveStar';
-        break;
-      case ShelfTarget.disliked:
-        targetName = 'Sevmedim';
-        shelfKey = 'disliked';
-        break;
-      case ShelfTarget.favorites:
-        targetName = 'Favoriler';
-        shelfKey = 'favorites';
-        break;
-      case ShelfTarget.watchlist:
-        targetName = 'İzlenecekler';
-        shelfKey = 'watchlist';
-        break;
+      case ShelfTarget.fiveStar: targetName = 'Sevdiklerim'; break;
+      case ShelfTarget.disliked: targetName = 'Sevmedim'; break;
+      case ShelfTarget.favorites: targetName = 'Favoriler'; break;
+      case ShelfTarget.watchlist: targetName = 'İzlenecekler'; break;
     }
 
-    try {
-      if (isCurrentlyAdded) {
-        // --- LİSTEDEN ÇIKARMA ---
-        final fs = FirebaseFirestore.instance;
-        
-        // Zaten sileceğimiz için TMDB'ye gidip filmi kontrol etmeye (vakit kaybetmeye) gerek yok.
-        final String primaryKey = _catalogDocId ?? widget.tmdbId.toString();
-        
-        await fs.collection('users').doc(user.uid).collection('shelves').doc(shelfKey).collection('items').doc(primaryKey).delete();
-        await fs.collection('users').doc(user.uid).collection('shelves').doc(shelfKey).collection('items').doc(widget.tmdbId.toString()).delete();
+    // SADECE BİLDİRİMİ GÖSTER
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isCurrentlyAdded ? "'$title', $targetName listesinden çıkartıldı." : "'$title', $targetName listesine eklendi."), 
+      backgroundColor: isCurrentlyAdded ? Colors.redAccent : Colors.green.shade700, 
+      behavior: SnackBarBehavior.floating
+    ));
 
-        await fs.collection('users').doc(user.uid).set({
-          '${shelfKey}Keys': FieldValue.arrayRemove([primaryKey, widget.tmdbId, widget.tmdbId.toString()])
-        }, SetOptions(merge: true));
-
-        if (shelfKey == 'fiveStar') {
-          await fs.collection('userTasteProfiles').doc(user.uid).set({
-            'fiveStars': FieldValue.arrayRemove([primaryKey, widget.tmdbId, widget.tmdbId.toString()])
-          }, SetOptions(merge: true));
-        } else if (shelfKey == 'disliked') {
-          await fs.collection('userTasteProfiles').doc(user.uid).set({
-            'lowRatings': FieldValue.arrayRemove([primaryKey, widget.tmdbId, widget.tmdbId.toString()])
-          }, SetOptions(merge: true));
-        }
-
-        // Arka plandaki işlem bitince Snackbar göster
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text("'${_movieData!['title']}', $targetName listesinden çıkartıldı."),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        
-      } else {
-        // --- LİSTEYE EKLEME ---
-        // Sadece eklerken kataloğa kaydettiriyoruz
-        final String? primaryKey = await _registerMovieToCatalog();
-        if (primaryKey == null) return;
-
-        final previousList = await UserProfileService.instance.moveMovieToTarget(
-          uid: user.uid,
-          movieId: primaryKey,
-          target: target,
-          posterUrl: widget.posterUrl ??
-              (_movieData!['poster_path'] != null
-                  ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}'
-                  : null),
-        );
-
-        String message = previousList != null
-            ? "'${_movieData!['title']}', $previousList listesinden çıkarılıp $targetName listesine eklendi."
-            : "'${_movieData!['title']}', $targetName listesine eklendi.";
-
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.green.shade700,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      messenger.showSnackBar(const SnackBar(content: Text('Bir hata oluştu.')));
-    }
+    // VERİTABANI İŞİNİ SERVİSE DEVRET
+    UserProfileService.instance.fastToggleStandardList(
+      uid: user.uid,
+      movieData: _movieData!,
+      tmdbId: widget.tmdbId,
+      catalogDocId: _catalogDocId,
+      target: target,
+      isCurrentlyAdded: isCurrentlyAdded,
+      posterUrl: widget.posterUrl,
+    );
   }
+
+  
 
   Future<void> _addToCustomList(String listId, String listTitle) async {
     if (_movieData == null) return;
-
-    // ANINDA KAPATMA
     final messenger = ScaffoldMessenger.of(context);
-    Navigator.pop(context); 
+
+    // --- YENİ EKLENEN: ÇİFT EKLEME KORUMASI ---
+    final query = await FirebaseFirestore.instance
+        .collection('custom_lists')
+        .doc(listId)
+        .collection('items')
+        .where('id', isEqualTo: widget.tmdbId)
+        .get();
+
+    if (query.docs.isNotEmpty) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Bu film zaten "$listTitle" listesinde ekli!'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context); // Menüyü kapat
+      return;
+    }
+
+    Navigator.pop(context); // Sorun yoksa menüyü kapat
 
     final movieMap = {
       'id': widget.tmdbId,
       'title': _movieData!['title'],
-      'poster': _movieData!['poster_path'] != null
-          ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}'
-          : null,
+      'poster': _movieData!['poster_path'] != null ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}' : null,
     };
 
-    await CustomListService.instance.addMovieToList(listId, movieMap);
+    CustomListService.instance.addMovieToList(listId, movieMap); 
 
     messenger.showSnackBar(
       SnackBar(
         content: Text('${_movieData!['title']}, "$listTitle" listesine eklendi.'),
+        backgroundColor: Colors.green.shade700,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -308,9 +318,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       isScrollControlled: true,
       builder: (context) {
         final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -328,43 +336,33 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
               children: [
                 Center(
                   child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'Listelere Ekle',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+                const Text('Listelere Ekle', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
-
-                const Text(
-                  'Profil Listeleri',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                const Text('Profil Listeleri', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 
                 StreamBuilder<DocumentSnapshot>(
-                  stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+                  stream: _userProfileStream,
                   builder: (context, snapshot) {
-                    
-                    // EKRANIN KİLİTLENMEMESİ İÇİN: Yükleme ekranı kaldırıldı! 
-                    // Veri gelene kadar boş kabul edip butonları direkt çizdiriyoruz.
-                    final data = snapshot.data?.data() as Map<String, dynamic>? ?? {};
+                    // HAFIZADAN ANINDA VERİ ÇEK (Ekranda bekleme yaşanmaz)
+                    final data = snapshot.data?.data() as Map<String, dynamic>? ?? _userProfileCache ?? {};
 
+                    // Bu fonksiyon _showAddSheet -> StreamBuilder içinde bulunuyor
                     bool checkIsAdded(String listKey) {
-                      final dbKeys = List<dynamic>.from(data[listKey] ?? []).map((e) => e.toString()).toList();
-                      if (dbKeys.contains(widget.tmdbId.toString())) return true;
-                      if (_catalogDocId != null && dbKeys.contains(_catalogDocId)) return true;
+                      // ID'leri küçük harfe ve string'e çevirerek tip uyuşmazlığını engelliyoruz
+                      final dbKeys = List<dynamic>.from(data[listKey] ?? [])
+                          .map((e) => e.toString().trim().toLowerCase()).toList();
+                      
+                      final currentIdStr = widget.tmdbId.toString().trim().toLowerCase();
+                      
+                      if (dbKeys.contains(currentIdStr)) return true;
+                      if (_catalogDocId != null && dbKeys.contains(_catalogDocId!.trim().toLowerCase())) return true;
+                      
                       return false;
                     }
 
@@ -372,57 +370,34 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                     final inFavorites = checkIsAdded('favoritesKeys');
                     final inFiveStar = checkIsAdded('fiveStarKeys');
                     final inDisliked = checkIsAdded('dislikedKeys');
+                    final inWatched = checkIsAdded('watchedKeys'); 
 
                     return GridView.count(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      crossAxisCount: 4,
+                      crossAxisCount: 3, 
                       mainAxisSpacing: 10,
                       crossAxisSpacing: 10,
                       children: [
-                        _buildQuickAction(
-                          Icons.bookmark_add_rounded, 'İzlenecekler', Colors.blue, inWatchlist,
-                          () => _toggleStandardList(ShelfTarget.watchlist, inWatchlist),
-                        ),
-                        _buildQuickAction(
-                          Icons.favorite_rounded, 'Favoriler', Colors.pink, inFavorites,
-                          () => _toggleStandardList(ShelfTarget.favorites, inFavorites),
-                        ),
-                        _buildQuickAction(
-                          Icons.star_rounded, 'Sevdiklerim', Colors.amber, inFiveStar,
-                          () => _toggleStandardList(ShelfTarget.fiveStar, inFiveStar),
-                        ),
-                        _buildQuickAction(
-                          Icons.thumb_down_rounded, 'Sevmedim', Colors.redAccent, inDisliked,
-                          () => _toggleStandardList(ShelfTarget.disliked, inDisliked),
-                        ),
+                        _buildQuickAction(Icons.visibility_rounded, 'İzledim', Colors.teal, inWatched, () => _toggleWatched(inWatched)),
+                        _buildQuickAction(Icons.bookmark_add_rounded, 'İzlenecekler', Colors.blue, inWatchlist, () => _toggleStandardList(ShelfTarget.watchlist, inWatchlist)),
+                        _buildQuickAction(Icons.favorite_rounded, 'Favoriler', Colors.pink, inFavorites, () => _toggleStandardList(ShelfTarget.favorites, inFavorites)),
+                        _buildQuickAction(Icons.star_rounded, 'Sevdiklerim', Colors.amber, inFiveStar, () => _toggleStandardList(ShelfTarget.fiveStar, inFiveStar)),
+                        _buildQuickAction(Icons.thumb_down_rounded, 'Sevmedim', Colors.redAccent, inDisliked, () => _toggleStandardList(ShelfTarget.disliked, inDisliked)),
                       ],
                     );
                   },
                 ),
 
                 const Divider(height: 40),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Özel Listelerim',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
+                const Text('Özel Listelerim', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold)),
 
                 StreamBuilder<List<CustomList>>(
-                  stream: CustomListService.instance.getUserLists(uid),
+                  stream: _customListsStream,
+                  initialData: _customListsCache, // Liste zaten hafızadaysa yükleme ekranı çıkarma!
                   builder: (context, snapshot) {
-                    final lists = snapshot.data ?? [];
+                    final lists = snapshot.data ?? _customListsCache ?? [];
                     
-                    // Özel listeler için de kilitlenmeyi önledik
                     if (snapshot.connectionState == ConnectionState.waiting && lists.isEmpty) {
                       return const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
                     }
@@ -430,10 +405,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                     if (lists.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20),
-                        child: Text(
-                          'Henüz özel bir listen yok.',
-                          style: TextStyle(color: Colors.grey),
-                        ),
+                        child: Text('Henüz özel bir listen yok.', style: TextStyle(color: Colors.grey)),
                       );
                     }
 
@@ -446,33 +418,16 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: Container(
-                            width: 40,
-                            height: 40,
+                            width: 40, height: 40,
                             decoration: BoxDecoration(
                               color: Colors.grey.shade800,
                               borderRadius: BorderRadius.circular(8),
-                              image: list.coverImageUrl != null
-                                  ? DecorationImage(
-                                      image: NetworkImage(list.coverImageUrl!),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : null,
+                              image: list.coverImageUrl != null ? DecorationImage(image: NetworkImage(list.coverImageUrl!), fit: BoxFit.cover) : null,
                             ),
-                            child: list.coverImageUrl == null
-                                ? const Icon(Icons.list, color: Colors.white54)
-                                : null,
+                            child: list.coverImageUrl == null ? const Icon(Icons.list, color: Colors.white54) : null,
                           ),
-                          title: Text(
-                            list.title,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text(
-                            '${list.movieCount} film',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                            ),
-                          ),
+                          title: Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${list.movieCount} film', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                           trailing: const Icon(Icons.add_circle_outline),
                           onTap: () => _addToCustomList(list.id, list.title),
                         );
@@ -530,7 +485,6 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     );
   }
 
-  // --- GETTERS ---
   String get _director {
     final d = _crew.firstWhere(
       (m) => m['job'] == 'Director',
