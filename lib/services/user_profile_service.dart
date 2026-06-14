@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/shelf_target.dart';
-
+import 'watched_movies_service.dart';
 /// Stores a user's film taste signals that we compute from Letterboxd and in‑app actions.
 /// Keep this model intentionally permissive so we can evolve it without schema migrations.
 class TasteProfile {
@@ -380,6 +380,7 @@ class UserProfileService {
     batch.set(userRef, mirrorPayload, SetOptions(merge: true));
 
     await batch.commit();
+
   }
 
   /// Patch specific fields without rewriting the whole doc.
@@ -772,7 +773,9 @@ class UserProfileService {
 
     // Tüm işlemleri tek seferde (1 Write) veritabanına yaz
     await batch.commit();
-
+    if (target != ShelfTarget.watchlist) {
+      WatchedMoviesService.instance.logMovieAsWatched(key);
+    }
     return previousListName; 
   }
 

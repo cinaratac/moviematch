@@ -5,7 +5,7 @@ import 'package:fluttergirdi/services/push_token_service.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
-
+import 'package:fluttergirdi/services/watched_movies_service.dart';
 import 'package:fluttergirdi/theme.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -129,6 +129,7 @@ class _MyAppState extends State<MyApp> {
                     NotificationService.I.start();
                     NotificationService.I.requestPermissions();
                     PushTokenService.I.start();
+                    WatchedMoviesService.instance.initWatchedHistory();
                   });
                 }
 

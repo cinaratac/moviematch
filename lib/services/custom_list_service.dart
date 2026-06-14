@@ -121,4 +121,54 @@ class CustomListService {
       return [];
     }
   }
+  // --- KAYDEDİLEN LİSTELER (BOOKMARK) FONKSİYONLARI ---
+
+  // 1. Listeyi Kaydet
+  Future<void> saveList(String listId, Map<String, dynamic> listData) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('saved_lists')
+        .doc(listId)
+        .set({
+          'savedAt': FieldValue.serverTimestamp(),
+          'listId': listId,
+          'title': listData['title'] ?? 'İsimsiz Liste',
+          'description': listData['description'] ?? '',
+          'coverImageUrl': listData['coverImageUrl'],
+          'ownerName': listData['ownerName'] ?? '',
+          'ownerId': listData['ownerId'] ?? '',
+          'movieCount': listData['movieCount'] ?? 0,
+        }, SetOptions(merge: true));
+  }
+
+  // 2. Listeyi Kaydedilenlerden Çıkar
+  Future<void> unsaveList(String listId) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('saved_lists')
+        .doc(listId)
+        .delete();
+  }
+
+  // 3. Listenin o anki kullanıcı tarafından kaydedilip kaydedilmediğini dinle (İkon rengi için)
+  Stream<bool> isListSaved(String listId) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(false);
+    
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('saved_lists')
+        .doc(listId)
+        .snapshots()
+        .map((snap) => snap.exists);
+  }
 }

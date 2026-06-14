@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
@@ -19,6 +20,11 @@ class CustomListDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // --- YENİ EKLENEN KESİN KONTROL ---
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final bool isActuallyMyList = list.ownerId == currentUid;
+    // ---------------------------------
+
     return Scaffold(
       body: CustomScrollView(
         slivers: [
@@ -27,7 +33,8 @@ class CustomListDetailScreen extends StatelessWidget {
             expandedHeight: 220,
             pinned: true,
             flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 16, bottom: 12, right: 16), // Hizalama ayarı
+              // ... (Buralar aynı kalıyor, titlePadding, title, background vb.)
+              titlePadding: const EdgeInsets.only(left: 16, bottom: 12, right: 16),
               title: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -44,15 +51,15 @@ class CustomListDetailScreen extends StatelessWidget {
                   ),
                   if (list.description.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(top: 2.0), // Başlık ile açıklama arası boşluk
+                      padding: const EdgeInsets.only(top: 2.0),
                       child: Text(
                         list.description,
-                        maxLines: 2, // Çok uzunsa 2 satırla sınırla
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 10, // Daha küçük font
+                          fontSize: 10,
                           fontWeight: FontWeight.normal,
-                          color: Colors.white, // Hafif silik beyaz
+                          color: Colors.white,
                           shadows: [Shadow(color: Colors.black, blurRadius: 8)]
                         ),
                       ),
@@ -82,21 +89,65 @@ class CustomListDetailScreen extends StatelessWidget {
                     ),
             ),
             actions: [
-              if (isMyList)
+              // isMyList YERİNE ARTIK KESİN OLAN isActuallyMyList KULLANIYORUZ
+              if (isActuallyMyList)
                 IconButton(
                   icon: const Icon(Icons.add_circle_outline),
                   tooltip: 'Film Ekle',
                   onPressed: () => _navigateToAddMovie(context),
                 ),
-              if (isMyList)
+              if (isActuallyMyList)
                 IconButton(
                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                    onPressed: () => _confirmDelete(context),
                 ),
+              
+              // --- KAYDET BUTONU SADECE LİSTE BAŞKASININSA ÇIKAR ---
+              if (!isActuallyMyList)
+                StreamBuilder<bool>(
+                  stream: CustomListService.instance.isListSaved(list.id),
+                  builder: (context, snapshot) {
+                    final isSaved = snapshot.data ?? false;
+                    
+                    return IconButton(
+                      icon: Icon(
+                        isSaved ? Icons.bookmark : Icons.bookmark_border,
+                        color: isSaved ? Colors.greenAccent : Colors.white,
+                      ),
+                      onPressed: () async {
+                        if (isSaved) {
+                          await CustomListService.instance.unsaveList(list.id);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Liste kaydedilenlerden çıkarıldı.'))
+                            );
+                          }
+                        } else {
+                          final listData = {
+                            'title': list.title,
+                            'description': list.description,
+                            'coverImageUrl': list.coverImageUrl,
+                            'ownerName': list.ownerName,
+                            'ownerId': list.ownerId,
+                            'movieCount': list.movieCount,
+                          };
+                          await CustomListService.instance.saveList(list.id, listData);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Liste kaydedildi!'))
+                            );
+                          }
+                        }
+                      },
+                    );
+                  }
+                ),
             ],
           ),
+          
+          // ... Kodun geri kalanı tamamen aynı ...
 
-          // --- 2. Liste Bilgileri ve Hazırlayan ---
+          // --- 2. Liste Bilgileri, Hazırlayan ve İZLEME ORANI ---
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -139,7 +190,6 @@ class CustomListDetailScreen extends StatelessWidget {
                         const SizedBox(width: 6),
                         RichText(
                           text: TextSpan(
-                          
                             children: [
                               const TextSpan(
                                 text: "Hazırlayan: ", 
@@ -147,7 +197,7 @@ class CustomListDetailScreen extends StatelessWidget {
                               ),
                               TextSpan(
                                 text: list.ownerName,
-                                style: TextStyle(
+                                style: const TextStyle(
                                   color: Colors.green,
                                   fontWeight: FontWeight.bold,
                                   decoration: TextDecoration.underline,
@@ -162,7 +212,7 @@ class CustomListDetailScreen extends StatelessWidget {
                   
                   const SizedBox(height: 12),
                   
-                  // İstatistikler (Film Sayısı, Gizlilik vb.)
+                  // İstatistikler
                   Row(
                     children: [
                       Icon(Icons.movie, size: 16, color: Colors.grey.shade400),
@@ -176,6 +226,78 @@ class CustomListDetailScreen extends StatelessWidget {
                       ]
                     ],
                   ),
+
+                  const SizedBox(height: 20),
+
+                  // --- İZLEME ORANI (SENİN DEDİĞİN DOĞRUDAN YÖNTEM) ---
+                  StreamBuilder<QuerySnapshot>(
+                    stream: CustomListService.instance.getListItems(list.id),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+
+                      final docs = snapshot.data!.docs;
+
+                      return FutureBuilder<Map<String, int>>(
+                        // SADECE bu listedeki filmleri kontrol eden yepyeni fonksiyonumuz
+                        future: _calculateWatchData(docs),
+                        builder: (context, futureSnap) {
+                          if (futureSnap.connectionState == ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8.0),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: SizedBox(
+                                  height: 16, 
+                                  width: 16, 
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.greenAccent)
+                                ),
+                              ),
+                            );
+                          }
+
+                          final watchedCount = futureSnap.data?['watched'] ?? 0;
+                          final totalCount = futureSnap.data?['total'] ?? docs.length;
+                          final double percentage = totalCount > 0 ? (watchedCount / totalCount) * 100 : 0;
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    "İzleme Oranı",
+                                    style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                                  ),
+                                  Text(
+                                    "%${percentage.toStringAsFixed(0)} ($watchedCount/$totalCount)",
+                                    style: const TextStyle(
+                                      fontSize: 13, 
+                                      fontWeight: FontWeight.bold, 
+                                      color: Colors.greenAccent
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: totalCount > 0 ? percentage / 100 : 0,
+                                  backgroundColor: Colors.white24,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+                                  minHeight: 8,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  // -------------------------------------------------------------
                 ],
               ),
             ),
@@ -290,6 +412,68 @@ class CustomListDetailScreen extends StatelessWidget {
     );
   }
 
+  // SENİN MANTIĞINLA ÇALIŞAN, SADECE LİSTEYE ODAKLANAN YENİ FONKSİYON
+  Future<Map<String, int>> _calculateWatchData(List<QueryDocumentSnapshot> listDocs) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || listDocs.isEmpty) return {'watched': 0, 'total': listDocs.length};
+
+    try {
+      // 1. O anki listede bulunan filmlerin TMDB ID'lerini topla
+      List<int> tmdbIds = [];
+      for (var doc in listDocs) {
+        final data = doc.data() as Map<String, dynamic>;
+        int tmdbId = 0;
+        if (data['id'] is int) tmdbId = data['id'];
+        else if (data['id'] != null) tmdbId = int.tryParse(data['id'].toString()) ?? 0;
+        else if (data['tmdbId'] != null) tmdbId = int.tryParse(data['tmdbId'].toString()) ?? 0;
+        
+        if (tmdbId != 0) tmdbIds.add(tmdbId);
+      }
+
+      if (tmdbIds.isEmpty) return {'watched': 0, 'total': listDocs.length};
+
+      // 2. Bu TMDB ID'lerin Firebase'deki karşılıklarını (Firebase Doc ID) bul
+      Set<String> listDocIds = {};
+      final _fs = FirebaseFirestore.instance;
+      
+      for (var i = 0; i < tmdbIds.length; i += 30) {
+        final chunk = tmdbIds.sublist(i, i + 30 > tmdbIds.length ? tmdbIds.length : i + 30);
+        final qs = await _fs.collection('catalog_films').where('tmdbId', whereIn: chunk).get();
+        for (var doc in qs.docs) {
+          listDocIds.add(doc.id.trim().toLowerCase());
+        }
+      }
+
+      // 3. Kullanıcının halihazırda var olan Sevdiklerini/Favorilerini tek seferde çek
+      Set<String> myWatchedIds = {};
+      final userDoc = await _fs.collection('users').doc(uid).get();
+      
+      if (userDoc.exists) {
+        final data = userDoc.data() ?? {};
+        final fiveStar = List<dynamic>.from(data['fiveStarKeys'] ?? []);
+        final disliked = List<dynamic>.from(data['dislikedKeys'] ?? []);
+        final favorites = List<dynamic>.from(data['favoritesKeys'] ?? []);
+        
+        for (var id in [...fiveStar, ...disliked, ...favorites]) {
+          if (id != null) myWatchedIds.add(id.toString().trim().toLowerCase());
+        }
+      }
+
+      // 4. Listedeki filmlerden kaç tanesi kullanıcının profilinde var? 
+      int watchedCount = 0;
+      for (var docId in listDocIds) {
+        if (myWatchedIds.contains(docId)) {
+          watchedCount++;
+        }
+      }
+
+      return {'watched': watchedCount, 'total': listDocs.length};
+    } catch (e) {
+      return {'watched': 0, 'total': listDocs.length};
+    }
+  }
+
+  // ... (Geri kalan AddMovie ve ConfirmDelete fonksiyonları orijinal haliyle burada kalmaya devam ediyor)
   Future<void> _navigateToAddMovie(BuildContext context) async {
     final selectedMovie = await Navigator.push(
       context, 

@@ -1681,57 +1681,150 @@ class _ListsTab extends StatefulWidget {
   State<_ListsTab> createState() => _ListsTabState();
 }
 
-class _ListsTabState extends State<_ListsTab>
-    with AutomaticKeepAliveClientMixin {
+class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) return const SizedBox.shrink();
+
+    // Bu profile bakan kişi, profilin sahibi mi?
+    final isMe = widget.uid == currentUid;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return StreamBuilder<List<CustomList>>(
-      stream: CustomListService.instance.getUserLists(uid),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting)
-          return const Center(child: CircularProgressIndicator());
-        final lists = snapshot.data ?? [];
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ==========================================
+          // 1. BÖLÜM: KENDİ OLUŞTURDUĞU LİSTELER
+          // ==========================================
+          StreamBuilder<List<CustomList>>(
+            stream: CustomListService.instance.getUserLists(widget.uid),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
 
-        if (lists.isEmpty) {
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            children: [
-              _CreateListTile(onTap: () => _showCreateListDialog(context)),
-              const SizedBox(height: 20),
-              Center(
-                child: Text(
-                  "Henüz liste oluşturmadın.",
-                  style: TextStyle(
-                    color: isDark ? Colors.white70 : Colors.black54,
-                  ),
+              final lists = snapshot.data ?? [];
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // En üstte "Yeni Liste Oluştur" butonu (Sadece kendi profilinde)
+                  if (isMe)
+                    _CreateListTile(onTap: () => _showCreateListDialog(context)),
+                  
+                  // Eğer hiç listesi yoksa
+                  if (lists.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: Center(
+                        child: Text(
+                          isMe ? "Henüz liste oluşturmadın." : "Kullanıcı henüz liste oluşturmamış.",
+                          style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                        ),
+                      ),
+                    )
+                  // Listeler varsa göster
+                  else
+                    ListView.builder(
+                      shrinkWrap: true, // Listenin sayfa içinde taşmaması için kritik
+                      physics: const NeverScrollableScrollPhysics(), // Kaydırmayı ana sayfaya devreder
+                      padding: EdgeInsets.zero,
+                      itemCount: lists.length,
+                      itemBuilder: (context, index) {
+                        return _CustomListCard(list: lists[index], isMine: isMe);
+                      },
+                    ),
+                ],
+              );
+            },
+          ),
+
+          // ==========================================
+          // 2. BÖLÜM: KAYDEDİLENLER (SADECE KENDİ PROFİLİNDEYSE GÖZÜKÜR)
+          // ==========================================
+          if (isMe) ...[
+            const SizedBox(height: 24),
+            // Ufak "Kaydedilenler" Başlığı
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 12),
+              child: Text(
+                "Kaydedilenler",
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey,
+                  letterSpacing: 0.5,
                 ),
               ),
-            ],
-          );
-        }
+            ),
+            
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(widget.uid)
+                  .collection('saved_lists')
+                  .orderBy('savedAt', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.all(32.0),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
 
-        return ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          itemCount: lists.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              return _CreateListTile(
-                onTap: () => _showCreateListDialog(context),
-              );
-            }
-            final list = lists[index - 1];
-            return _CustomListCard(list: list, isMine: true);
-          },
-        );
-      },
+                final docs = snapshot.data?.docs ?? [];
+
+                if (docs.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Center(
+                      child: Text(
+                        "Henüz kaydedilmiş listen yok.",
+                        style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  shrinkWrap: true, // Listenin sayfa içinde taşmaması için kritik
+                  physics: const NeverScrollableScrollPhysics(), // Kaydırmayı ana sayfaya devreder
+                  padding: EdgeInsets.zero,
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final data = docs[index].data() as Map<String, dynamic>;
+                    
+                    final customList = CustomList(
+                      id: data['listId'],
+                      ownerId: data['ownerId'] ?? '',
+                      ownerName: data['ownerName'] ?? 'Bilinmiyor',
+                      title: data['title'] ?? 'İsimsiz',
+                      description: data['description'] ?? '',
+                      coverImageUrl: data['coverImageUrl'],
+                      isPublic: data['isPublic'] ?? true,
+                      movieCount: data['movieCount'] ?? 0,
+                      createdAt: DateTime.now(), 
+                    );
+                    
+                    return _CustomListCard(list: customList, isMine: false);
+                  },
+                );
+              },
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -2183,6 +2276,198 @@ class _UserListSheet extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+class ProfileListsView extends StatefulWidget {
+  final String profileUid; // Profiline bakılan kişinin UID'si
+  final bool isMe; // Kendi profilimiz mi?
+
+  const ProfileListsView({
+    Key? key,
+    required this.profileUid,
+    required this.isMe,
+  }) : super(key: key);
+
+  @override
+  State<ProfileListsView> createState() => _ProfileListsViewState();
+}
+
+class _ProfileListsViewState extends State<ProfileListsView> {
+  bool _showSaved = false; // false: Kendi Listelerim, true: Kaydedilenler
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // SADECE KENDİ PROFİLİMİZSE TOGGLE (GEÇİŞ) BUTONLARINI GÖSTER
+        if (widget.isMe)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            child: Container(
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _showSaved = false),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: !_showSaved ? Colors.green : Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          "Oluşturduklarım",
+                          style: TextStyle(
+                            color: !_showSaved ? Colors.white : Colors.white54,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _showSaved = true),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _showSaved ? Colors.green : Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          "Kaydedilenler",
+                          style: TextStyle(
+                            color: _showSaved ? Colors.white : Colors.white54,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // LİSTELERİN GÖSTERİLDİĞİ ALAN
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _showSaved
+                // KAYDEDİLENLER SORGUSU
+                ? FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(widget.profileUid)
+                    .collection('saved_lists')
+                    .orderBy('savedAt', descending: true)
+                    .snapshots()
+                // OLUŞTURDUKLARIM SORGUSU
+                : FirebaseFirestore.instance
+                    .collection('custom_lists')
+                    .where('ownerId', isEqualTo: widget.profileUid)
+                    .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: Colors.green));
+              }
+
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return Center(
+                  child: Text(
+                    _showSaved 
+                        ? "Henüz hiç liste kaydetmedin." 
+                        : "Henüz bir liste oluşturulmadı.",
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                );
+              }
+
+              final docs = snapshot.data!.docs;
+
+              return ListView.builder(
+                padding: const EdgeInsets.only(top: 8, bottom: 80),
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final data = docs[index].data() as Map<String, dynamic>;
+                  
+                  // Firebase'den gelen veriyi CustomList modeline çeviriyoruz
+                  // (Senin CustomList.fromMap() fonksiyonun varsa onu da kullanabilirsin)
+                  final customList = CustomList(
+                    id: _showSaved ? data['listId'] : docs[index].id,
+                    ownerId: data['ownerId'] ?? '',
+                    ownerName: data['ownerName'] ?? 'Bilinmiyor',
+                    title: data['title'] ?? 'İsimsiz',
+                    description: data['description'] ?? '',
+                    coverImageUrl: data['coverImageUrl'],
+                    isPublic: data['isPublic'] ?? true,
+                    movieCount: data['movieCount'] ?? 0,
+                    createdAt: data['createdAt']?.toDate() ?? DateTime.now(),
+                  );
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    color: Colors.white10,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(12),
+                      leading: customList.coverImageUrl != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(
+                                customList.coverImageUrl!,
+                                width: 50,
+                                height: 50,
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                color: Colors.black26,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(Icons.list, color: Colors.white54),
+                            ),
+                      title: Text(
+                        customList.title,
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Text(
+                          "${customList.movieCount} Film • Hazırlayan: ${customList.ownerName}",
+                          style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
+                        ),
+                      ),
+                      trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                      onTap: () {
+                        // Tıklandığında yazdığımız detay ekranına yönlendir!
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CustomListDetailScreen(
+                              list: customList,
+                              isMyList: customList.ownerId == FirebaseAuth.instance.currentUser?.uid,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
