@@ -8,7 +8,7 @@ import 'package:fluttergirdi/services/chat_service.dart';
 import 'dart:async';
 import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/club_card.dart';
-import 'package:fluttergirdi/screens/create_club_screen.dart'; 
+import 'package:fluttergirdi/screens/create_club_screen.dart';
 import 'package:fluttergirdi/widgets/messages_skeleton.dart';
 
 // --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
@@ -21,10 +21,11 @@ class MessagesPage extends StatefulWidget {
   State<MessagesPage> createState() => _MessagesPageState();
 }
 
-class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMixin {
+class _MessagesPageState extends State<MessagesPage>
+    with TickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
-  
+
   String _chatSearchText = '';
   String _clubSearchText = '';
 
@@ -37,7 +38,7 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
 
   void _handleTabSelection() {
     if (!mounted) return;
-    if (_tabController.indexIsChanging || 
+    if (_tabController.indexIsChanging ||
         _tabController.animation!.value == _tabController.index.toDouble()) {
       _updateSearchControllerText();
     }
@@ -45,7 +46,9 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
 
   void _updateSearchControllerText() {
     if (!mounted) return;
-    final targetText = _tabController.index == 0 ? _chatSearchText : _clubSearchText;
+    final targetText = _tabController.index == 0
+        ? _chatSearchText
+        : _clubSearchText;
     if (_searchController.text != targetText) {
       setState(() {
         _searchController.text = targetText;
@@ -68,9 +71,11 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
     if (!mounted) return;
     final rawInput = val.toLowerCase();
     if (_tabController.index == 0) {
-      if (_chatSearchText != rawInput) setState(() => _chatSearchText = rawInput);
+      if (_chatSearchText != rawInput)
+        setState(() => _chatSearchText = rawInput);
     } else {
-      if (_clubSearchText != rawInput) setState(() => _clubSearchText = rawInput);
+      if (_clubSearchText != rawInput)
+        setState(() => _clubSearchText = rawInput);
     }
   }
 
@@ -86,9 +91,9 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
-        toolbarHeight: 65, 
-        titleSpacing: 16, 
-        
+        toolbarHeight: 65,
+        titleSpacing: 16,
+
         title: Container(
           height: 40,
           padding: const EdgeInsets.all(4),
@@ -113,7 +118,10 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
             ),
             labelColor: cs.onSurface,
             unselectedLabelColor: cs.onSurfaceVariant,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            labelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
             overlayColor: WidgetStateProperty.all(Colors.transparent),
             tabs: const [
               Tab(text: 'Sohbetler'),
@@ -137,21 +145,30 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
                 onChanged: _onSearchChanged,
                 textAlignVertical: TextAlignVertical.center,
                 decoration: InputDecoration(
-                  hintText: _tabController.index == 0 ? 'Sohbetlerde ara...' : 'Kulüplerde ara...',
-                  hintStyle: TextStyle(color: cs.onSurfaceVariant.withOpacity(0.7), fontSize: 14),
-                  prefixIcon: Icon(Icons.search, size: 20, color: cs.onSurfaceVariant),
+                  hintText: _tabController.index == 0
+                      ? 'Sohbetlerde ara...'
+                      : 'Kulüplerde ara...',
+                  hintStyle: TextStyle(
+                    color: cs.onSurfaceVariant.withOpacity(0.7),
+                    fontSize: 14,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.search,
+                    size: 20,
+                    color: cs.onSurfaceVariant,
+                  ),
                   border: InputBorder.none,
                   isDense: true,
                   contentPadding: EdgeInsets.zero,
-                  suffixIcon: _searchController.text.isNotEmpty 
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          _onSearchChanged('');
-                        },
-                      ) 
-                    : null,
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            _onSearchChanged('');
+                          },
+                        )
+                      : null,
                 ),
               ),
             ),
@@ -173,15 +190,17 @@ class _MessagesPageState extends State<MessagesPage> with TickerProviderStateMix
 class _ChatsView extends StatefulWidget {
   final String uid;
   final String filterText;
-  
+
   const _ChatsView({required this.uid, required this.filterText});
 
   @override
   State<_ChatsView> createState() => _ChatsViewState();
 }
 
-class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMixin {
+class _ChatsViewState extends State<_ChatsView>
+    with AutomaticKeepAliveClientMixin {
   late Stream<QuerySnapshot<Map<String, dynamic>>> _chatsStream;
+  final Set<String> _requestedUserUids = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -196,6 +215,7 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   void didUpdateWidget(covariant _ChatsView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.uid != widget.uid) {
+      _requestedUserUids.clear();
       _initStream();
     }
   }
@@ -210,12 +230,11 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    
+
     return Scaffold(
       body: Column(
         children: [
-          if (widget.filterText.isEmpty) 
-            NewMatchHeader(currentUid: widget.uid),
+          if (widget.filterText.isEmpty) NewMatchHeader(currentUid: widget.uid),
 
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -224,32 +243,47 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                 if (s.connectionState == ConnectionState.waiting) {
                   return const MessagesSkeleton();
                 }
-                
+
                 var docs = s.data?.docs.toList() ?? [];
-                
+
                 docs.removeWhere((doc) {
-                   final data = doc.data();
-                   final parts = List.from(data['participants'] ?? []);
+                  final data = doc.data();
+                  final parts = List.from(data['participants'] ?? []);
 
-                   if (!parts.contains(widget.uid)) return true;
-                   if (data['isGroup'] == true) return true;
+                  if (!parts.contains(widget.uid)) return true;
+                  if (data['isGroup'] == true) return true;
+                  final hiddenFor = data['hiddenFor'];
+                  if (hiddenFor is Map && hiddenFor[widget.uid] == true) {
+                    return true;
+                  }
 
-                   return false;
+                  return false;
                 });
 
                 final otherUids = <String>{};
                 for (var doc in docs) {
                   final parts = List.from(doc.data()['participants'] ?? []);
-                  final other = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
+                  final other = parts.firstWhere(
+                    (id) => id != widget.uid,
+                    orElse: () => null,
+                  );
                   if (other != null) otherUids.add(other.toString());
                 }
 
                 // --- MERKEZİ CACHE KULLANIMI ---
-                final missingUids = otherUids.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
+                final missingUids = otherUids
+                    .where(
+                      (id) =>
+                          UserCacheService.instance.getFromCache(id) == null &&
+                          !_requestedUserUids.contains(id),
+                    )
+                    .toList();
                 if (missingUids.isNotEmpty) {
+                  _requestedUserUids.addAll(missingUids);
                   Future.microtask(() async {
                     await UserCacheService.instance.fetchUsers(missingUids);
-                    if (mounted) setState(() {}); // Veriler geldiğinde ekranı yenile
+                    if (mounted)
+                      setState(() {}); // Veriler geldiğinde ekranı yenile
                   });
                 }
                 // --------------------------------
@@ -258,55 +292,78 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
                   docs = docs.where((doc) {
                     final data = doc.data();
                     final parts = List.from(data['participants'] ?? []);
-                    final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
-                    
+                    final otherId = parts.firstWhere(
+                      (id) => id != widget.uid,
+                      orElse: () => null,
+                    );
+
                     if (otherId == null) return false;
 
                     // Aramayı merkezi cache üzerinden yap
-                    final cachedUser = UserCacheService.instance.getFromCache(otherId);
+                    final cachedUser = UserCacheService.instance.getFromCache(
+                      otherId,
+                    );
                     if (cachedUser != null) {
                       final name = cachedUser.displayName.toLowerCase();
                       final username = cachedUser.handle.toLowerCase();
-                      return name.contains(widget.filterText) || username.contains(widget.filterText);
+                      return name.contains(widget.filterText) ||
+                          username.contains(widget.filterText);
                     }
-                    
+
                     final titles = (data['titles'] as Map?) ?? {};
-                    final savedName = (titles[widget.uid] as String?)?.toLowerCase() ?? '';
+                    final savedName =
+                        (titles[widget.uid] as String?)?.toLowerCase() ?? '';
                     return savedName.contains(widget.filterText);
                   }).toList();
                 }
 
                 docs.sort((a, b) {
-                    final tA = (a.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
-                    final tB = (b.data()['updatedAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
-                    return tB.compareTo(tA);
+                  final tA =
+                      (a.data()['updatedAt'] as Timestamp?)?.toDate() ??
+                      DateTime(2000);
+                  final tB =
+                      (b.data()['updatedAt'] as Timestamp?)?.toDate() ??
+                      DateTime(2000);
+                  return tB.compareTo(tA);
                 });
-                
+
                 if (docs.isEmpty) {
-                  return widget.filterText.isNotEmpty 
-                    ? const Center(child: Padding(
-                        padding: EdgeInsets.all(20.0),
-                        child: Text('Eşleşen sohbet bulunamadı.', style: TextStyle(color: Colors.black)),
-                      )) 
-                    : const _EmptyMessagesInteractive();
+                  return widget.filterText.isNotEmpty
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20.0),
+                            child: Text(
+                              'Eşleşen sohbet bulunamadı.',
+                              style: TextStyle(color: Colors.black),
+                            ),
+                          ),
+                        )
+                      : const _EmptyMessagesInteractive();
                 }
 
                 return ListView.separated(
                   itemCount: docs.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
-                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
                   itemBuilder: (context, index) {
                     final doc = docs[index];
                     final parts = List.from(doc.data()['participants'] ?? []);
-                    final otherId = parts.firstWhere((id) => id != widget.uid, orElse: () => null);
-                    
-                    final cachedUser = (otherId != null) ? UserCacheService.instance.getFromCache(otherId) : null;
+                    final otherId = parts.firstWhere(
+                      (id) => id != widget.uid,
+                      orElse: () => null,
+                    );
+
+                    final cachedUser = (otherId != null)
+                        ? UserCacheService.instance.getFromCache(otherId)
+                        : null;
 
                     return ChatListTile(
                       key: ValueKey(doc.id),
                       chatDoc: doc,
                       currentUid: widget.uid,
-                      cachedUser: cachedUser, // Artık özel Map yerine CachedUser objesi gidiyor
+                      cachedUser:
+                          cachedUser, // Artık özel Map yerine CachedUser objesi gidiyor
                     );
                   },
                 );
@@ -323,60 +380,86 @@ class _ChatsViewState extends State<_ChatsView> with AutomaticKeepAliveClientMix
 class ChatListTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> chatDoc;
   final String currentUid;
-  final CachedUser? cachedUser; 
+  final CachedUser? cachedUser;
 
   const ChatListTile({
     super.key,
     required this.chatDoc,
     required this.currentUid,
-    this.cachedUser, 
+    this.cachedUser,
   });
-  
-  Widget _buildTile(BuildContext context, String otherUid, String displayName, String? photoUrl, String lastMsg, DateTime? lastMsgTime) {
+
+  Widget _buildTile(
+    BuildContext context,
+    String otherUid,
+    String displayName,
+    String? photoUrl,
+    String lastMsg,
+    DateTime? lastMsgTime,
+  ) {
     final data = chatDoc.data();
     final unreadMap = (data['unreadCounts'] as Map?) ?? {};
     final int count = (unreadMap[currentUid] as num?)?.toInt() ?? 0;
 
     return ListTile(
-        onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(chatId: chatDoc.id, otherUid: otherUid, otherTitle: displayName)));
-            ChatService.instance.markAsRead(chatDoc.id, currentUid);
-        },
-        onLongPress: () => _showDeleteDialog(context, chatDoc.id), 
-        leading: InkWell(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid))),
-            child: CircleAvatar(
-                backgroundImage: (photoUrl != null && photoUrl.isNotEmpty) ? NetworkImage(photoUrl) : null,
-                child: (photoUrl == null || photoUrl.isEmpty) ? const Icon(Icons.person) : null,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatRoomScreen(
+              chatId: chatDoc.id,
+              otherUid: otherUid,
+              otherTitle: displayName,
             ),
+          ),
+        );
+        ChatService.instance.markAsRead(chatDoc.id, currentUid);
+      },
+      onLongPress: () => _showDeleteDialog(context, chatDoc.id),
+      leading: InkWell(
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: otherUid)),
         ),
-        title: Text(
-          displayName, 
-          maxLines: 1, 
-          overflow: TextOverflow.ellipsis, 
-          style: const TextStyle(fontWeight: FontWeight.bold)
+        child: CircleAvatar(
+          backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+              ? NetworkImage(photoUrl)
+              : null,
+          child: (photoUrl == null || photoUrl.isEmpty)
+              ? const Icon(Icons.person)
+              : null,
         ),
-        subtitle: Row(
-            children: [
-                Expanded(
-                    child: Text(
-                        lastMsg.isNotEmpty ? lastMsg : 'Fotoğraf / Medya',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: lastMsg.isEmpty ? Colors.grey : null,
-                            fontStyle: lastMsg.isEmpty ? FontStyle.italic : null,
-                        ),
-                    ),
-                ),
-                if (lastMsgTime != null)
-                    Padding(
-                        padding: const EdgeInsets.only(left: 8.0),
-                        child: Text(_formatTime(lastMsgTime), style: Theme.of(context).textTheme.bodySmall),
-                    ),
-            ],
-        ),
-        trailing: count > 0 
+      ),
+      title: Text(
+        displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      subtitle: Row(
+        children: [
+          Expanded(
+            child: Text(
+              lastMsg.isNotEmpty ? lastMsg : 'Fotoğraf / Medya',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: lastMsg.isEmpty ? Colors.grey : null,
+                fontStyle: lastMsg.isEmpty ? FontStyle.italic : null,
+              ),
+            ),
+          ),
+          if (lastMsgTime != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8.0),
+              child: Text(
+                _formatTime(lastMsgTime),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+        ],
+      ),
+      trailing: count > 0
           ? Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -384,8 +467,12 @@ class ChatListTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                count.toString(), 
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)
+                count.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             )
           : null,
@@ -396,7 +483,10 @@ class ChatListTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = chatDoc.data();
     final parts = (data['participants'] as List<dynamic>?) ?? [];
-    final otherUid = parts.firstWhere((id) => id != currentUid, orElse: () => null);
+    final otherUid = parts.firstWhere(
+      (id) => id != currentUid,
+      orElse: () => null,
+    );
 
     if (otherUid == null) return const SizedBox.shrink();
 
@@ -404,68 +494,63 @@ class ChatListTile extends StatelessWidget {
     final lastMsgTime = (data['lastMessageAt'] as Timestamp?)?.toDate();
     final titles = (data['titles'] as Map?) ?? {};
     final photos = (data['photos'] as Map?) ?? {};
-    
+
     String? denormName = (titles[currentUid] as String?);
     String? denormPhoto = (photos[currentUid] as String?);
 
     String? cachedName;
     String? cachedPhoto;
     if (cachedUser != null) {
-        cachedName = cachedUser!.displayName;
-        cachedPhoto = cachedUser!.photoURL;
+      cachedName = cachedUser!.displayName;
+      cachedPhoto = cachedUser!.photoURL;
     }
 
-    String finalName = (denormName != null && denormName.isNotEmpty) ? denormName : (cachedName ?? 'Kullanıcı');
-    String? finalPhoto = (denormPhoto != null && denormPhoto.isNotEmpty) ? denormPhoto : cachedPhoto;
+    String finalName = (denormName != null && denormName.isNotEmpty)
+        ? denormName
+        : (cachedName ?? 'Kullanıcı');
+    String? finalPhoto = (denormPhoto != null && denormPhoto.isNotEmpty)
+        ? denormPhoto
+        : cachedPhoto;
 
-    if (finalName != 'Kullanıcı' || cachedUser != null) {
-        return _buildTile(context, otherUid, finalName, finalPhoto, lastMsg, lastMsgTime);
-    }
-    
-    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
-        builder: (context, userSnap) {
-            if (userSnap.hasData && !userSnap.data!.exists) {
-               return const SizedBox.shrink();
-            }
-
-            String fetchedDisplayName = 'Kullanıcı';
-            String? fetchedPhotoUrl;
-            
-            if (userSnap.hasData && userSnap.data!.exists) {
-                final userData = userSnap.data!.data()!;
-                final username = userData['username'] as String?;
-                final name = userData['displayName'] as String?;
-                fetchedPhotoUrl = userData['photoURL'] as String?;
-                if (username != null && username.isNotEmpty) fetchedDisplayName = username;
-                else if (name != null && name.isNotEmpty) fetchedDisplayName = name;
-            } else if (userSnap.connectionState == ConnectionState.waiting) {
-                 return const Center(child: Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))));
-            }
-            return _buildTile(context, otherUid, fetchedDisplayName, fetchedPhotoUrl, lastMsg, lastMsgTime);
-        },
+    return _buildTile(
+      context,
+      otherUid,
+      finalName,
+      finalPhoto,
+      lastMsg,
+      lastMsgTime,
     );
   }
-  
+
   Future<void> _showDeleteDialog(BuildContext context, String docId) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Sohbeti Sil?'),
-        content: const Text('Sohbet kalıcı olarak silinecek ve geri alınamaz. Onaylıyor musunuz?'),
+        content: const Text('Sohbet listenizden kaldırılacak.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('İptal'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true), 
-            child: const Text('Sil')
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sil'),
           ),
         ],
       ),
     );
 
     if (confirm == true) {
-      await FirebaseFirestore.instance.collection('chats').doc(docId).delete();
+      try {
+        await ChatService.instance.hideChatFor(docId, currentUid);
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Sohbet kaldırılamadı.')));
+      }
     }
   }
 }
@@ -509,20 +594,31 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
 
       if (matchQs.docs.isEmpty) return null;
 
-      final chatCheck = await fs.collection('chats').where('participants', arrayContains: uid).get();
-      final existingChatUids = <String>{};
-      for (var doc in chatCheck.docs) {
-        final parts = List.from(doc.data()['participants'] ?? []);
-        final other = parts.firstWhere((id) => id != uid, orElse: () => '');
-        if (other.isNotEmpty) existingChatUids.add(other);
-      }
-
       String? targetUid;
       for (var doc in matchQs.docs) {
         final matchUsers = List.from(doc.data()['users'] ?? []);
-        final matchedUid = matchUsers.firstWhere((id) => id != uid, orElse: () => '');
+        final matchedUid = matchUsers.firstWhere(
+          (id) => id != uid,
+          orElse: () => '',
+        );
 
-        if (matchedUid.isNotEmpty && !existingChatUids.contains(matchedUid)) {
+        if (matchedUid.isEmpty) continue;
+
+        final chatId = ChatService.instance.getChatId(uid, matchedUid);
+        var chatExists = false;
+        try {
+          final cachedChat = await fs
+              .collection('chats')
+              .doc(chatId)
+              .get(const GetOptions(source: Source.cache));
+          chatExists = cachedChat.exists;
+        } catch (_) {}
+        if (!chatExists) {
+          final serverChat = await fs.collection('chats').doc(chatId).get();
+          chatExists = serverChat.exists;
+        }
+
+        if (!chatExists) {
           targetUid = matchedUid;
           break;
         }
@@ -530,9 +626,19 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
 
       if (targetUid == null) return null;
 
+      final cachedUser = await UserCacheService.instance.getUser(targetUid);
+      if (cachedUser != null) {
+        return {
+          'uid': targetUid,
+          'username': cachedUser.handle.replaceFirst('@', ''),
+          'displayName': cachedUser.displayName,
+          'photoURL': cachedUser.photoURL,
+        };
+      }
+
       final userDoc = await fs.collection('users').doc(targetUid).get();
       if (!userDoc.exists) return null;
-      
+
       final userData = userDoc.data()!;
       return {
         'uid': targetUid,
@@ -551,26 +657,33 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
       future: _matchFuture,
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data == null) {
-          return const SizedBox.shrink(); 
+          return const SizedBox.shrink();
         }
 
         final data = snapshot.data!;
         final otherUid = data['uid'];
-        final name = (data['displayName'] ?? data['username'] ?? 'Yeni Sinefil').toString();
+        final name = (data['displayName'] ?? data['username'] ?? 'Yeni Sinefil')
+            .toString();
         final photo = data['photoURL'] as String?;
 
         return Container(
           decoration: BoxDecoration(
-             color: Colors.greenAccent.withOpacity(0.10),
-             border: Border(bottom: BorderSide(color: Colors.greenAccent.withOpacity(0.3))),
+            color: Colors.greenAccent.withOpacity(0.10),
+            border: Border(
+              bottom: BorderSide(color: Colors.greenAccent.withOpacity(0.3)),
+            ),
           ),
           child: ListTile(
             leading: Stack(
               alignment: Alignment.bottomRight,
               children: [
                 CircleAvatar(
-                  backgroundImage: (photo != null && photo.isNotEmpty) ? NetworkImage(photo) : null,
-                  child: (photo == null || photo.isEmpty) ? const Icon(Icons.person) : null,
+                  backgroundImage: (photo != null && photo.isNotEmpty)
+                      ? NetworkImage(photo)
+                      : null,
+                  child: (photo == null || photo.isEmpty)
+                      ? const Icon(Icons.person)
+                      : null,
                 ),
                 const CircleAvatar(
                   radius: 8,
@@ -578,21 +691,38 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
                   child: CircleAvatar(
                     radius: 6,
                     backgroundColor: Colors.green,
-                    child: Icon(Icons.people_alt, size: 8, color: Colors.white), 
+                    child: Icon(Icons.people_alt, size: 8, color: Colors.white),
                   ),
                 ),
               ],
             ),
-            title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-            subtitle: const Text('Artık karşılıklı takip ediyorsunuz!'), 
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
+            title: Text(
+              name,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.green,
+              ),
+            ),
+            subtitle: const Text('Artık karşılıklı takip ediyorsunuz!'),
+            trailing: const Icon(
+              Icons.arrow_forward_ios,
+              size: 16,
+              color: Colors.green,
+            ),
             onTap: () async {
-               final chatId = await ChatService.instance.getOrCreateChat(widget.currentUid, otherUid);
-               if (!context.mounted) return;
-               Navigator.push(
+              final chatId = await ChatService.instance.getOrCreateChat(
+                widget.currentUid,
+                otherUid,
+              );
+              if (!context.mounted) return;
+              Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => ChatRoomScreen(chatId: chatId, otherUid: otherUid, otherTitle: name),
+                  builder: (_) => ChatRoomScreen(
+                    chatId: chatId,
+                    otherUid: otherUid,
+                    otherTitle: name,
+                  ),
                 ),
               );
               setState(() {
@@ -611,7 +741,8 @@ String _formatTime(DateTime dt) {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
   final thatDay = DateTime(local.year, local.month, local.day);
-  if (thatDay == today) return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  if (thatDay == today)
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
   return '${local.day.toString().padLeft(2, '0')}.${local.month.toString().padLeft(2, '0')}';
 }
 
@@ -622,7 +753,7 @@ class _ForestFace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const base = Color(0xFF1B5E20); 
+    const base = Color(0xFF1B5E20);
     return SizedBox(
       width: 140,
       height: 140,
@@ -642,17 +773,32 @@ class _ForestFace extends StatelessWidget {
   }
 
   static Widget _ring(double size, Color color) {
-    return Container(width: size, height: size, decoration: BoxDecoration(shape: BoxShape.circle, color: color));
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    );
   }
 
   static Widget _eye(double offsetX, double offsetY) {
     return Container(
-      width: 28, height: 28,
-      decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+      width: 28,
+      height: 28,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         alignment: Alignment(offsetX / 10, offsetY / 10),
-        child: Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.black87, shape: BoxShape.circle)),
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: const BoxDecoration(
+            color: Colors.black87,
+            shape: BoxShape.circle,
+          ),
+        ),
       ),
     );
   }
@@ -661,12 +807,13 @@ class _ForestFace extends StatelessWidget {
 class _EmptyMessagesInteractive extends StatefulWidget {
   const _EmptyMessagesInteractive();
   @override
-  State<_EmptyMessagesInteractive> createState() => _EmptyMessagesInteractiveState();
+  State<_EmptyMessagesInteractive> createState() =>
+      _EmptyMessagesInteractiveState();
 }
 
 class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
   double _offsetX = 0;
-  double _offsetY = -10; 
+  double _offsetY = -10;
 
   void _updateOffsets(Offset p, Size size) {
     final cx = size.width / 2;
@@ -680,7 +827,10 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
     });
   }
 
-  void _resetUp() => setState(() { _offsetX = 0; _offsetY = -10; });
+  void _resetUp() => setState(() {
+    _offsetX = 0;
+    _offsetY = -10;
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -700,7 +850,14 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
               children: [
                 _ForestFace(offsetX: _offsetX, offsetY: _offsetY),
                 const SizedBox(height: 12),
-                const Text('Yalnızsın galiba', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color.fromARGB(255, 124, 131, 116))),
+                const Text(
+                  'Yalnızsın galiba',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color.fromARGB(255, 124, 131, 116),
+                  ),
+                ),
               ],
             ),
           ),
@@ -711,16 +868,17 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
 }
 
 class JoinedClubsList extends StatefulWidget {
-  final String uid; 
+  final String uid;
   final String filterText;
-  
+
   const JoinedClubsList({super.key, required this.uid, this.filterText = ''});
 
   @override
   State<JoinedClubsList> createState() => _JoinedClubsListState();
 }
 
-class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAliveClientMixin {
+class _JoinedClubsListState extends State<JoinedClubsList>
+    with AutomaticKeepAliveClientMixin {
   late Stream<QuerySnapshot> _clubsStream;
 
   @override
@@ -756,36 +914,61 @@ class _JoinedClubsListState extends State<JoinedClubsList> with AutomaticKeepAli
         }
 
         var docs = snapshot.data?.docs ?? [];
-        
+
         if (widget.filterText.isNotEmpty) {
           docs = docs.where((d) {
-             final data = d.data() as Map<String, dynamic>;
-             final name = (data['name'] ?? '').toString().toLowerCase();
-             return name.contains(widget.filterText);
+            final data = d.data() as Map<String, dynamic>;
+            final name = (data['name'] ?? '').toString().toLowerCase();
+            return name.contains(widget.filterText);
           }).toList();
         }
 
         if (docs.isEmpty) {
           if (widget.filterText.isNotEmpty) {
-             return const Center(child: Text("Eşleşen kulüp bulunamadı.", style: TextStyle(color: Colors.grey)));
+            return const Center(
+              child: Text(
+                "Eşleşen kulüp bulunamadı.",
+                style: TextStyle(color: Colors.grey),
+              ),
+            );
           }
-          
+
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.diversity_3_outlined, size: 64, color: Colors.grey.withOpacity(0.3)),
+                Icon(
+                  Icons.diversity_3_outlined,
+                  size: 64,
+                  color: Colors.grey.withOpacity(0.3),
+                ),
                 const SizedBox(height: 16),
-                const Text("Henüz bir kulübe üye değilsin.", style: TextStyle(color: Colors.grey)),
+                const Text(
+                  "Henüz bir kulübe üye değilsin.",
+                  style: TextStyle(color: Colors.grey),
+                ),
                 const SizedBox(height: 24),
                 FilledButton.tonal(
                   onPressed: () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateClubScreen()));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CreateClubScreen(),
+                      ),
+                    );
                   },
                   child: const Text("Yeni Bir Kulüp Kur"),
                 ),
-                 const SizedBox(height: 5),
-                 FilledButton.tonal(onPressed: () {Navigator.push(context,  MaterialPageRoute(builder: (_) => const ClubsScreen()));}, child: const Text("Kulüpleri Keşfet"))
+                const SizedBox(height: 5),
+                FilledButton.tonal(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ClubsScreen()),
+                    );
+                  },
+                  child: const Text("Kulüpleri Keşfet"),
+                ),
               ],
             ),
           );

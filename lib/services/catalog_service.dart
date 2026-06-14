@@ -3,6 +3,8 @@ import 'dart:developer';
 
 class CatalogService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  static final Map<String, Map<String, dynamic>> _filmCache = {};
+  static final Set<String> _missingFilmKeys = {};
 
   static String canonicalKeyFromTmdb(int tmdbId) => 'tmdb:$tmdbId';
 
@@ -126,9 +128,10 @@ class CatalogService {
           .collection('catalog_films')
           .doc(primaryId)
           .set(data, SetOptions(merge: true));
-          return primaryId;
+      return primaryId;
     } catch (e, st) {
       log('Error in upsertFromTmdb: $e', stackTrace: st);
+      return null;
     }
   }
 
@@ -195,47 +198,81 @@ class CatalogService {
     }
   }
 
- 
-
   Future<List<Map<String, dynamic>>> getFilmsByKeys(List<String> keys) async {
-    final List<Map<String, dynamic>> results = [];
-    try {
-      if (keys.isEmpty) return results;
-      
-      // Firestore 'whereIn' limiti 10'dur.
-      final batchSize = 10;
-      
-      // Tüm sorguları (Future) bu listede toplayacağız
-      final List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
+    final orderedKeys = keys
+        .map((key) => key.trim())
+        .where((key) => key.isNotEmpty)
+        .toList();
+    if (orderedKeys.isEmpty) return [];
 
-      for (var i = 0; i < keys.length; i += batchSize) {
-        final chunk = keys.sublist(
-          i,
-          i + batchSize > keys.length ? keys.length : i + batchSize,
-        );
-        
-        // Sorguyu başlatıyoruz ama 'await' ile beklemiyoruz, listeye atıyoruz.
-        futures.add(
-          _db.collection('catalog_films')
-             .where(FieldPath.documentId, whereIn: chunk)
-             .get()
-        );
+    final keysToLoad = <String>[];
+    for (final key in orderedKeys.toSet()) {
+      if (!_filmCache.containsKey(key) && !_missingFilmKeys.contains(key)) {
+        keysToLoad.add(key);
       }
-      
-      // BURASI ÖNEMLİ: Tüm sorguların aynı anda bitmesini bekliyoruz (Paralel İstek)
-      final snapshots = await Future.wait(futures);
-      
-      for (final snap in snapshots) {
-        for (final doc in snap.docs) {
-          final data = doc.data();
-          // ID eşleştirmesi için döküman ID'sini veriye ekliyoruz
-          data['docId'] = doc.id; 
-          results.add(data);
+    }
+
+    if (keysToLoad.isNotEmpty) {
+      await _loadFilmChunks(keysToLoad, Source.cache);
+      final stillMissing = keysToLoad
+          .where(
+            (key) =>
+                !_filmCache.containsKey(key) && !_missingFilmKeys.contains(key),
+          )
+          .toList();
+      if (stillMissing.isNotEmpty) {
+        await _loadFilmChunks(stillMissing, Source.server);
+      }
+    }
+
+    return [
+      for (final key in orderedKeys)
+        if (_filmCache[key] != null)
+          Map<String, dynamic>.from(_filmCache[key]!),
+    ];
+  }
+
+  Future<void> _loadFilmChunks(List<String> keys, Source source) async {
+    const batchSize = 10;
+    final futures = <Future<void>>[];
+
+    for (var i = 0; i < keys.length; i += batchSize) {
+      final chunk = keys.sublist(
+        i,
+        i + batchSize > keys.length ? keys.length : i + batchSize,
+      );
+      futures.add(_loadFilmChunk(chunk, source));
+    }
+
+    await Future.wait(futures);
+  }
+
+  Future<void> _loadFilmChunk(List<String> chunk, Source source) async {
+    if (chunk.isEmpty) return;
+    try {
+      final snapshot = await _db
+          .collection('catalog_films')
+          .where(FieldPath.documentId, whereIn: chunk)
+          .get(GetOptions(source: source));
+
+      final foundIds = <String>{};
+      for (final doc in snapshot.docs) {
+        foundIds.add(doc.id);
+        final data = Map<String, dynamic>.from(doc.data());
+        data['docId'] = doc.id;
+        data['canonicalKey'] ??= doc.id;
+        _filmCache[doc.id] = data;
+      }
+
+      if (source == Source.server) {
+        for (final key in chunk) {
+          if (!foundIds.contains(key)) _missingFilmKeys.add(key);
         }
       }
     } catch (e, st) {
-      log('Error in getFilmsByKeys: $e', stackTrace: st);
+      if (source == Source.server) {
+        log('Error in getFilmsByKeys chunk: $e', stackTrace: st);
+      }
     }
-    return results;
   }
 }

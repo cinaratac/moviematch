@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/screens/full_shelf_screen.dart';
 import 'dart:async';
@@ -51,8 +52,10 @@ class UserShelfCache {
         .toList();
   }
 
-  static void setWatchlistFromMaps(List<Map<String, dynamic>> items) {
-    watchlist = items
+  static List<Map<String, String>> _mapsFromFilmDocs(
+    List<Map<String, dynamic>> items,
+  ) {
+    return items
         .map(
           (m) => {
             'title': (m['title'] ?? '').toString(),
@@ -61,6 +64,31 @@ class UserShelfCache {
           },
         )
         .toList();
+  }
+
+  static void setShelfFromMaps(
+    ShelfTarget target,
+    List<Map<String, dynamic>> items,
+  ) {
+    final mapped = _mapsFromFilmDocs(items);
+    switch (target) {
+      case ShelfTarget.favorites:
+        favorites = mapped;
+        break;
+      case ShelfTarget.fiveStar:
+        fiveStar = mapped;
+        break;
+      case ShelfTarget.disliked:
+        disliked = mapped;
+        break;
+      case ShelfTarget.watchlist:
+        watchlist = mapped;
+        break;
+    }
+  }
+
+  static void setWatchlistFromMaps(List<Map<String, dynamic>> items) {
+    watchlist = _mapsFromFilmDocs(items);
   }
 
   static void clear() {
@@ -336,9 +364,6 @@ class _ProfilePageState extends State<ProfilePage> {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
   String? _lbUsername;
   String? _appUsername;
-  Future<List<LetterboxdFilm>>? _futureFavs;
-  Future<List<LetterboxdFilm>>? _futureFiveStar;
-  Future<List<LetterboxdFilm>>? _futureDisliked;
 
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
       {};
@@ -354,7 +379,7 @@ class _ProfilePageState extends State<ProfilePage> {
   void initState() {
     super.initState();
     _userStream = FirebaseAuth.instance.userChanges();
-    
+
     UserShelfCache.clear();
     _loadPrefs();
     _bindLbFromFirestore();
@@ -406,23 +431,6 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       }
     });
-  }
-
-  Future<void> _primeShelfCache() async {
-    try {
-      if (_futureFavs != null) {
-        final favs = await _futureFavs!;
-        UserShelfCache.setFavorites(favs);
-      }
-      if (_futureFiveStar != null) {
-        final five = await _futureFiveStar!;
-        UserShelfCache.setFiveStar(five);
-      }
-      if (_futureDisliked != null) {
-        final dis = await _futureDisliked!;
-        UserShelfCache.setDisliked(dis);
-      }
-    } catch (_) {}
   }
 
   Future<void> _forceWriteLbUsernameIfMissing() async {
@@ -484,19 +492,8 @@ class _ProfilePageState extends State<ProfilePage> {
         : sp.getString('lb_username');
     setState(() {
       _lbUsername = u;
-      _futureFavs = (u == null || u.isEmpty)
-          ? null
-          : LetterboxdService.fetchFavorites(u);
-      _futureFiveStar = (u == null || u.isEmpty)
-          ? null
-          : LetterboxdService.fetchFiveStar(u);
-      _futureDisliked = (u == null || u.isEmpty)
-          ? null
-          : LetterboxdService.fetchDisliked(u);
     });
-    _primeShelfCache().then((_) {
-      _checkGuideVisibility();
-    });
+    _checkGuideVisibility();
     _forceWriteLbUsernameIfMissing();
   }
 
@@ -531,45 +528,11 @@ class _ProfilePageState extends State<ProfilePage> {
               }
               if (lb.isNotEmpty && lb != _lbUsername) {
                 _lbUsername = lb;
-                _refreshFavorites();
               }
             });
           }
           _checkGuideVisibility();
         });
-  }
-
-  Future<void> _refreshFavorites() async {
-    if (_lbUsername == null || _lbUsername!.isEmpty) {
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) {
-        try {
-          final ref = FirebaseFirestore.instance.collection('users').doc(uid);
-          var snap = await ref.get(const GetOptions(source: Source.cache));
-          if (!snap.exists)
-            snap = await ref.get(const GetOptions(source: Source.server));
-          final lb = (snap.data()?['letterboxdUsername'] ?? '').toString();
-          if (lb.isNotEmpty) setState(() => _lbUsername = lb);
-        } catch (_) {}
-      }
-      if (_lbUsername == null || _lbUsername!.isEmpty) return;
-    }
-
-    final sp = await SharedPreferences.getInstance();
-    final key = 'lb_cache_${_lbUsername?.toLowerCase()}';
-    await sp.remove(key);
-    await sp.remove('${key}_time');
-    await sp.remove('${key}_watchlist');
-
-    setState(() {
-      if (_lbUsername != null) {
-        _futureFavs = LetterboxdService.fetchFavorites(_lbUsername!);
-        _futureFiveStar = LetterboxdService.fetchFiveStar(_lbUsername!);
-        _futureDisliked = LetterboxdService.fetchDisliked(_lbUsername!);
-      }
-    });
-
-    _primeShelfCache();
   }
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
@@ -626,28 +589,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     final limited = keys.take(maxItems).toList();
     final hash = limited.join('|');
-    final future = _watchlistFutureCache[hash] ??= Future.wait(
-      limited.map((k) async {
-        final col = FirebaseFirestore.instance.collection('catalog_films').doc(k);
-        try {
-          final c = await col.get(const GetOptions(source: Source.cache));
-          if (c.exists) {
-            final d = c.data();
-            d?['docId'] = k;
-            return d;
-          }
-        } catch (_) {}
-        try {
-          final s = await col.get(const GetOptions(source: Source.server));
-          if (s.exists) {
-            final d = s.data();
-            d?['docId'] = k;
-            return d;
-          }
-        } catch (_) {}
-        return null;
-      }),
-    );
+    final future = _watchlistFutureCache[hash] ??= CatalogService()
+        .getFilmsByKeys(limited)
+        .then(
+          (films) => films.map<Map<String, dynamic>?>((film) => film).toList(),
+        );
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
@@ -658,7 +604,7 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
-        
+
         // EKSİK OLAN SATIRLAR BURADAYDI (films değişkeni tanımlanıyor)
         final films = (filmSnap.data ?? [])
             .where((m) => m != null)
@@ -673,62 +619,76 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Row(
               children: [
                 for (int i = 0; i < films.length; i++) ...[
-                  Builder(builder: (context) {
-                    final film = films[i];
-                    final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
-                    final title = (film['title'] ?? '') as String;
-                    final docId = (film['docId'] ?? '').toString();
-                    final tmdbId = _extractTmdbId(film);
+                  Builder(
+                    builder: (context) {
+                      final film = films[i];
+                      final poster =
+                          (film['poster'] ??
+                                  film['posterUrl'] ??
+                                  film['image'] ??
+                                  '')
+                              .toString();
+                      final title = (film['title'] ?? '') as String;
+                      final docId = (film['docId'] ?? '').toString();
+                      final tmdbId = _extractTmdbId(film);
 
-                    return GestureDetector(
-                      onTap: () {
-                        if (title.isNotEmpty) {
-                          MovieActionHelper.show(
-                            context,
-                            title: title,
-                            posterUrl: poster,
-                            docId: docId,
-                            tmdbId: tmdbId,
-                            target: ShelfTarget.watchlist,
-                            onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
-                          );
-                        }
-                      },
-                      child: AspectRatio(
-                        aspectRatio: 2 / 3,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              PosterImage(
-                                posterUrl: poster,
-                                title: title,
-                                tmdbId: tmdbId,
-                                fit: BoxFit.cover,
-                              ),
-                              if (title.isNotEmpty)
-                                Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                    color: Colors.black54,
-                                    width: double.infinity,
-                                    child: Text(
-                                      _noYear(title),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 12, color: Colors.white),
-                                      textAlign: TextAlign.center,
+                      return GestureDetector(
+                        onTap: () {
+                          if (title.isNotEmpty) {
+                            MovieActionHelper.show(
+                              context,
+                              title: title,
+                              posterUrl: poster,
+                              docId: docId,
+                              tmdbId: tmdbId,
+                              target: ShelfTarget.watchlist,
+                              onItemDeleted: () =>
+                                  setState(() => _watchlistFutureCache.clear()),
+                            );
+                          }
+                        },
+                        child: AspectRatio(
+                          aspectRatio: 2 / 3,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                PosterImage(
+                                  posterUrl: poster,
+                                  title: title,
+                                  tmdbId: tmdbId,
+                                  fit: BoxFit.cover,
+                                ),
+                                if (title.isNotEmpty)
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 4,
+                                      ),
+                                      color: Colors.black54,
+                                      width: double.infinity,
+                                      child: Text(
+                                        _noYear(title),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
                                     ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    },
+                  ),
                   const SizedBox(width: 12),
                 ],
                 // Ekleme Butonu
@@ -783,30 +743,11 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     final limited = keys.take(maxItems).toList();
     final hash = '$fieldName:' + limited.join('|');
-    final future = _watchlistFutureCache[hash] ??= Future.wait(
-      limited.map((k) async {
-        final col = FirebaseFirestore.instance
-            .collection('catalog_films')
-            .doc(k);
-        try {
-          final c = await col.get(const GetOptions(source: Source.cache));
-          if (c.exists) {
-            final d = c.data();
-            d?['docId'] = k;
-            return d;
-          }
-        } catch (_) {}
-        try {
-          final s = await col.get(const GetOptions(source: Source.server));
-          if (s.exists) {
-            final d = s.data();
-            d?['docId'] = k;
-            return d;
-          }
-        } catch (_) {}
-        return null;
-      }),
-    );
+    final future = _watchlistFutureCache[hash] ??= CatalogService()
+        .getFilmsByKeys(limited)
+        .then(
+          (films) => films.map<Map<String, dynamic>?>((film) => film).toList(),
+        );
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
@@ -821,6 +762,7 @@ class _ProfilePageState extends State<ProfilePage> {
             .where((m) => m != null)
             .map((m) => m!)
             .toList();
+        UserShelfCache.setShelfFromMaps(target, films);
         return SizedBox(
           height: 140,
           child: ListView.separated(
@@ -842,7 +784,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       .toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
-              final tmdbId = _extractTmdbId(film); 
+              final tmdbId = _extractTmdbId(film);
 
               return GestureDetector(
                 onTap: () {
@@ -1185,7 +1127,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
 
     return StreamBuilder<User?>(
-      stream: _userStream, 
+      stream: _userStream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return Scaffold(
@@ -1284,8 +1226,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                                     .toString();
                                           });
                                         }
-                                      } catch (_) {
-                                      }
+                                      } catch (_) {}
                                     }
                                   }
                                 },

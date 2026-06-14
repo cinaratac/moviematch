@@ -25,7 +25,7 @@ class ChatService {
       // Kullanıcı bilgilerini çekip sohbet dokümanına gömüyoruz
       final userA = await _fs.collection('users').doc(uidA).get();
       final userB = await _fs.collection('users').doc(uidB).get();
-      
+
       final dataA = userA.data() ?? {};
       final dataB = userB.data() ?? {};
 
@@ -35,13 +35,19 @@ class ChatService {
         'updatedAt': FieldValue.serverTimestamp(),
         // Denormalize Veri:
         'titles': {
-          uidA: dataB['displayName'] ?? dataB['username'] ?? 'Kullanıcı', // A, B'yi ne diye görecek?
-          uidB: dataA['displayName'] ?? dataA['username'] ?? 'Kullanıcı', // B, A'yı ne diye görecek?
+          uidA:
+              dataB['displayName'] ??
+              dataB['username'] ??
+              'Kullanıcı', // A, B'yi ne diye görecek?
+          uidB:
+              dataA['displayName'] ??
+              dataA['username'] ??
+              'Kullanıcı', // B, A'yı ne diye görecek?
         },
         'photos': {
           uidA: dataB['photoURL'] ?? '', // A, B'nin hangi fotosunu görecek?
           uidB: dataA['photoURL'] ?? '', // B, A'nın hangi fotosunu görecek?
-        }
+        },
       }, SetOptions(merge: true));
     }
     return id;
@@ -50,10 +56,15 @@ class ChatService {
   String getChatId(String uidA, String uidB) {
     return chatIdFor(uidA, uidB);
   }
-  Future<void> sendEventMessage(String chatId, String myUid, Map<String, dynamic> eventData) async {
+
+  Future<void> sendEventMessage(
+    String chatId,
+    String myUid,
+    Map<String, dynamic> eventData,
+  ) async {
     await send(
-      chatId, 
-      myUid, 
+      chatId,
+      myUid,
       "📅 Yeni Etkinlik: ${eventData['title']}", // Bildirimlerde görünecek metin
       otherUid: "", // Gruplarda genellikle boştur ama gerekirse doldurulabilir
       customType: 'event',
@@ -62,16 +73,21 @@ class ChatService {
   }
 
   // --- YENİ: Anket Mesajı Gönderme ---
-  Future<void> sendPollMessage(String chatId, String myUid, Map<String, dynamic> pollData) async {
+  Future<void> sendPollMessage(
+    String chatId,
+    String myUid,
+    Map<String, dynamic> pollData,
+  ) async {
     await send(
-      chatId, 
-      myUid, 
+      chatId,
+      myUid,
       "📊 Yeni Anket: ${pollData['question']}",
       otherUid: "",
       customType: 'poll',
       customData: pollData,
     );
   }
+
   // GÜNCELLENDİ: Mesaj atarken de güncel profil bilgilerini basıyoruz
   Future<void> send(
     String chatId,
@@ -80,7 +96,7 @@ class ChatService {
     required String otherUid,
     Map<String, dynamic>? movie,
     String? imageUrl,
-    String? customType,        // <--- YENİ
+    String? customType, // <--- YENİ
     Map<String, dynamic>? customData,
   }) async {
     final chatRef = _fs.collection('chats').doc(chatId);
@@ -103,8 +119,7 @@ class ChatService {
     } else if (imageUrl != null) {
       msgData['type'] = 'image';
       msgData['imageUrl'] = imageUrl;
-    }
-    else if (customType != null) {
+    } else if (customType != null) {
       msgData['type'] = customType;
       if (customData != null) {
         msgData[customType] = customData; // 'event' veya 'poll' alanı açar
@@ -116,25 +131,34 @@ class ChatService {
     // 2. Sohbet Verisi (Merge true olduğu için yoksa yaratır, varsa günceller)
     String lastMsgText = trimmed;
     if (lastMsgText.isEmpty) {
-      if (movie != null) lastMsgText = '🎬 Film paylaştı';
-      else if (imageUrl != null) lastMsgText = '📷 Fotoğraf';
-      else if (customType == 'event') lastMsgText = '📅 Etkinlik'; 
-      else if (customType == 'poll') lastMsgText = '📊 Anket';
+      if (movie != null)
+        lastMsgText = '🎬 Film paylaştı';
+      else if (imageUrl != null)
+        lastMsgText = '📷 Fotoğraf';
+      else if (customType == 'event')
+        lastMsgText = '📅 Etkinlik';
+      else if (customType == 'poll')
+        lastMsgText = '📊 Anket';
     }
 
     final me = _auth.currentUser;
-    
+
     final Map<String, dynamic> chatUpdate = {
       'lastMessage': lastMsgText,
       'lastMessageAt': FieldValue.serverTimestamp(),
       'lastMessageAuthorId': fromUid,
       'updatedAt': FieldValue.serverTimestamp(),
-      'participants': FieldValue.arrayUnion([fromUid, otherUid]), // Garanti olsun
+      'participants': FieldValue.arrayUnion([
+        fromUid,
+        otherUid,
+      ]), // Garanti olsun
+      'hiddenFor.$fromUid': FieldValue.delete(),
     };
 
     if (otherUid.isNotEmpty) {
       chatUpdate['unreadCounts'] = {otherUid: FieldValue.increment(1)};
-      
+      chatUpdate['hiddenFor.$otherUid'] = FieldValue.delete();
+
       // İlk mesajda karşı tarafın listesinde düzgün görünmek için:
       if (me != null) {
         chatUpdate['titles.$otherUid'] = me.displayName ?? 'Kullanıcı';
@@ -145,15 +169,26 @@ class ChatService {
     // SetOptions(merge: true) sayesinde döküman yoksa oluşturulur!
     batch.set(chatRef, chatUpdate, SetOptions(merge: true));
     await batch.commit();
-    
+
     if (otherUid.isNotEmpty) {
       try {
         final likes = _fs.collection('likes');
-        var qs = await likes.where('a', isEqualTo: fromUid).where('b', isEqualTo: otherUid).limit(1).get();
-        if (qs.docs.isEmpty) qs = await likes.where('a', isEqualTo: otherUid).where('b', isEqualTo: fromUid).limit(1).get();
+        var qs = await likes
+            .where('a', isEqualTo: fromUid)
+            .where('b', isEqualTo: otherUid)
+            .limit(1)
+            .get();
+        if (qs.docs.isEmpty)
+          qs = await likes
+              .where('a', isEqualTo: otherUid)
+              .where('b', isEqualTo: fromUid)
+              .limit(1)
+              .get();
         if (qs.docs.isNotEmpty) {
           await qs.docs.first.reference.set({
-            'aSeen': true, 'bSeen': true, 'lastInteractedAt': FieldValue.serverTimestamp(),
+            'aSeen': true,
+            'bSeen': true,
+            'lastInteractedAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
         }
       } catch (_) {}
@@ -162,11 +197,25 @@ class ChatService {
 
   Future<void> markAsRead(String chatId, String uid) async {
     final chatRef = _fs.collection('chats').doc(chatId);
-    await chatRef.set({'unreadCounts': {uid: 0}}, SetOptions(merge: true));
-    
+    await chatRef.set({
+      'unreadCounts': {uid: 0},
+    }, SetOptions(merge: true));
+
     // Okundu bilgisini güncelle...
     final readRef = chatRef.collection('reads').doc(uid);
-    await readRef.set({'uid': uid, 'lastReadAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    await readRef.set({
+      'uid': uid,
+      'lastReadAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> hideChatFor(String chatId, String uid) async {
+    if (uid.isEmpty) return;
+    await _fs.collection('chats').doc(chatId).set({
+      'hiddenFor.$uid': true,
+      'unreadCounts': {uid: 0},
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   Stream<int> unreadCountForChat(String chatId, String myUid) {
@@ -201,10 +250,10 @@ class ChatService {
   Future<void> stopChatNotifications() async {
     await NotificationService.I.dispose();
   }
-  
+
   Future<void> deleteIfEmpty(String chatId) async {
     // Boş temizleme mantığı aynen kalabilir
-     try {
+    try {
       final chatRef = _fs.collection('chats').doc(chatId);
       final msgSnap = await chatRef.collection('messages').limit(1).get();
       if (msgSnap.docs.isEmpty) {
@@ -212,5 +261,4 @@ class ChatService {
       }
     } catch (_) {}
   }
-  
 }

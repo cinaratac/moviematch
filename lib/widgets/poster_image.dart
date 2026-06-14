@@ -8,7 +8,8 @@ final customCacheManager = CacheManager(
   Config(
     'moviePosterCache',
     stalePeriod: const Duration(days: 30), // 7 günden 30 güne çıkardık
-    maxNrOfCacheObjects: 1000, // Daha fazla poster tutabilmesi için kapasiteyi artırdık
+    maxNrOfCacheObjects:
+        1000, // Daha fazla poster tutabilmesi için kapasiteyi artırdık
     repo: JsonCacheInfoRepository(databaseName: 'moviePosterCache_db'),
   ),
 );
@@ -21,6 +22,7 @@ class PosterImage extends StatefulWidget {
   final double? height;
   final BoxFit fit;
   final int? cacheWidth;
+  final bool enableFallback;
 
   const PosterImage({
     super.key,
@@ -31,6 +33,7 @@ class PosterImage extends StatefulWidget {
     this.height,
     this.fit = BoxFit.cover,
     this.cacheWidth,
+    this.enableFallback = true,
   });
 
   @override
@@ -47,6 +50,8 @@ class _PosterImageState extends State<PosterImage> {
   void initState() {
     super.initState();
     _currentUrl = widget.posterUrl;
+
+    if (!widget.enableFallback) return;
 
     if (_currentUrl != null && _currentUrl!.contains('ltrbxd.com')) {
       _tryFallback(force: true);
@@ -68,6 +73,8 @@ class _PosterImageState extends State<PosterImage> {
         _retryCount = 0;
       });
 
+      if (!widget.enableFallback) return;
+
       if (_currentUrl != null && _currentUrl!.contains('ltrbxd.com')) {
         _tryFallback(force: true);
       } else if (_isEmpty(_currentUrl) && !_isEmpty(widget.title)) {
@@ -77,6 +84,20 @@ class _PosterImageState extends State<PosterImage> {
   }
 
   bool _isEmpty(String? s) => s == null || s.trim().isEmpty;
+
+  bool _isDirectlyLoadable(String? s) {
+    if (_isEmpty(s)) return false;
+    final url = s!.trim();
+    if (!(url.startsWith('http://') || url.startsWith('https://'))) {
+      return false;
+    }
+    if (url.contains('ltrbxd.com') ||
+        url.contains('empty-poster') ||
+        url.contains('null')) {
+      return false;
+    }
+    return true;
+  }
 
   Future<void> _tryFallback({bool force = false}) async {
     if (_isLoadingFallback || _isEmpty(widget.title) || _retryCount >= 3) {
@@ -125,6 +146,17 @@ class _PosterImageState extends State<PosterImage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_isDirectlyLoadable(_currentUrl)) {
+      if (widget.enableFallback && !_isLoadingFallback && !_failed) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tryFallback(force: true);
+        });
+      }
+      return widget.enableFallback && _isLoadingFallback
+          ? _buildLoading()
+          : _buildPlaceholder();
+    }
+
     if (_failed || (_isEmpty(_currentUrl) && !_isLoadingFallback)) {
       return _buildPlaceholder();
     }
@@ -138,17 +170,20 @@ class _PosterImageState extends State<PosterImage> {
       // --- KÖKTEN ÇÖZÜM 1: SABİT CACHE KEY ---
       // Sunucu URL'yi ufak tefek değiştirse bile biz resmi hep aynı isimle kaydedip çağıracağız.
       cacheKey: _generateCacheKey(_currentUrl!),
-      
+
       cacheManager: customCacheManager,
-      
+
       // --- KÖKTEN ÇÖZÜM 2: memCacheWidth İPTALİ ---
       // Bazı poster formatları (webp/avif) sıkıştırılırken sessizce hata verip cache'e yazılmayı reddediyordu. Bunu kaldırarak orijinal haliyle kaydedilmesini zorluyoruz.
-      // memCacheWidth: optimalMemCacheWidth, 
-      
+      memCacheWidth: widget.cacheWidth,
+
       httpHeaders: const {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'Cache-Control': 'max-age=2592000, public', // Sunucuya "Bana ne dersen de, ben bunu kaydedeceğim" diyoruz.
+        'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept':
+            'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Cache-Control':
+            'max-age=2592000, public', // Sunucuya "Bana ne dersen de, ben bunu kaydedeceğim" diyoruz.
       },
       width: widget.width,
       height: widget.height,
@@ -156,15 +191,16 @@ class _PosterImageState extends State<PosterImage> {
       errorWidget: (context, url, error) {
         // Eğer resim hatalıysa (Örn: 404), cache'i temizle ki sonsuza dek bozuk resim göstermesin
         customCacheManager.removeFile(_generateCacheKey(url));
-        
-        if (!_isLoadingFallback && !_failed) {
+
+        if (widget.enableFallback && !_isLoadingFallback && !_failed) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) _tryFallback(force: true);
           });
         }
         return _buildPlaceholder();
       },
-      placeholder: (context, url) => _buildLoading(),
+      placeholder: (context, url) =>
+          widget.enableFallback ? _buildLoading() : _buildPlaceholder(),
     );
   }
 
