@@ -205,19 +205,19 @@ class _MatchListScreenState extends State<MatchListScreen> {
           : _all.isEmpty
           ? const _NoMatchesCharacter()
           : PageView.builder(
-              scrollDirection: Axis.vertical,
-              controller: _pageController,
-              physics: const BouncingScrollPhysics(),
-              allowImplicitScrolling: false,
-              onPageChanged: (index) {
-                _markVisibleAsSeen(me.uid, _all[index].uid);
-              },
-              itemCount: _all.length,
-              itemBuilder: (context, index) {
-                final m = _all[index];
-                return _VerticalUserCard(key: ValueKey(m.uid), result: m);
-              },
-            ),
+                scrollDirection: Axis.vertical,
+                controller: _pageController,
+                physics: const BouncingScrollPhysics(),
+                allowImplicitScrolling: true, // <--- BURASI FALSE YERİNE TRUE OLMALI
+                onPageChanged: (index) {
+                  _markVisibleAsSeen(me.uid, _all[index].uid);
+                },
+                itemCount: _all.length,
+                itemBuilder: (context, index) {
+                  final m = _all[index];
+                  return _VerticalUserCard(key: ValueKey(m.uid), result: m);
+                },
+              ),
     );
   }
 }
@@ -351,7 +351,9 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
 
   Future<void> _handleFilmTap(BuildContext context, FilmItem film) async {
     int? id = film.tmdbId;
+    String currentPoster = film.posterUrl;
 
+    // 1. TMDB ID YOKSA ARAMA YAP
     if (id == null) {
       showDialog(
         context: context,
@@ -380,11 +382,21 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
 
         if (results != null && results.isNotEmpty) {
           id = results[0]['id'];
+          
+          // YENİ: Bulunan filmin taze TMDB afişini de alıyoruz
+          final fetchedPosterPath = results[0]['poster_path'];
+          if (fetchedPosterPath != null) {
+            currentPoster = 'https://image.tmdb.org/t/p/w500$fetchedPosterPath';
+          }
+
           if (film.id.isNotEmpty && id != null) {
             FirebaseFirestore.instance
                 .collection('catalog_films')
                 .doc(film.id)
-                .set({'tmdbId': id}, SetOptions(merge: true));
+                .set({
+                  'tmdbId': id,
+                  if (fetchedPosterPath != null) 'posterUrl': currentPoster, // Veritabanını da güncelliyoruz
+                }, SetOptions(merge: true));
           }
         } else {
           if (!context.mounted) return;
@@ -403,6 +415,18 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
       }
     }
 
+    // 2. DETAY EKRANINA GİTMEDEN ÖNCE URL TEMİZLİĞİ
+    // Eğer veritabanından gelen URL yarım bir TMDB yoluysa (örn: /abC123.jpg) tam URL'ye çevir.
+    if (currentPoster.startsWith('/')) {
+      currentPoster = 'https://image.tmdb.org/t/p/w500$currentPoster';
+    } 
+    // Letterboxd linkleri artık hotlink engelli (403 Forbidden). 
+    // Detay ekranına kırık link göndermektense boş gönderelim ki kendi güncelini çeksin.
+    else if (currentPoster.contains('ltrbxd.com')) {
+      currentPoster = ''; 
+    }
+
+    // 3. YÖNLENDİRME
     if (id != null && context.mounted) {
       Navigator.push(
         context,
@@ -410,7 +434,7 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
           builder: (_) => MovieDetailScreen(
             tmdbId: id!,
             title: film.title,
-            posterUrl: film.posterUrl,
+            posterUrl: currentPoster,
           ),
         ),
       );
@@ -607,6 +631,10 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
                           ? Colors.white24
                           : const Color(0xFF2E7D32),
                       foregroundColor: Colors.white,
+                      // --- EKLENEN KISIM: Buton pasif (null) olduğunda alacağı renkler ---
+                      disabledBackgroundColor: Colors.white24, 
+                      disabledForegroundColor: Colors.white70,
+                      // ------------------------------------------------------------------
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),

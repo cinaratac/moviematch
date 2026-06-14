@@ -96,7 +96,7 @@ class ChatService {
     required String otherUid,
     Map<String, dynamic>? movie,
     String? imageUrl,
-    String? customType, // <--- YENİ
+    String? customType, 
     Map<String, dynamic>? customData,
   }) async {
     final chatRef = _fs.collection('chats').doc(chatId);
@@ -122,53 +122,53 @@ class ChatService {
     } else if (customType != null) {
       msgData['type'] = customType;
       if (customData != null) {
-        msgData[customType] = customData; // 'event' veya 'poll' alanı açar
+        msgData[customType] = customData; 
       }
     }
 
     batch.set(msgRef, msgData);
 
-    // 2. Sohbet Verisi (Merge true olduğu için yoksa yaratır, varsa günceller)
+    // 2. Sohbet Verisi 
     String lastMsgText = trimmed;
     if (lastMsgText.isEmpty) {
-      if (movie != null)
-        lastMsgText = '🎬 Film paylaştı';
-      else if (imageUrl != null)
-        lastMsgText = '📷 Fotoğraf';
-      else if (customType == 'event')
-        lastMsgText = '📅 Etkinlik';
-      else if (customType == 'poll')
-        lastMsgText = '📊 Anket';
+      if (movie != null) lastMsgText = '🎬 Film paylaştı';
+      else if (imageUrl != null) lastMsgText = '📷 Fotoğraf';
+      else if (customType == 'event') lastMsgText = '📅 Etkinlik';
+      else if (customType == 'poll') lastMsgText = '📊 Anket';
     }
 
     final me = _auth.currentUser;
 
+    // DİKKAT: .set() içinde nokta notasyonu kullanmıyoruz! Sadece temel alanlar.
     final Map<String, dynamic> chatUpdate = {
       'lastMessage': lastMsgText,
       'lastMessageAt': FieldValue.serverTimestamp(),
       'lastMessageAuthorId': fromUid,
       'updatedAt': FieldValue.serverTimestamp(),
-      'participants': FieldValue.arrayUnion([
-        fromUid,
-        otherUid,
-      ]), // Garanti olsun
-      'hiddenFor.$fromUid': FieldValue.delete(),
+      'participants': FieldValue.arrayUnion([fromUid, otherUid]), 
+    };
+
+    batch.set(chatRef, chatUpdate, SetOptions(merge: true));
+    await batch.commit();
+
+    // 3. Nokta notasyonu (İç içe map güncellemeleri) sadece update() ile güvenli çalışır:
+    final Map<String, dynamic> nestedUpdates = {
+      'hiddenFor.$fromUid': FieldValue.delete(), // Mesaj atan kişi sildiyse sohbet tekrar görünsün
     };
 
     if (otherUid.isNotEmpty) {
-      chatUpdate['unreadCounts'] = {otherUid: FieldValue.increment(1)};
-      chatUpdate['hiddenFor.$otherUid'] = FieldValue.delete();
+      nestedUpdates['unreadCounts.$otherUid'] = FieldValue.increment(1);
+      nestedUpdates['hiddenFor.$otherUid'] = FieldValue.delete(); // Karşı taraf sildiyse ona da tekrar görünsün
 
-      // İlk mesajda karşı tarafın listesinde düzgün görünmek için:
       if (me != null) {
-        chatUpdate['titles.$otherUid'] = me.displayName ?? 'Kullanıcı';
-        chatUpdate['photos.$otherUid'] = me.photoURL ?? '';
+        nestedUpdates['titles.$otherUid'] = me.displayName ?? 'Kullanıcı';
+        nestedUpdates['photos.$otherUid'] = me.photoURL ?? '';
       }
     }
 
-    // SetOptions(merge: true) sayesinde döküman yoksa oluşturulur!
-    batch.set(chatRef, chatUpdate, SetOptions(merge: true));
-    await batch.commit();
+    try {
+      await chatRef.update(nestedUpdates);
+    } catch (_) {}
 
     if (otherUid.isNotEmpty) {
       try {
@@ -178,12 +178,13 @@ class ChatService {
             .where('b', isEqualTo: otherUid)
             .limit(1)
             .get();
-        if (qs.docs.isEmpty)
+        if (qs.docs.isEmpty) {
           qs = await likes
               .where('a', isEqualTo: otherUid)
               .where('b', isEqualTo: fromUid)
               .limit(1)
               .get();
+        }
         if (qs.docs.isNotEmpty) {
           await qs.docs.first.reference.set({
             'aSeen': true,
@@ -194,12 +195,14 @@ class ChatService {
       } catch (_) {}
     }
   }
-
   Future<void> markAsRead(String chatId, String uid) async {
     final chatRef = _fs.collection('chats').doc(chatId);
-    await chatRef.set({
-      'unreadCounts': {uid: 0},
-    }, SetOptions(merge: true));
+    
+    try {
+      await chatRef.update({
+        'unreadCounts.$uid': 0,
+      });
+    } catch (_) {}
 
     // Okundu bilgisini güncelle...
     final readRef = chatRef.collection('reads').doc(uid);
@@ -211,13 +214,15 @@ class ChatService {
 
   Future<void> hideChatFor(String chatId, String uid) async {
     if (uid.isEmpty) return;
-    await _fs.collection('chats').doc(chatId).set({
-      'hiddenFor.$uid': true,
-      'unreadCounts': {uid: 0},
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    try {
+      await _fs.collection('chats').doc(chatId).update({
+        'hiddenFor.$uid': true,
+        'unreadCounts.$uid': 0, // Sadece bu kullanıcının okunmamış sayısını sıfırla
+      });
+    } catch (e) {
+      // Belge henüz yoksa oluşabilecek hatayı yoksayıyoruz
+    }
   }
-
   Stream<int> unreadCountForChat(String chatId, String myUid) {
     return _fs.collection('chats').doc(chatId).snapshots().map((chatSnap) {
       final data = chatSnap.data();
