@@ -5,14 +5,12 @@ import 'movie_detail_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-// --- YENİ EKLENEN: GLOBAL HAFIZA (RAM CACHE) ---
 class _ActorCacheData {
   final Map<String, dynamic> details;
   final List<dynamic> movies;
   _ActorCacheData(this.details, this.movies);
 }
 final Map<int, _ActorCacheData> _globalActorCache = {};
-// ------------------------------------------------
 
 class ActorScreen extends StatefulWidget {
   final int actorId;
@@ -29,6 +27,7 @@ class _ActorScreenState extends State<ActorScreen> {
   List<dynamic> _movies = [];
   bool _loading = true;
   bool _isFavorited = false;
+  Future<Map<String, int>>? _watchDataFuture; // YENİ: İzleme oranını tutacak gelecek veri
 
   @override
   void initState() {
@@ -56,12 +55,16 @@ class _ActorScreenState extends State<ActorScreen> {
   }
 
   Future<void> _fetchActorData() async {
-    // --- YENİ EKLENEN: EĞER HAFIZADA VARSA İNTERNETE GİTME, DİREKT GÖSTER ---
     if (_globalActorCache.containsKey(widget.actorId)) {
       if (mounted) {
         setState(() {
           _actorDetails = _globalActorCache[widget.actorId]!.details;
           _movies = _globalActorCache[widget.actorId]!.movies;
+          
+          // Listedeki ilk 30 filmi (ekranda görünenleri) baz alarak oranı hesapla
+          final visibleMovies = _movies.length > 30 ? _movies.take(30).toList() : _movies;
+          _watchDataFuture = _calculateWatchData(visibleMovies);
+          
           _loading = false;
         });
       }
@@ -84,14 +87,66 @@ class _ActorScreenState extends State<ActorScreen> {
           _actorDetails = Map<String, dynamic>.from(detailsResult.data as Map);
           _movies = (moviesResult.data['cast'] as List);
           _movies.sort((a, b) => (b['popularity'] ?? 0).compareTo(a['popularity'] ?? 0));
+          
+          final visibleMovies = _movies.length > 30 ? _movies.take(30).toList() : _movies;
+          _watchDataFuture = _calculateWatchData(visibleMovies);
+
           _loading = false;
         });
 
-        // Veriyi internetten çektikten sonra bir dahaki sefer için hafızaya kaydet
         _globalActorCache[widget.actorId] = _ActorCacheData(_actorDetails!, _movies);
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // --- YENİ EKLENEN FONKSİYON: İZLEME ORANINI HESAPLAR ---
+  Future<Map<String, int>> _calculateWatchData(List<dynamic> tmdbMovies) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || tmdbMovies.isEmpty) return {'watched': 0, 'total': tmdbMovies.length};
+
+    try {
+      List<int> tmdbIds = [];
+      for (var m in tmdbMovies) {
+        if (m['id'] != null) tmdbIds.add(m['id']);
+      }
+      
+      if (tmdbIds.isEmpty) return {'watched': 0, 'total': tmdbMovies.length};
+
+      Set<String> listDocIds = {};
+      final _fs = FirebaseFirestore.instance;
+      
+      for (var i = 0; i < tmdbIds.length; i += 30) {
+        final chunk = tmdbIds.sublist(i, i + 30 > tmdbIds.length ? tmdbIds.length : i + 30);
+        final qs = await _fs.collection('catalog_films').where('tmdbId', whereIn: chunk).get();
+        for (var doc in qs.docs) {
+          listDocIds.add(doc.id.trim().toLowerCase());
+        }
+      }
+
+      Set<String> myWatchedIds = {};
+      final userDoc = await _fs.collection('users').doc(uid).get();
+      if (userDoc.exists) {
+        final data = userDoc.data() ?? {};
+        final fiveStar = List<dynamic>.from(data['fiveStarKeys'] ?? []);
+        final disliked = List<dynamic>.from(data['dislikedKeys'] ?? []);
+        final favorites = List<dynamic>.from(data['favoritesKeys'] ?? []);
+        for (var id in [...fiveStar, ...disliked, ...favorites]) {
+          if (id != null) myWatchedIds.add(id.toString().trim().toLowerCase());
+        }
+      }
+
+      int watchedCount = 0;
+      for (var docId in listDocIds) {
+        if (myWatchedIds.contains(docId)) {
+          watchedCount++;
+        }
+      }
+
+      return {'watched': watchedCount, 'total': tmdbMovies.length};
+    } catch(e) {
+      return {'watched': 0, 'total': tmdbMovies.length};
     }
   }
 
@@ -121,6 +176,7 @@ class _ActorScreenState extends State<ActorScreen> {
                       ),
                     ),
                    onPressed: () async {
+                      // Favoriye alma işlemi kodları (Aynı)
                       final uid = FirebaseAuth.instance.currentUser?.uid;
                       if (uid == null) return;
                       final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
@@ -191,7 +247,54 @@ class _ActorScreenState extends State<ActorScreen> {
                         const SizedBox(height: 30),
                       ],
                       Text("${widget.actorName} Filmleri", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 16),
+                      
+                      // --- YENİ EKLENEN İZLEME ORANI (PROGRESS BAR) ---
+                      if (_watchDataFuture != null)
+                        FutureBuilder<Map<String, int>>(
+                          future: _watchDataFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return const Padding(
+                                padding: EdgeInsets.only(top: 12.0),
+                                child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.greenAccent)),
+                              );
+                            }
+
+                            final watchedCount = snapshot.data?['watched'] ?? 0;
+                            final totalCount = snapshot.data?['total'] ?? 0;
+                            if (totalCount == 0) return const SizedBox.shrink();
+
+                            final double percentage = (watchedCount / totalCount) * 100;
+
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text("İzleme Oranı", style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+                                      Text("%${percentage.toStringAsFixed(0)} ($watchedCount/$totalCount)", 
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: percentage / 100,
+                                      backgroundColor: Colors.white24,
+                                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+                                      minHeight: 6,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      const SizedBox(height: 12),
                     ],
                   ),
                 ),
