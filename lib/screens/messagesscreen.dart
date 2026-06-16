@@ -10,7 +10,7 @@ import 'package:fluttergirdi/services/club_service.dart';
 import 'package:fluttergirdi/widgets/club_card.dart';
 import 'package:fluttergirdi/screens/create_club_screen.dart';
 import 'package:fluttergirdi/widgets/messages_skeleton.dart';
-
+import 'package:fluttergirdi/services/global_data_service.dart';
 // --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
 import 'package:fluttergirdi/services/user_cache_service.dart';
 
@@ -240,12 +240,19 @@ class _ChatsViewState extends State<_ChatsView>
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _chatsStream,
               builder: (context, s) {
-                if (s.connectionState == ConnectionState.waiting) {
+                // --- KESİN ÇÖZÜM: GLOBAL CACHE VARSA SKELETON GÖSTERME ---
+                final hasGlobalData = GlobalDataService.instance.myChats != null;
+                
+                if (s.connectionState == ConnectionState.waiting && !hasGlobalData) {
                   return const MessagesSkeleton();
                 }
 
-                var docs = s.data?.docs.toList() ?? [];
+                // Veriyi canlı stream'den VEYA arka plan cache'inden al!
+                var docs = s.hasData 
+                    ? s.data!.docs.toList() 
+                    : (GlobalDataService.instance.myChats ?? []);
 
+                // (BURADAN AŞAĞISI SENİN MEVCUT KODLARIN, AYNEN DEVAM EDİYOR)
                 docs.removeWhere((doc) {
                   final data = doc.data();
                   final parts = List.from(data['participants'] ?? []);

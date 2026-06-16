@@ -22,7 +22,7 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
-
+import 'package:fluttergirdi/services/global_data_service.dart';
 import 'package:fluttergirdi/models/gamification.dart';
 import 'package:fluttergirdi/services/gamification_service.dart';
 
@@ -497,45 +497,42 @@ class _ProfilePageState extends State<ProfilePage> {
     _forceWriteLbUsernameIfMissing();
   }
 
-  void _bindLbFromFirestore() {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return;
-  _userSub?.cancel();
-  _userSub = FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .snapshots()
-      .listen((snap) async {
-        if (!snap.exists || !mounted) return;
-        final data = Map<String, dynamic>.from(snap.data() ?? {});
+ void _bindLbFromFirestore() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
 
-        // Hangi key listeleri değişti?
-        final oldFav   = List.from(_lastUserData?['favoritesKeys'] ?? []);
-        final oldFive  = List.from(_lastUserData?['fiveStarKeys']  ?? []);
-        final oldDis   = List.from(_lastUserData?['dislikedKeys']  ?? []);
-        final oldWatch = List.from(_lastUserData?['watchlistKeys'] ?? []);
-        final newFav   = List.from(data['favoritesKeys']  ?? []);
-        final newFive  = List.from(data['fiveStarKeys']   ?? []);
-        final newDis   = List.from(data['dislikedKeys']   ?? []);
-        final newWatch = List.from(data['watchlistKeys']  ?? []);
-
-        // Sadece değişen listelerin Future cache'ini temizle
-        if (!_listEquals(oldFav,   newFav))   _watchlistFutureCache.removeWhere((k, _) => k.startsWith('favoritesKeys:'));
-        if (!_listEquals(oldFive,  newFive))  _watchlistFutureCache.removeWhere((k, _) => k.startsWith('fiveStarKeys:'));
-        if (!_listEquals(oldDis,   newDis))   _watchlistFutureCache.removeWhere((k, _) => k.startsWith('dislikedKeys:'));
-        if (!_listEquals(oldWatch, newWatch)) _watchlistFutureCache.removeWhere((k, _) => k.startsWith('watchlistKeys:') || k.startsWith(newWatch.join('|')));
-
-        final lb   = (data['letterboxdUsername'] ?? '').toString().trim();
-        final appU = (data['displayName'] ?? data['username'] ?? data['handle'] ?? '').toString().trim();
-
+    void updateProfileState(Map<String, dynamic> data) {
+      if (mounted) {
         setState(() {
-          _lastUserData = data;
-          if (appU.isNotEmpty && appU != (_appUsername ?? '')) _appUsername = appU;
-          if (lb.isNotEmpty  && lb  != _lbUsername)           _lbUsername  = lb;
+          _lastUserData = Map<String, dynamic>.from(data);
+          final lb = (data['letterboxdUsername'] ?? '').toString().trim();
+          final appU = (data['displayName'] ?? data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
+          if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
+            _appUsername = appU;
+          }
+          if (lb.isNotEmpty && lb != _lbUsername) {
+            _lbUsername = lb;
+          }
         });
-        _checkGuideVisibility();
-      });
-}
+      }
+      _checkGuideVisibility();
+    }
+
+    // --- KESİN ÇÖZÜM: ARKAPLANDA İNEN VERİ VARSA ANINDA GÖSTER ---
+    if (GlobalDataService.instance.myProfileData != null) {
+      updateProfileState(GlobalDataService.instance.myProfileData!);
+    }
+
+    _userSub?.cancel();
+    _userSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) async {
+          if (!snap.exists) return;
+          updateProfileState(snap.data() ?? const {});
+        });
+  }
 
 bool _listEquals(List a, List b) {
   if (a.length != b.length) return false;

@@ -10,6 +10,7 @@ import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/services/tab_service.dart';
+import 'package:fluttergirdi/services/global_data_service.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -22,6 +23,7 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
   late final AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSubscription;
+  Timer? _smartLoadingTimer;
 
   final List<Widget> _pages = [
     const FeedPage(),
@@ -41,6 +43,8 @@ class _HomeShellState extends State<HomeShell> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
+      GlobalDataService.instance.startPreloading();
+      _startSmartLoading();
     });
 
     _initDeepLinks();
@@ -71,9 +75,32 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   // --- İŞTE SİHİRLİ KISIM (AKILLI YÜKLEME) ---
+  void _startSmartLoading() {
+    // Feed (0) zaten yüklü. Diğer sekmeleri aralarına yarım saniye 
+    // koyarak arka planda yüklüyoruz. Hepsini aynı anda yüklemek 
+    // uygulamanın ilk açılışta kasmasına sebep olur.
+    
+    _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
+      if (mounted && !_loadedPages[3]) {
+        setState(() => _loadedPages[3] = true); // 1. Öncelik: Profil Sayfası
+      }
 
+      _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
+        if (mounted && !_loadedPages[2]) {
+          setState(() => _loadedPages[2] = true); // 2. Öncelik: Mesajlar
+        }
+
+        _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
+          if (mounted && !_loadedPages[1]) {
+            setState(() => _loadedPages[1] = true); // 3. Öncelik: Cinephiles
+          }
+        });
+      });
+    });
+  }
   @override
   void dispose() {
+    _smartLoadingTimer?.cancel();
     _linkSubscription?.cancel();
     TabService.instance.indexNotifier.removeListener(_onTabServiceIndexChanged);
     super.dispose();

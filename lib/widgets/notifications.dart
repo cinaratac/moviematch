@@ -21,7 +21,7 @@ class NotificationsButton extends StatelessWidget {
     
     if (uid == null) {
       return IconButton(
-        icon: const Icon(Icons.notifications_none),
+        icon: const Icon(Icons.favorite_border), // Instagram tarzı kalp ikonu
         onPressed: () {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Bildirimler için giriş yapmalısın.')),
@@ -47,8 +47,13 @@ class NotificationsButton extends StatelessWidget {
           children: [
             IconButton(
               tooltip: 'Bildirimler',
-              icon: const Icon(Icons.notifications_none),
-              onPressed: () => _openSheet(context, uid),
+              icon: Icon(unread > 0 ? Icons.favorite : Icons.favorite_border, color: unread > 0 ? cs.error : null),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => NotificationsScreen(uid: uid)),
+                );
+              },
             ),
             if (unread > 0)
               Positioned(
@@ -59,14 +64,15 @@ class NotificationsButton extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: cs.error,
                     borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2), // IG tarzı çerçeve
                   ),
                   constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                   child: Text(
                     unread > 9 ? '9+' : unread.toString(),
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -77,30 +83,22 @@ class NotificationsButton extends StatelessWidget {
       },
     );
   }
-
-  void _openSheet(BuildContext context, String uid) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _NotificationsSheet(uid: uid),
-    );
-  }
 }
 
-class _NotificationsSheet extends StatefulWidget {
+// ============================================================================
+// TAM SAYFA BİLDİRİM EKRANI
+// ============================================================================
+class NotificationsScreen extends StatefulWidget {
   final String uid;
-  const _NotificationsSheet({required this.uid});
+  const NotificationsScreen({super.key, required this.uid});
 
   @override
-  State<_NotificationsSheet> createState() => _NotificationsSheetState();
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
-class _NotificationsSheetState extends State<_NotificationsSheet> {
+class _NotificationsScreenState extends State<NotificationsScreen> {
   late final Query<Map<String, dynamic>> _q;
   late final Stream<QuerySnapshot<Map<String, dynamic>>> _notificationsStream;
-
-  // NOT: Özel _actorCache tamamen silindi. Artık UserCacheService kullanıyoruz.
 
   @override
   void initState() {
@@ -117,6 +115,7 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
 
     _notificationsStream = _q.snapshots();
 
+    // Sayfa açıldığında arka planda okundu işaretle
     NotificationService.I.markAllAsRead(widget.uid);
     NotificationService.I.deleteOldNotifications(widget.uid);
   }
@@ -124,136 +123,131 @@ class _NotificationsSheetState extends State<_NotificationsSheet> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.9,
-      minChildSize: 0.6,
-      maxChildSize: 0.98,
-      builder: (context, controller) {
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-              child: Row(
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Bildirimler',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+        ),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _notificationsStream,
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final docs = snap.data?.docs ?? [];
+          if (docs.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('Bildirimler', style: Theme.of(context).textTheme.titleMedium),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Kapat',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
+                  Icon(Icons.favorite_border, size: 64, color: cs.onSurfaceVariant.withOpacity(0.5)),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Hareket Yok', 
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Henüz bildirimin bulunmuyor.', 
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)
+                  )
                 ],
               ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _notificationsStream,
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final docs = snap.data?.docs ?? [];
-                  if (docs.isEmpty) {
-                    return Center(
-                      child: Text(
-                        'Henüz bildirimin yok.', 
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)
-                      )
-                    );
-                  }
+            );
+          }
 
-                  // --- MERKEZİ CACHE KULLANIMI: Eksik kullanıcıları toplu olarak arka planda çek ---
-                  final Set<String> actorIds = {};
-                  for (var doc in docs) {
-                    final aId = doc.data()['actorId'];
-                    if (aId != null && aId.toString().isNotEmpty) {
-                      actorIds.add(aId.toString());
-                    }
-                  }
-                  final missingIds = actorIds.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
-                  if (missingIds.isNotEmpty) {
-                    Future.microtask(() async {
-                      await UserCacheService.instance.fetchUsers(missingIds);
-                      if (mounted) setState(() {}); // Veriler geldiğinde ekranı pürüzsüz yenile
-                    });
-                  }
-                  // ----------------------------------------------------------------------------------
+          // --- MERKEZİ CACHE KULLANIMI ---
+          final Set<String> actorIds = {};
+          for (var doc in docs) {
+            final aId = doc.data()['actorId'];
+            if (aId != null && aId.toString().isNotEmpty) {
+              actorIds.add(aId.toString());
+            }
+          }
+          final missingIds = actorIds.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
+          if (missingIds.isNotEmpty) {
+            Future.microtask(() async {
+              await UserCacheService.instance.fetchUsers(missingIds);
+              if (mounted) setState(() {}); 
+            });
+          }
+          // ----------------------------------------------------------------------------------
 
-                  // BEĞENİLERİ GRUPLA
-                  final List<dynamic> displayItems = [];
-                  final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> likeGroups = {};
+          // BEĞENİLERİ GRUPLA
+          final List<dynamic> displayItems = [];
+          final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> likeGroups = {};
 
-                  for (var doc in docs) {
-                    final data = doc.data();
-                    final type = (data['type'] ?? '').toString();
-                    final postId = (data['postId'] ?? '').toString();
+          for (var doc in docs) {
+            final data = doc.data();
+            final type = (data['type'] ?? '').toString();
+            final postId = (data['postId'] ?? '').toString();
 
-                    if (type == 'like' && postId.isNotEmpty && postId != '-') {
-                      likeGroups.putIfAbsent(postId, () => []).add(doc);
-                    } else {
-                      displayItems.add(doc);
-                    }
-                  }
+            if (type == 'like' && postId.isNotEmpty && postId != '-') {
+              likeGroups.putIfAbsent(postId, () => []).add(doc);
+            } else {
+              displayItems.add(doc);
+            }
+          }
 
-                  likeGroups.forEach((postId, groupDocs) {
-                    if (groupDocs.length == 1) {
-                      displayItems.add(groupDocs.first);
-                    } else {
-                      displayItems.add({
-                        'isGroupedLike': true,
-                        'postId': postId,
-                        'docs': groupDocs,
-                      });
-                    }
-                  });
+          likeGroups.forEach((postId, groupDocs) {
+            if (groupDocs.length == 1) {
+              displayItems.add(groupDocs.first);
+            } else {
+              displayItems.add({
+                'isGroupedLike': true,
+                'postId': postId,
+                'docs': groupDocs,
+              });
+            }
+          });
 
-                  // TARİHE GÖRE SIRALA
-                  displayItems.sort((a, b) {
-                    Timestamp? tA = a is QueryDocumentSnapshot 
-                        ? (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp? 
-                        : a['createdAt'] as Timestamp?;
-                    Timestamp? tB = b is QueryDocumentSnapshot 
-                        ? (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp? 
-                        : b['createdAt'] as Timestamp?;
-                        
-                    if (tA == null || tB == null) return 0;
-                    return tB.compareTo(tA);
-                  });
+          // TARİHE GÖRE SIRALA
+          displayItems.sort((a, b) {
+            Timestamp? tA = a is QueryDocumentSnapshot 
+                ? (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp? 
+                : a['createdAt'] as Timestamp?;
+            Timestamp? tB = b is QueryDocumentSnapshot 
+                ? (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp? 
+                : b['createdAt'] as Timestamp?;
+                
+            if (tA == null || tB == null) return 0;
+            return tB.compareTo(tA);
+          });
 
-                  return ListView.separated(
-                    controller: controller,
-                    itemCount: displayItems.length,
-                    separatorBuilder: (context, index) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final item = displayItems[i];
+          return ListView.builder(
+            itemCount: displayItems.length,
+            // Instagram'da çizgiler yoktur, Padding ile ferah bir görünüm sağlanır
+            padding: const EdgeInsets.symmetric(vertical: 8), 
+            itemBuilder: (context, i) {
+              final item = displayItems[i];
 
-                      if (item is Map && item['isGroupedLike'] == true) {
-                        return _GroupedNotificationTile(
-                          postId: item['postId'],
-                          docs: item['docs'],
-                        );
-                      } else {
-                        return _SingleNotificationTile(
-                          doc: item as QueryDocumentSnapshot<Map<String, dynamic>>,
-                        );
-                      }
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
+              if (item is Map && item['isGroupedLike'] == true) {
+                return _GroupedNotificationTile(
+                  postId: item['postId'],
+                  docs: item['docs'],
+                );
+              } else {
+                return _SingleNotificationTile(
+                  doc: item as QueryDocumentSnapshot<Map<String, dynamic>>,
+                );
+              }
+            },
+          );
+        },
+      ),
     );
   }
 }
 
 // ============================================================================
-// 1. TEKİL BİLDİRİM KARTI (SIFIR YANIP SÖNME GARANTİLİ)
+// 1. TEKİL BİLDİRİM KARTI (Instagram Stili)
 // ============================================================================
 class _SingleNotificationTile extends StatefulWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> doc;
@@ -278,14 +272,12 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
     
     if (actorId.isEmpty) return;
 
-    // 1. ADIM: Daha önce yüklendiyse direkt RAM'den al
     final cached = UserCacheService.instance.getFromCache(actorId);
     if (cached != null) {
       if (mounted) setState(() => actor = cached);
       return; 
     }
 
-    // 2. ADIM: Hafızada yoksa, bildirimin içindeki eski/yedek veriyi ekrana bas (Fallback)
     final fallback = CachedUser(
       uid: actorId,
       displayName: (m['actorName'] ?? '').toString(),
@@ -294,7 +286,6 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
     );
     if (mounted) setState(() => actor = fallback);
 
-    // 3. ADIM: Merkezi servisten en güncelini bekle
     final fetched = await UserCacheService.instance.getUser(actorId);
     if (fetched != null && mounted) {
       setState(() => actor = fetched);
@@ -304,6 +295,7 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final m = widget.doc.data();
     final type = (m['type'] ?? '').toString();
     final actorId = (m['actorId'] ?? '').toString();
@@ -312,12 +304,10 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
     final read = (m['read'] ?? false) == true;
 
     final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
-    final title = _titleFor(type);
-    final subtitle = _subtitleFor(type, count);
+    final actionText = _actionTextFor(type, count);
 
     void goToProfile() {
       if (actorId.isNotEmpty) {
-        Navigator.pop(context);
         Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: actorId)));
       }
     }
@@ -327,13 +317,11 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
       if (type == 'follow') {
         goToProfile();
       } else if ((type == 'like' || type == 'comment') && postId.isNotEmpty && postId != '-') {
-        Navigator.pop(context);
         Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)));
       } else if (type == 'club_request') {
         final clubId = (m['clubId'] ?? '').toString();
         final clubName = (m['clubName'] ?? '').toString();
         if (clubId.isNotEmpty) {
-          Navigator.pop(context);
           Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(
             chatId: clubId, otherUid: '', otherTitle: clubName, isGroup: true, groupName: clubName,
           )));
@@ -341,60 +329,61 @@ class _SingleNotificationTileState extends State<_SingleNotificationTile> {
       }
     }
 
-    final displayName = actor?.displayName.isNotEmpty == true ? actor!.displayName : title;
-    final handle = actor?.handle.isNotEmpty == true ? actor!.handle : (actor?.displayName.isNotEmpty == true ? actor!.displayName : 'Kullanıcı');
+    final displayName = actor?.handle.isNotEmpty == true ? actor!.handle : (actor?.displayName.isNotEmpty == true ? actor!.displayName : 'Kullanıcı');
 
-    return ListTile(
+    return InkWell(
       onTap: () {
         widget.doc.reference.update({'read': true});
         goToContent(); 
       },
-      leading: GestureDetector(
-        onTap: goToProfile,
-        child: Stack(
-          clipBehavior: Clip.none,
+      child: Container(
+        color: read ? Colors.transparent : (isDark ? Colors.blue.withOpacity(0.1) : Colors.blue.withOpacity(0.05)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _Avatar(url: actor?.photoURL, radius: 20),
-            if (type == 'like')
-              Positioned(
-                bottom: -4,
-                right: -4,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).scaffoldBackgroundColor, 
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.favorite, size: 12, color: Colors.red),
+            GestureDetector(
+              onTap: goToProfile,
+              child: _Avatar(url: actor?.photoURL, radius: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: RichText(
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                text: TextSpan(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.3),
+                  children: [
+                    TextSpan(
+                      text: displayName,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    TextSpan(text: ' $actionText. '),
+                    TextSpan(
+                      text: timeLabel,
+                      style: TextStyle(color: cs.onSurfaceVariant),
+                    ),
+                  ],
                 ),
+              ),
+            ),
+            // Opsiyonel: Sağ tarafa postun küçük resmini koymak istersen burayı kullanabilirsin.
+            // Şimdilik sadece okunmamışsa ufak bir mavi nokta koyuyoruz.
+            if (!read)
+              Container(
+                margin: const EdgeInsets.only(left: 8),
+                width: 8, height: 8, 
+                decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle)
               ),
           ],
         ),
-      ),
-      title: GestureDetector(
-        onTap: goToProfile,
-        child: Text(
-          displayName, 
-          maxLines: 1, 
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w600), 
-        ),
-      ),
-      subtitle: Text('$handle $subtitle', maxLines: 2, overflow: TextOverflow.ellipsis),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
-          const SizedBox(height: 4),
-          if (!read) Container(width: 8, height: 8, decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle)),
-        ],
       ),
     );
   }
 }
 
 // ============================================================================
-// 2. ÇOKLU (GRUPLANMIŞ) BİLDİRİM KARTI
+// 2. ÇOKLU (GRUPLANMIŞ) BİLDİRİM KARTI (Instagram Stili)
 // ============================================================================
 class _GroupedNotificationTile extends StatefulWidget {
   final String postId;
@@ -432,7 +421,6 @@ class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
   Future<CachedUser> _resolveActor(String actorId, Map<String, dynamic> m) async {
     if (actorId.isEmpty) return CachedUser(uid: '', displayName: '', handle: '', photoURL: '');
     
-    // Hafızada varsa anında dön
     final cached = UserCacheService.instance.getFromCache(actorId);
     if (cached != null) return cached;
 
@@ -452,6 +440,7 @@ class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final firstData = widget.docs[0].data();
     final createdAt = firstData['createdAt'] as Timestamp?;
     final timeLabel = createdAt != null ? _timeAgoShort(createdAt.toDate()) : '';
@@ -463,60 +452,77 @@ class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
       else if (actor1!.displayName.isNotEmpty) name = actor1!.displayName;
     }
 
-    return ListTile(
+    return InkWell(
       onTap: () {
-        Navigator.pop(context);
         Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(postId: widget.postId)));
       },
-      leading: SizedBox(
-        width: 52,
-        height: 42,
-        child: Stack(
-          clipBehavior: Clip.none,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Positioned(
-              right: 0,
-              top: 4,
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2.5),
-                ),
-                child: _Avatar(url: actor2?.photoURL, radius: 15),
+            SizedBox(
+              width: 50,
+              height: 50,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                      ),
+                      child: _Avatar(url: actor2?.photoURL, radius: 18),
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    bottom: 0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                      ),
+                      child: _Avatar(url: actor1?.photoURL, radius: 18),
+                    ),
+                  ),
+                ],
               ),
             ),
-            Positioned(
-              left: 0,
-              top: 0,
-              child: Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2.5),
+            const SizedBox(width: 14),
+            Expanded(
+              child: RichText(
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                text: TextSpan(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.3),
+                  children: [
+                    TextSpan(
+                      text: name,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    TextSpan(
+                      text: ' ve ',
+                    ),
+                    TextSpan(
+                      text: '$othersCount diğer kişi',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const TextSpan(text: ' gönderini beğendi. '),
+                    TextSpan(
+                      text: timeLabel,
+                      style: TextStyle(color: cs.onSurfaceVariant),
+                    ),
+                  ],
                 ),
-                child: _Avatar(url: actor1?.photoURL, radius: 18),
-              ),
-            ),
-            Positioned(
-              bottom: -4,
-              right: -4,
-              child: Container(
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.favorite, size: 12, color: Colors.red),
               ),
             ),
           ],
         ),
       ),
-      title: Text(
-        '$name ve $othersCount diğer kişi',
-        style: Theme.of(context).textTheme.titleSmall,
-      ),
-      subtitle: const Text('gönderini beğendi'),
-      trailing: Text(timeLabel, style: Theme.of(context).textTheme.labelSmall),
     );
   }
 }
@@ -524,23 +530,14 @@ class _GroupedNotificationTileState extends State<_GroupedNotificationTile> {
 // ============================================================================
 // YARDIMCI FONKSİYONLAR
 // ============================================================================
-String _titleFor(String type) {
-  switch (type) {
-    case 'like': return 'Yeni beğeni';
-    case 'comment': return 'Yeni yorum';
-    case 'follow': return 'Yeni takipçi';
-    case 'club_request': return 'Kulüp İsteği';
-    default: return 'Bildirim';
-  }
-}
 
-String _subtitleFor(String type, int count) {
+String _actionTextFor(String type, int count) {
   final suffix = count > 1 ? ' ve ${count - 1} diğer kişi' : '';
   switch (type) {
-    case 'like': return '$suffix gönderinizi beğendi';
-    case 'comment': return '$suffix gönderinize yorum yaptı';
-    case 'follow': return 'sizi takip etmeye başladı';
-    case 'club_request': return 'kulübünüze katılmak istiyor';
+    case 'like': return 'gönderini beğendi$suffix';
+    case 'comment': return 'gönderine yorum yaptı$suffix';
+    case 'follow': return 'seni takip etmeye başladı';
+    case 'club_request': return 'kulübüne katılmak istiyor';
     default: return 'bir etkinlikte bulundu';
   }
 }

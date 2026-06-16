@@ -9,6 +9,7 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'dart:async';
+import 'package:fluttergirdi/services/global_data_service.dart';
 
 class FilmItem {
   final String id;
@@ -119,22 +120,28 @@ class _MatchListScreenState extends State<MatchListScreen> {
       global_match.MatchService.instance.clearCache();
     }
 
-    if (mounted) setState(() => _loading = true);
+    // --- KESİN ÇÖZÜM: ARKAPLANDA HAZIR DATA VARSA YÜKLEME EKRANINI GÖSTERMEDEN DİREKT BAS ---
+    if (!forceRefresh && GlobalDataService.instance.myMatches != null && GlobalDataService.instance.myMatches!.isNotEmpty) {
+      if (mounted) {
+        setState(() {
+          _all = GlobalDataService.instance.myMatches!;
+          _loading = false;
+        });
+      }
+    } else {
+      if (mounted) setState(() => _loading = true);
+    }
 
     _matchSubscription?.cancel();
-    // YENİ: findMatches() yerine findMatchesStream() kullanıyoruz ve .listen() ile dinliyoruz
     _matchSubscription = global_match.MatchService.instance
         .findMatchesStream(me.uid)
         .listen(
           (results) {
             if (!mounted) return;
-
             setState(() {
               _all = results;
-              _loading =
-                  false; // İLK 10 KİŞİ GELDİĞİ SANİYE YÜKLEME EKRANI KALKAR!
+              _loading = false; 
             });
-
             if (_all.isNotEmpty) {
               _markVisibleAsSeen(me.uid, _all.first.uid);
             }
@@ -145,9 +152,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
               _loading = false;
               if (_all.isEmpty) _all = [];
             });
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Öneriler alınamadı: $e')));
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Öneriler alınamadı: $e')));
           },
         );
   }
