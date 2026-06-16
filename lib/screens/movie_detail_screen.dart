@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -38,43 +39,68 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   List<dynamic> _crew = [];
   bool _loading = true;
   bool _hasError = false;
-  
-  String? _catalogDocId; 
 
+  String? _catalogDocId;
+
+  // Stream nesneleri – sadece StreamBuilder'lara veriliyor, ayrıca .listen() YOK
   Stream<DocumentSnapshot>? _userProfileStream;
   Stream<List<CustomList>>? _customListsStream;
 
-  // --- YENİ EKLENEN: ARAYÜZÜ IŞIK HIZINA ÇIKARAN ANLIK HAFIZA (CACHE) ---
+  // Cache: stream'den gelen son veriyi tutuyoruz
+  // StreamBuilder'lar zaten veriyi kendileri yönetiyor;
+  // bu cache sadece bottom sheet ilk açıldığında boş göstermemek için.
   Map<String, dynamic>? _userProfileCache;
   List<CustomList>? _customListsCache;
+
+  // ÖNEMLİ: .listen() kullandığımız subscription'ları burada saklıyoruz
+  // ki dispose()'da iptal edebilelim.
+  StreamSubscription<DocumentSnapshot>? _profileSub;
+  StreamSubscription<List<CustomList>>? _listsSub;
 
   @override
   void initState() {
     super.initState();
     _fetchDetails();
-    
-    // Film sayfası açılır açılmaz verileri dinlemeye başlıyoruz ki 
-    // menüye tıklandığında bekleme olmasın
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      _userProfileStream = FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
-      _userProfileStream!.listen((snap) {
-        if (mounted) {
-          setState(() {
-            _userProfileCache = snap.data() as Map<String, dynamic>?;
-          });
-        }
-      });
+    _initStreams();
+  }
 
-      _customListsStream = CustomListService.instance.getUserLists(uid);
-      _customListsStream!.listen((lists) {
-        if (mounted) {
-          setState(() {
-            _customListsCache = lists;
-          });
-        }
-      });
-    }
+  void _initStreams() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    // Stream nesnelerini oluştur (StreamBuilder için)
+    _userProfileStream =
+        FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
+
+    _customListsStream = CustomListService.instance.getUserLists(uid);
+
+    // Cache güncellemek için .listen() – subscription'ı MUTLAKA kaydet
+    _profileSub = _userProfileStream!.listen((snap) {
+      if (mounted) {
+        setState(() {
+          _userProfileCache = snap.data() as Map<String, dynamic>?;
+        });
+      }
+    });
+
+    _listsSub = _customListsStream!.listen((lists) {
+      if (mounted) {
+        setState(() {
+          _customListsCache = lists;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    // Stream'leri burada iptal ediyoruz.
+    // Bu olmazsa Firestore listener'ları arka planda sonsuza dek çalışır,
+    // her değişiklikte kapalı ekrana setState yapmaya çalışır ve
+    // tüm uygulamayı yavaşlatır.
+    _profileSub?.cancel();
+    _listsSub?.cancel();
+    super.dispose();
   }
 
   String _timeAgo(DateTime dt) {
@@ -101,12 +127,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       final result = await FirebaseFunctions.instance
           .httpsCallable('callTMDB')
           .call({
-            'endpoint': '/3/movie/${widget.tmdbId}',
-            'params': {
-              'language': 'tr-TR',
-              'append_to_response': 'credits,release_dates',
-            },
-          });
+        'endpoint': '/3/movie/${widget.tmdbId}',
+        'params': {
+          'language': 'tr-TR',
+          'append_to_response': 'credits,release_dates',
+        },
+      });
 
       final data = Map<String, dynamic>.from(result.data as Map);
 
@@ -118,9 +144,11 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
           _crew = credits['crew'] ?? [];
           _loading = false;
         });
-        
-        _catalogDocId = await _registerMovieToCatalog();
-        if (mounted) setState(() {});
+
+        // Catalog kaydını arka planda yap, UI'ı bekleme
+        CatalogService().upsertFromTmdb(data).then((docId) {
+          if (mounted) setState(() => _catalogDocId = docId);
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -144,69 +172,61 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
             'title': _movieData!['title'],
             'poster': widget.posterUrl,
           },
-          onSend:
-              ({
-                required text,
-                movie,
-                images,
-                rating,
-                required isSpoiler,
-                tags,
-                reviewTitle,
-              }) async {
-                final user = FirebaseAuth.instance.currentUser;
-                if (user == null) return;
+          onSend: ({
+            required text,
+            movie,
+            images,
+            rating,
+            required isSpoiler,
+            tags,
+            reviewTitle,
+          }) async {
+            final user = FirebaseAuth.instance.currentUser;
+            if (user == null) return;
 
-                List<String> postImageUrls = [];
+            List<String> postImageUrls = [];
+            if (images != null && images.isNotEmpty) {
+              for (var i = 0; i < images.length; i++) {
+                final image = images[i];
+                final String fileName =
+                    '${user.uid}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+                final ref = FirebaseStorage.instance
+                    .ref()
+                    .child('post_images')
+                    .child(fileName);
+                await ref.putFile(image);
+                final url = await ref.getDownloadURL();
+                postImageUrls.add(url);
+              }
+            }
 
-                if (images != null && images.isNotEmpty) {
-                  for (var i = 0; i < images.length; i++) {
-                    final image = images[i];
-                    final String fileName =
-                        '${user.uid}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
-                    final ref = FirebaseStorage.instance
-                        .ref()
-                        .child('post_images')
-                        .child(fileName);
-                    await ref.putFile(image);
-                    final url = await ref.getDownloadURL();
-                    postImageUrls.add(url);
-                  }
-                }
+            await FeedService.instance.createPost(
+              text: text,
+              movie: movie,
+              photoURL:
+                  postImageUrls.isNotEmpty ? postImageUrls.first : null,
+              photoURLs: postImageUrls,
+              displayName: user.displayName,
+              handle: user.email?.split('@')[0],
+              rating: rating,
+              isSpoiler: isSpoiler,
+              tags: tags,
+              reviewTitle: reviewTitle,
+            );
 
-                await FeedService.instance.createPost(
-                  text: text,
-                  movie: movie,
-                  photoURL: postImageUrls.isNotEmpty
-                      ? postImageUrls.first
-                      : null,
-                  photoURLs: postImageUrls,
-                  displayName: user.displayName,
-                  handle: user.email?.split('@')[0],
-                  rating: rating,
-                  isSpoiler: isSpoiler,
-                  tags: tags,
-                  reviewTitle: reviewTitle,
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context); 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Gönderiniz Paylaşıldı!'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
+            if (context.mounted) {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Gönderiniz Paylaşıldı!'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          },
         ),
       ),
     );
-  }
-
-  Future<String?> _registerMovieToCatalog() async {
-    if (_movieData == null) return null;
-    return await CatalogService().upsertFromTmdb(_movieData!); 
   }
 
   Future<void> _toggleWatched(bool isCurrentlyAdded) async {
@@ -214,16 +234,16 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     if (user == null || _movieData == null) return;
 
     final title = _movieData!['title'];
-    Navigator.pop(context); // Menüyü kapat
+    Navigator.pop(context);
 
-    // SADECE BİLDİRİMİ GÖSTER
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(isCurrentlyAdded ? "'$title', izlediklerimden çıkarıldı." : "'$title', izledim olarak işaretlendi."), 
-      backgroundColor: isCurrentlyAdded ? Colors.redAccent : Colors.teal, 
-      behavior: SnackBarBehavior.floating
+      content: Text(isCurrentlyAdded
+          ? "'$title', izlediklerimden çıkarıldı."
+          : "'$title', izledim olarak işaretlendi."),
+      backgroundColor: isCurrentlyAdded ? Colors.redAccent : Colors.teal,
+      behavior: SnackBarBehavior.floating,
     ));
 
-    // VERİTABANI İŞİNİ SERVİSE DEVRET (Arayüz burada işini bitirir)
     UserProfileService.instance.fastToggleWatched(
       uid: user.uid,
       movieData: _movieData!,
@@ -233,29 +253,30 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     );
   }
 
-  Future<void> _toggleStandardList(ShelfTarget target, bool isCurrentlyAdded) async {
+  Future<void> _toggleStandardList(
+      ShelfTarget target, bool isCurrentlyAdded) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _movieData == null) return;
 
     final title = _movieData!['title'];
-    Navigator.pop(context); // Menüyü kapat
+    Navigator.pop(context);
 
-    String targetName = '';
-    switch (target) {
-      case ShelfTarget.fiveStar: targetName = 'Sevdiklerim'; break;
-      case ShelfTarget.disliked: targetName = 'Sevmedim'; break;
-      case ShelfTarget.favorites: targetName = 'Favoriler'; break;
-      case ShelfTarget.watchlist: targetName = 'İzlenecekler'; break;
-    }
+    final targetName = switch (target) {
+      ShelfTarget.fiveStar  => 'Sevdiklerim',
+      ShelfTarget.disliked  => 'Sevmedim',
+      ShelfTarget.favorites => 'Favoriler',
+      ShelfTarget.watchlist => 'İzlenecekler',
+    };
 
-    // SADECE BİLDİRİMİ GÖSTER
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(isCurrentlyAdded ? "'$title', $targetName listesinden çıkartıldı." : "'$title', $targetName listesine eklendi."), 
-      backgroundColor: isCurrentlyAdded ? Colors.redAccent : Colors.green.shade700, 
-      behavior: SnackBarBehavior.floating
+      content: Text(isCurrentlyAdded
+          ? "'$title', $targetName listesinden çıkartıldı."
+          : "'$title', $targetName listesine eklendi."),
+      backgroundColor:
+          isCurrentlyAdded ? Colors.redAccent : Colors.green.shade700,
+      behavior: SnackBarBehavior.floating,
     ));
 
-    // VERİTABANI İŞİNİ SERVİSE DEVRET
     UserProfileService.instance.fastToggleStandardList(
       uid: user.uid,
       movieData: _movieData!,
@@ -267,13 +288,10 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     );
   }
 
-  
-
   Future<void> _addToCustomList(String listId, String listTitle) async {
     if (_movieData == null) return;
     final messenger = ScaffoldMessenger.of(context);
 
-    // --- YENİ EKLENEN: ÇİFT EKLEME KORUMASI ---
     final query = await FirebaseFirestore.instance
         .collection('custom_lists')
         .doc(listId)
@@ -282,34 +300,33 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
         .get();
 
     if (query.docs.isNotEmpty) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Bu film zaten "$listTitle" listesinde ekli!'),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      Navigator.pop(context); // Menüyü kapat
+      messenger.showSnackBar(SnackBar(
+        content: Text('Bu film zaten "$listTitle" listesinde ekli!'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ));
+      Navigator.pop(context);
       return;
     }
 
-    Navigator.pop(context); // Sorun yoksa menüyü kapat
+    Navigator.pop(context);
 
     final movieMap = {
       'id': widget.tmdbId,
       'title': _movieData!['title'],
-      'poster': _movieData!['poster_path'] != null ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}' : null,
+      'poster': _movieData!['poster_path'] != null
+          ? 'https://image.tmdb.org/t/p/w500${_movieData!['poster_path']}'
+          : null,
     };
 
-    CustomListService.instance.addMovieToList(listId, movieMap); 
+    CustomListService.instance.addMovieToList(listId, movieMap);
 
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('${_movieData!['title']}, "$listTitle" listesine eklendi.'),
-        backgroundColor: Colors.green.shade700,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    messenger.showSnackBar(SnackBar(
+      content:
+          Text('${_movieData!['title']}, "$listTitle" listesine eklendi.'),
+      backgroundColor: Colors.green.shade700,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   void _showAddSheet() {
@@ -318,7 +335,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       isScrollControlled: true,
       builder: (context) {
         final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -336,76 +354,104 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
               children: [
                 Center(
                   child: Container(
-                    width: 40, height: 4,
-                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(2)),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text('Listelere Ekle', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Text('Listelere Ekle',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
-                const Text('Profil Listeleri', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold)),
+                const Text('Profil Listeleri',
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
-                
+
+                // StreamBuilder – stream'i initState'de açtık, burada sadece dinliyoruz.
+                // Ayrıca .listen() YOK, bu yüzden subscription sızıntısı olmaz.
                 StreamBuilder<DocumentSnapshot>(
                   stream: _userProfileStream,
                   builder: (context, snapshot) {
-                    // HAFIZADAN ANINDA VERİ ÇEK (Ekranda bekleme yaşanmaz)
-                    final data = snapshot.data?.data() as Map<String, dynamic>? ?? _userProfileCache ?? {};
+                    final data =
+                        snapshot.data?.data() as Map<String, dynamic>? ??
+                            _userProfileCache ??
+                            {};
 
-                    // Bu fonksiyon _showAddSheet -> StreamBuilder içinde bulunuyor
-                    bool checkIsAdded(String listKey) {
-                      // ID'leri küçük harfe ve string'e çevirerek tip uyuşmazlığını engelliyoruz
-                      final dbKeys = List<dynamic>.from(data[listKey] ?? [])
-                          .map((e) => e.toString().trim().toLowerCase()).toList();
-                      
-                      final currentIdStr = widget.tmdbId.toString().trim().toLowerCase();
-                      
-                      if (dbKeys.contains(currentIdStr)) return true;
-                      if (_catalogDocId != null && dbKeys.contains(_catalogDocId!.trim().toLowerCase())) return true;
-                      
-                      return false;
-                    }
+                    // Tek seferinde Set'e dönüştür – döngü içinde tekrar hesaplama yok
+                    final watchedSet   = _toNormalizedSet(data['watchedKeys']);
+                    final watchlistSet = _toNormalizedSet(data['watchlistKeys']);
+                    final favoritesSet = _toNormalizedSet(data['favoritesKeys']);
+                    final fiveStarSet  = _toNormalizedSet(data['fiveStarKeys']);
+                    final dislikedSet  = _toNormalizedSet(data['dislikedKeys']);
 
-                    final inWatchlist = checkIsAdded('watchlistKeys');
-                    final inFavorites = checkIsAdded('favoritesKeys');
-                    final inFiveStar = checkIsAdded('fiveStarKeys');
-                    final inDisliked = checkIsAdded('dislikedKeys');
-                    final inWatched = checkIsAdded('watchedKeys'); 
+                    final tmdbStr = widget.tmdbId.toString();
+                    final catalogId = _catalogDocId?.toLowerCase();
+
+                    bool isIn(Set<String> set) =>
+                        set.contains(tmdbStr) ||
+                        (catalogId != null && set.contains(catalogId));
 
                     return GridView.count(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      crossAxisCount: 3, 
+                      crossAxisCount: 3,
                       mainAxisSpacing: 10,
                       crossAxisSpacing: 10,
                       children: [
-                        _buildQuickAction(Icons.visibility_rounded, 'İzledim', Colors.teal, inWatched, () => _toggleWatched(inWatched)),
-                        _buildQuickAction(Icons.bookmark_add_rounded, 'İzlenecekler', Colors.blue, inWatchlist, () => _toggleStandardList(ShelfTarget.watchlist, inWatchlist)),
-                        _buildQuickAction(Icons.favorite_rounded, 'Favoriler', Colors.pink, inFavorites, () => _toggleStandardList(ShelfTarget.favorites, inFavorites)),
-                        _buildQuickAction(Icons.star_rounded, 'Sevdiklerim', Colors.amber, inFiveStar, () => _toggleStandardList(ShelfTarget.fiveStar, inFiveStar)),
-                        _buildQuickAction(Icons.thumb_down_rounded, 'Sevmedim', Colors.redAccent, inDisliked, () => _toggleStandardList(ShelfTarget.disliked, inDisliked)),
+                        _buildQuickAction(Icons.visibility_rounded, 'İzledim',
+                            Colors.teal, isIn(watchedSet),
+                            () => _toggleWatched(isIn(watchedSet))),
+                        _buildQuickAction(Icons.bookmark_add_rounded,
+                            'İzlenecekler', Colors.blue, isIn(watchlistSet),
+                            () => _toggleStandardList(ShelfTarget.watchlist, isIn(watchlistSet))),
+                        _buildQuickAction(Icons.favorite_rounded, 'Favoriler',
+                            Colors.pink, isIn(favoritesSet),
+                            () => _toggleStandardList(ShelfTarget.favorites, isIn(favoritesSet))),
+                        _buildQuickAction(Icons.star_rounded, 'Sevdiklerim',
+                            Colors.amber, isIn(fiveStarSet),
+                            () => _toggleStandardList(ShelfTarget.fiveStar, isIn(fiveStarSet))),
+                        _buildQuickAction(Icons.thumb_down_rounded, 'Sevmedim',
+                            Colors.redAccent, isIn(dislikedSet),
+                            () => _toggleStandardList(ShelfTarget.disliked, isIn(dislikedSet))),
                       ],
                     );
                   },
                 ),
 
                 const Divider(height: 40),
-                const Text('Özel Listelerim', style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold)),
+                const Text('Özel Listelerim',
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold)),
 
                 StreamBuilder<List<CustomList>>(
                   stream: _customListsStream,
-                  initialData: _customListsCache, // Liste zaten hafızadaysa yükleme ekranı çıkarma!
+                  initialData: _customListsCache,
                   builder: (context, snapshot) {
-                    final lists = snapshot.data ?? _customListsCache ?? [];
-                    
-                    if (snapshot.connectionState == ConnectionState.waiting && lists.isEmpty) {
-                      return const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()));
+                    final lists =
+                        snapshot.data ?? _customListsCache ?? [];
+
+                    if (snapshot.connectionState ==
+                            ConnectionState.waiting &&
+                        lists.isEmpty) {
+                      return const SizedBox(
+                          height: 100,
+                          child:
+                              Center(child: CircularProgressIndicator()));
                     }
-                    
+
                     if (lists.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20),
-                        child: Text('Henüz özel bir listen yok.', style: TextStyle(color: Colors.grey)),
+                        child: Text('Henüz özel bir listen yok.',
+                            style: TextStyle(color: Colors.grey)),
                       );
                     }
 
@@ -418,18 +464,33 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: Container(
-                            width: 40, height: 40,
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
                               color: Colors.grey.shade800,
                               borderRadius: BorderRadius.circular(8),
-                              image: list.coverImageUrl != null ? DecorationImage(image: NetworkImage(list.coverImageUrl!), fit: BoxFit.cover) : null,
+                              image: list.coverImageUrl != null
+                                  ? DecorationImage(
+                                      image: NetworkImage(
+                                          list.coverImageUrl!),
+                                      fit: BoxFit.cover)
+                                  : null,
                             ),
-                            child: list.coverImageUrl == null ? const Icon(Icons.list, color: Colors.white54) : null,
+                            child: list.coverImageUrl == null
+                                ? const Icon(Icons.list,
+                                    color: Colors.white54)
+                                : null,
                           ),
-                          title: Text(list.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('${list.movieCount} film', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                          trailing: const Icon(Icons.add_circle_outline),
-                          onTap: () => _addToCustomList(list.id, list.title),
+                          title: Text(list.title,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          subtitle: Text('${list.movieCount} film',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.grey)),
+                          trailing:
+                              const Icon(Icons.add_circle_outline),
+                          onTap: () =>
+                              _addToCustomList(list.id, list.title),
                         );
                       },
                     );
@@ -441,6 +502,15 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
         );
       },
     );
+  }
+
+  /// Liste verilerini normalize edilmiş Set'e dönüştür.
+  /// Bu sayede checkIsAdded her render'da tekrar dönüşüm yapmaz.
+  Set<String> _toNormalizedSet(dynamic raw) {
+    if (raw == null) return {};
+    return List<dynamic>.from(raw as List)
+        .map((e) => e.toString().trim().toLowerCase())
+        .toSet();
   }
 
   Widget _buildQuickAction(
@@ -473,7 +543,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
             label,
             style: TextStyle(
               fontSize: 11,
-              fontWeight: isAdded ? FontWeight.bold : FontWeight.w600,
+              fontWeight:
+                  isAdded ? FontWeight.bold : FontWeight.w600,
               color: isAdded ? color : Colors.grey.shade600,
             ),
             textAlign: TextAlign.center,
@@ -575,8 +646,10 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                     fit: BoxFit.cover,
                   ),
                   BackdropFilter(
-                    filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                    child: Container(color: bgColor.withOpacity(0.85)),
+                    filter:
+                        ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                    child:
+                        Container(color: bgColor.withOpacity(0.85)),
                   ),
                 ],
               ),
@@ -585,10 +658,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
             const Center(child: CircularProgressIndicator())
           else if (_hasError || _movieData == null)
             Center(
-              child: Text(
-                "Detaylar yüklenemedi",
-                style: TextStyle(color: textColor),
-              ),
+              child: Text("Detaylar yüklenemedi",
+                  style: TextStyle(color: textColor)),
             )
           else
             SingleChildScrollView(
@@ -602,7 +673,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 20),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -621,7 +693,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                         const SizedBox(width: 20),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
                             children: [
                               Text(
                                 _movieData!['title'],
@@ -645,11 +718,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                               const SizedBox(height: 12),
                               Row(
                                 children: [
-                                  const Icon(
-                                    Icons.star_rounded,
-                                    color: Colors.amber,
-                                    size: 28,
-                                  ),
+                                  const Icon(Icons.star_rounded,
+                                      color: Colors.amber, size: 28),
                                   const SizedBox(width: 4),
                                   Text(
                                     _rating,
@@ -670,31 +740,33 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => DirectorScreen(
-                                          directorId: director['id'] as int,
+                                          directorId:
+                                              director['id'] as int,
                                           directorName:
-                                              director['name'] ?? 'Bilinmiyor',
+                                              director['name'] ??
+                                                  'Bilinmiyor',
                                         ),
                                       ),
                                     );
                                   } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Yönetmen bilgisi bulunamadı.',
-                                        ),
-                                      ),
-                                    );
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(const SnackBar(
+                                      content: Text(
+                                          'Yönetmen bilgisi bulunamadı.'),
+                                    ));
                                   }
                                 },
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       "Yönetmen",
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w500,
-                                        color: textColor.withOpacity(0.5),
+                                        color:
+                                            textColor.withOpacity(0.5),
                                         letterSpacing: 0.5,
                                       ),
                                     ),
@@ -705,10 +777,10 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                                         fontSize: 15,
                                         fontWeight: FontWeight.w600,
                                         color: textColor,
-                                        decoration: TextDecoration.underline,
-                                        decorationColor: textColor.withOpacity(
-                                          0.3,
-                                        ),
+                                        decoration:
+                                            TextDecoration.underline,
+                                        decorationColor:
+                                            textColor.withOpacity(0.3),
                                       ),
                                     ),
                                   ],
@@ -724,18 +796,16 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   const SizedBox(height: 30),
 
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 20),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          "Özet",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: textColor,
-                          ),
-                        ),
+                        Text("Özet",
+                            style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: textColor)),
                         const SizedBox(height: 8),
                         Text(
                           _movieData!['overview'] ?? 'Özet bulunamadı.',
@@ -752,26 +822,25 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   const SizedBox(height: 30),
 
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      "Oyuncular",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: textColor,
-                      ),
-                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text("Oyuncular",
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: textColor)),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
                     height: 130,
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                      ), 
-                      itemCount: _cast.length > 10 ? 10 : _cast.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 16),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 20),
+                      itemCount:
+                          _cast.length > 10 ? 10 : _cast.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(width: 16),
                       itemBuilder: (context, index) {
                         final actor = _cast[index];
                         return GestureDetector(
@@ -791,11 +860,11 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                               CircleAvatar(
                                 radius: 35,
                                 backgroundColor: Colors.grey.shade800,
-                                backgroundImage: actor['profile_path'] != null
-                                    ? NetworkImage(
-                                        'https://image.tmdb.org/t/p/w200${actor['profile_path']}',
-                                      )
-                                    : null,
+                                backgroundImage:
+                                    actor['profile_path'] != null
+                                        ? NetworkImage(
+                                            'https://image.tmdb.org/t/p/w200${actor['profile_path']}')
+                                        : null,
                                 child: actor['profile_path'] == null
                                     ? const Icon(Icons.person)
                                     : null,
@@ -828,13 +897,14 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                         .collection('posts')
                         .where(
                           Filter.or(
-                            Filter(
-                              'movie.id',
-                              isEqualTo: widget.tmdbId.toString(),
-                            ),
-                            Filter('movie.id', isEqualTo: widget.tmdbId),
-                            Filter('movie.tmdbId', isEqualTo: widget.tmdbId),
-                            Filter('movieTmdbId', isEqualTo: widget.tmdbId),
+                            Filter('movie.id',
+                                isEqualTo: widget.tmdbId.toString()),
+                            Filter('movie.id',
+                                isEqualTo: widget.tmdbId),
+                            Filter('movie.tmdbId',
+                                isEqualTo: widget.tmdbId),
+                            Filter('movieTmdbId',
+                                isEqualTo: widget.tmdbId),
                           ),
                         )
                         .limit(10)
@@ -845,7 +915,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
 
                       return Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 30),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 30),
                         decoration: BoxDecoration(
                           color: hasPosts ? bgColor : Colors.transparent,
                         ),
@@ -854,57 +925,53 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                           children: [
                             Padding(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                              ),
+                                  horizontal: 20),
                               child: Text(
                                 "Bu Film Hakkında Söylenenler",
                                 style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: textColor,
-                                ),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: textColor),
                               ),
                             ),
                             const SizedBox(height: 20),
-
                             if (snapshot.connectionState ==
                                 ConnectionState.waiting)
-                              const Center(child: CircularProgressIndicator())
+                              const Center(
+                                  child: CircularProgressIndicator())
                             else if (!hasPosts)
                               GestureDetector(
-                                onTap: () => _navigateToCompose(
-                                  context,
-                                ), 
+                                onTap: () =>
+                                    _navigateToCompose(context),
                                 child: Container(
                                   width: double.infinity,
                                   margin: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                  ),
+                                      horizontal: 20),
                                   padding: const EdgeInsets.all(30),
                                   decoration: BoxDecoration(
                                     color: isDark
                                         ? Colors.white.withOpacity(0.05)
                                         : Colors.black.withOpacity(0.05),
-                                    borderRadius: BorderRadius.circular(20),
+                                    borderRadius:
+                                        BorderRadius.circular(20),
                                     border: Border.all(
-                                      color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12,
-                                    ),
+                                        color: isDark
+                                            ? Colors.white12
+                                            : Colors.black12),
                                   ),
                                   child: Column(
                                     children: [
-                                      Icon(
-                                        Icons.add_comment_rounded,
-                                        color: textColor.withOpacity(0.4),
-                                        size: 40,
-                                      ),
+                                      Icon(Icons.add_comment_rounded,
+                                          color:
+                                              textColor.withOpacity(0.4),
+                                          size: 40),
                                       const SizedBox(height: 12),
                                       Text(
                                         'Henüz kimse bir şey söylememiş.\nİlk yorumu sen yaparak tartışmayı başlat!',
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
-                                          color: textColor.withOpacity(0.7),
+                                          color:
+                                              textColor.withOpacity(0.7),
                                           fontSize: 14,
                                           height: 1.5,
                                         ),
@@ -916,63 +983,71 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                             else
                               ListView.separated(
                                 shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
+                                physics:
+                                    const NeverScrollableScrollPhysics(),
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
+                                    horizontal: 20),
                                 itemCount: docs.length,
                                 separatorBuilder: (context, index) =>
                                     const SizedBox(height: 16),
                                 itemBuilder: (context, index) {
                                   final d = docs[index];
-                                  final m = d.data() as Map<String, dynamic>;
+                                  final m = d.data()
+                                      as Map<String, dynamic>;
                                   return PostTile(
                                     postId: d.id,
-                                    authorId: (m['authorId'] ?? '').toString(),
-                                    displayName: (m['displayName'] ?? '')
+                                    authorId: (m['authorId'] ?? '')
                                         .toString(),
-                                    handle: (m['handle'] ?? '').toString(),
-                                    photoURL: (m['photoURL'] ?? '').toString(),
+                                    displayName:
+                                        (m['displayName'] ?? '')
+                                            .toString(),
+                                    handle:
+                                        (m['handle'] ?? '').toString(),
+                                    photoURL:
+                                        (m['photoURL'] ?? '').toString(),
                                     timeLabel: m['createdAt'] == null
                                         ? ''
                                         : _timeAgo(
                                             (m['createdAt'] as Timestamp)
-                                                .toDate(),
-                                          ),
+                                                .toDate()),
                                     text: (m['text'] ?? '').toString(),
-                                    movieTitle:
-                                        m['movieTitle'] ??
+                                    movieTitle: m['movieTitle'] ??
                                         (m['movie'] != null
                                             ? m['movie']['title']
                                             : null),
-                                    moviePoster:
-                                        m['moviePoster'] ??
+                                    moviePoster: m['moviePoster'] ??
                                         (m['movie'] != null
                                             ? m['movie']['poster']
                                             : null),
                                     movieTmdbId: _parseTmdbId(m),
                                     postImage: m['postImage'],
                                     postImages: List<String>.from(
-                                      m['photoURLs'] ?? [],
-                                    ),
-                                    rating: (m['rating'] as num?)?.toDouble(),
+                                        m['photoURLs'] ?? []),
+                                    rating: (m['rating'] as num?)
+                                        ?.toDouble(),
                                     isSpoiler: m['isSpoiler'] == true,
-                                    tags: List<String>.from(m['tags'] ?? []),
-                                    reviewTitle: m['reviewTitle'] as String?,
-                                    likeCount: ((m['likeCount'] ?? 0) as num)
-                                        .toInt(),
-                                    replyCount: ((m['replyCount'] ?? 0) as num)
-                                        .toInt(),
+                                    tags: List<String>.from(
+                                        m['tags'] ?? []),
+                                    reviewTitle:
+                                        m['reviewTitle'] as String?,
+                                    likeCount:
+                                        ((m['likeCount'] ?? 0) as num)
+                                            .toInt(),
+                                    replyCount:
+                                        ((m['replyCount'] ?? 0) as num)
+                                            .toInt(),
                                     initialIsLiked: false,
                                     initialIsFollowing: false,
-                                    onToggleLike: (pid, val) => FeedService
-                                        .instance
-                                        .toggleLike(postId: pid, like: val),
+                                    onToggleLike: (pid, val) =>
+                                        FeedService.instance.toggleLike(
+                                            postId: pid, like: val),
                                     onStartChat: (uid) {},
-                                    onFollow: (uid) =>
-                                        FeedService.instance.followUser(uid),
-                                    onReport: (pid) =>
-                                        FeedService.instance.reportPost(pid),
+                                    onFollow: (uid) => FeedService
+                                        .instance
+                                        .followUser(uid),
+                                    onReport: (pid) => FeedService
+                                        .instance
+                                        .reportPost(pid),
                                   );
                                 },
                               ),
@@ -993,9 +1068,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+        color: isDark
+            ? Colors.white10
+            : Colors.black.withOpacity(0.05),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+        border: Border.all(
+            color: isDark ? Colors.white24 : Colors.black12),
       ),
       child: Text(
         text,

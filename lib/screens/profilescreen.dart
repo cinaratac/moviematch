@@ -498,42 +498,52 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _bindLbFromFirestore() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-    _userSub?.cancel();
-    _userSub = FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .snapshots()
-        .listen((snap) async {
-          if (!snap.exists) return;
-          final data = snap.data() ?? const {};
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
+  _userSub?.cancel();
+  _userSub = FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .listen((snap) async {
+        if (!snap.exists || !mounted) return;
+        final data = Map<String, dynamic>.from(snap.data() ?? {});
 
-          if (mounted) {
-            setState(() {
-              _lastUserData = Map<String, dynamic>.from(data);
+        // Hangi key listeleri değişti?
+        final oldFav   = List.from(_lastUserData?['favoritesKeys'] ?? []);
+        final oldFive  = List.from(_lastUserData?['fiveStarKeys']  ?? []);
+        final oldDis   = List.from(_lastUserData?['dislikedKeys']  ?? []);
+        final oldWatch = List.from(_lastUserData?['watchlistKeys'] ?? []);
+        final newFav   = List.from(data['favoritesKeys']  ?? []);
+        final newFive  = List.from(data['fiveStarKeys']   ?? []);
+        final newDis   = List.from(data['dislikedKeys']   ?? []);
+        final newWatch = List.from(data['watchlistKeys']  ?? []);
 
-              final lb = (data['letterboxdUsername'] ?? '').toString().trim();
-              final appU =
-                  (data['displayName'] ??
-                          data['username'] ??
-                          data['handle'] ??
-                          data['appUsername'] ??
-                          '')
-                      .toString()
-                      .trim();
+        // Sadece değişen listelerin Future cache'ini temizle
+        if (!_listEquals(oldFav,   newFav))   _watchlistFutureCache.removeWhere((k, _) => k.startsWith('favoritesKeys:'));
+        if (!_listEquals(oldFive,  newFive))  _watchlistFutureCache.removeWhere((k, _) => k.startsWith('fiveStarKeys:'));
+        if (!_listEquals(oldDis,   newDis))   _watchlistFutureCache.removeWhere((k, _) => k.startsWith('dislikedKeys:'));
+        if (!_listEquals(oldWatch, newWatch)) _watchlistFutureCache.removeWhere((k, _) => k.startsWith('watchlistKeys:') || k.startsWith(newWatch.join('|')));
 
-              if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
-                _appUsername = appU;
-              }
-              if (lb.isNotEmpty && lb != _lbUsername) {
-                _lbUsername = lb;
-              }
-            });
-          }
-          _checkGuideVisibility();
+        final lb   = (data['letterboxdUsername'] ?? '').toString().trim();
+        final appU = (data['displayName'] ?? data['username'] ?? data['handle'] ?? '').toString().trim();
+
+        setState(() {
+          _lastUserData = data;
+          if (appU.isNotEmpty && appU != (_appUsername ?? '')) _appUsername = appU;
+          if (lb.isNotEmpty  && lb  != _lbUsername)           _lbUsername  = lb;
         });
+        _checkGuideVisibility();
+      });
+}
+
+bool _listEquals(List a, List b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i].toString() != b[i].toString()) return false;
   }
+  return true;
+}
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
