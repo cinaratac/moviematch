@@ -228,7 +228,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
 }
 
 // ==========================================
-// GELİŞMİŞ DİKEY KULLANICI KARTI
+// GELİŞMİŞ DİKEY KULLANICI KARTI (YENİLENMİŞ)
 // ==========================================
 class _VerticalUserCard extends StatefulWidget {
   final global_match.MatchResult result;
@@ -239,7 +239,6 @@ class _VerticalUserCard extends StatefulWidget {
   State<_VerticalUserCard> createState() => _VerticalUserCardState();
 }
 
-// KARTIN HAFIZADA KALMASI İÇİN MIXIN EKLENDİ
 class _VerticalUserCardState extends State<_VerticalUserCard>
     with AutomaticKeepAliveClientMixin {
   bool _isAdded = false;
@@ -249,7 +248,6 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
   List<FilmItem>? _commonFilms;
   List<FilmItem>? _favoriteFilms;
 
-  // HAFIZADA TUTMA İZNİ VERİLDİ
   @override
   bool get wantKeepAlive => true;
 
@@ -358,7 +356,6 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
     int? id = film.tmdbId;
     String currentPoster = film.posterUrl;
 
-    // 1. TMDB ID YOKSA ARAMA YAP
     if (id == null) {
       showDialog(
         context: context,
@@ -387,8 +384,6 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
 
         if (results != null && results.isNotEmpty) {
           id = results[0]['id'];
-          
-          // YENİ: Bulunan filmin taze TMDB afişini de alıyoruz
           final fetchedPosterPath = results[0]['poster_path'];
           if (fetchedPosterPath != null) {
             currentPoster = 'https://image.tmdb.org/t/p/w500$fetchedPosterPath';
@@ -400,7 +395,7 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
                 .doc(film.id)
                 .set({
                   'tmdbId': id,
-                  if (fetchedPosterPath != null) 'posterUrl': currentPoster, // Veritabanını da güncelliyoruz
+                  if (fetchedPosterPath != null) 'posterUrl': currentPoster,
                 }, SetOptions(merge: true));
           }
         } else {
@@ -413,25 +408,17 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
       } catch (e) {
         if (!context.mounted) return;
         Navigator.pop(context);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
         return;
       }
     }
 
-    // 2. DETAY EKRANINA GİTMEDEN ÖNCE URL TEMİZLİĞİ
-    // Eğer veritabanından gelen URL yarım bir TMDB yoluysa (örn: /abC123.jpg) tam URL'ye çevir.
     if (currentPoster.startsWith('/')) {
       currentPoster = 'https://image.tmdb.org/t/p/w500$currentPoster';
-    } 
-    // Letterboxd linkleri artık hotlink engelli (403 Forbidden). 
-    // Detay ekranına kırık link göndermektense boş gönderelim ki kendi güncelini çeksin.
-    else if (currentPoster.contains('ltrbxd.com')) {
+    } else if (currentPoster.contains('ltrbxd.com')) {
       currentPoster = ''; 
     }
 
-    // 3. YÖNLENDİRME
     if (id != null && context.mounted) {
       Navigator.push(
         context,
@@ -448,40 +435,40 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
 
   Widget _buildFilmRow(String title, List<FilmItem> films) {
     return Padding(
-      padding: const EdgeInsets.only(top: 12.0),
+      padding: const EdgeInsets.only(top: 8.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 14,
+              color: Colors.white.withValues(alpha: 0.8),
+              fontSize: 12,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           SizedBox(
-            height: 110,
+            height: 80, // AFİŞLER KÜÇÜLTÜLDÜ (Eski değer: 110)
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: math.min(films.length, 5),
               itemBuilder: (context, index) {
                 final film = films[index];
                 return Padding(
-                  padding: const EdgeInsets.only(right: 12.0),
+                  padding: const EdgeInsets.only(right: 8.0),
                   child: GestureDetector(
                     onTap: () => _handleFilmTap(context, film),
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(6),
                         child: PosterImage(
                           posterUrl: film.posterUrl,
                           title: film.title,
                           tmdbId: film.tmdbId,
                           enableFallback: true,
-                          cacheWidth: 180,
+                          cacheWidth: 120,
                         ),
                       ),
                     ),
@@ -495,6 +482,22 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
     );
   }
 
+  // Kümeleme tag/chip oluşturucu yardımcı widget
+  Widget _buildPrefChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.4), width: 1),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -504,6 +507,14 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
 
     String? photoUrl = _userData?['photoURL'];
     String? username = _userData?['username'];
+    
+    // --- YENİ EKLENEN VERİ ALANLARI ---
+    final int? age = _userData?['age'];
+    final String bio = (_userData?['bio'] ?? '').toString().trim();
+    
+    final List<dynamic> genres = _userData?['favGenres'] ?? [];
+    final List<dynamic> directors = _userData?['favDirectors'] ?? [];
+    final List<dynamic> actors = _userData?['favActors'] ?? [];
 
     return Stack(
       fit: StackFit.expand,
@@ -527,94 +538,135 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
             gradient: LinearGradient(
               colors: [
                 Colors.transparent,
-                Colors.black.withValues(alpha: 0.75),
-                Colors.black.withValues(alpha: 0.98),
+                Colors.black.withValues(alpha: 0.80),
+                Colors.black.withValues(alpha: 0.99),
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              stops: const [0.1, 0.45, 1.0],
+              stops: const [0.05, 0.40, 1.0],
             ),
           ),
         ),
 
         SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16.0,
-              vertical: 16.0,
-            ),
+            padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 10.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.end,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Uyum Oranı Başlığı
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.green.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.greenAccent, width: 1.5),
+                    border: Border.all(color: Colors.greenAccent, width: 1.2),
                   ),
                   child: Text(
                     '%$pct Sinema Uyumu',
                     style: const TextStyle(
                       color: Colors.greenAccent,
                       fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                      fontSize: 13,
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
 
+                // İsim ve Yaş Alanı
                 GestureDetector(
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => PublicProfileScreen(uid: m.uid),
-                      ),
+                      MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: m.uid)),
                     );
                   },
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
                     children: [
-                      Text(
-                        m.displayName ?? 'İsimsiz Sinefil',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          height: 1.1,
+                      Expanded(
+                        child: Text(
+                          m.displayName ?? 'İsimsiz Sinefil',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                            height: 1.1,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (username != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text(
-                            '@$username',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 16,
-                            ),
+                      if (age != null && age > 0) ...[
+                        const SizedBox(width: 10),
+                        Text(
+                          '$age',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
+                      ],
                     ],
                   ),
                 ),
+                
+                if (username != null)
+                  Text(
+                    '@$username',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      fontSize: 14,
+                    ),
+                  ),
 
+                // --- BİYOGRAFİ ALANI ---
+                if (bio.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+                    child: Text(
+                      bio,
+                      style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+
+                // --- SEVİLEN TÜR, YÖNETMEN VE OYUNCULAR (CHIP DÜZENİ) ---
+                if (genres.isNotEmpty || directors.isNotEmpty || actors.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6.0, bottom: 6.0),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        // İlk 2 Tür
+                        ...genres.take(2).map((g) => _buildPrefChip(g.toString(), Colors.blueAccent)),
+                        // İlk 2 Yönetmen
+                        ...directors.take(2).map((d) {
+                          final String name = d is Map ? (d['name'] ?? '') : d.toString();
+                          return name.isNotEmpty ? _buildPrefChip(name, Colors.amberAccent) : const SizedBox.shrink();
+                        }),
+                        // İlk 2 Oyuncu
+                        ...actors.take(2).map((a) {
+                          final String name = a is Map ? (a['name'] ?? '') : a.toString();
+                          return name.isNotEmpty ? _buildPrefChip(name, Colors.purpleAccent) : const SizedBox.shrink();
+                        }),
+                      ],
+                    ),
+                  ),
+
+                // Küçültülmüş Film Rowları
                 if (_commonFilms == null && _favoriteFilms == null)
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40.0),
+                    padding: EdgeInsets.symmetric(vertical: 20.0),
                     child: Center(
                       child: SizedBox(
-                        height: 24,
-                        width: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.grey,
-                        ),
+                        height: 20, width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
                       ),
                     ),
                   )
@@ -625,51 +677,37 @@ class _VerticalUserCardState extends State<_VerticalUserCard>
                     _buildFilmRow('Favori Filmleri', _favoriteFilms!),
                 ],
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 14),
 
+                // Arkadaş Ekle Butonu
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: _isAdded || _isLoading ? null : _addFriend,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _isAdded
-                          ? Colors.white24
-                          : const Color(0xFF2E7D32),
+                      backgroundColor: _isAdded ? Colors.white24 : const Color(0xFF2E7D32),
                       foregroundColor: Colors.white,
-                      // --- EKLENEN KISIM: Buton pasif (null) olduğunda alacağı renkler ---
                       disabledBackgroundColor: Colors.white24, 
                       disabledForegroundColor: Colors.white70,
-                      // ------------------------------------------------------------------
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
                     ),
                     icon: _isLoading
                         ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
+                            width: 18, height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
                         : Icon(
-                            _isAdded
-                                ? Icons.how_to_reg_rounded
-                                : Icons.person_add_alt_1_rounded,
+                            _isAdded ? Icons.how_to_reg_rounded : Icons.person_add_alt_1_rounded,
+                            size: 20,
                           ),
                     label: Text(
                       _isAdded ? 'Arkadaş Eklendi' : 'Arkadaş Ekle',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
               ],
             ),
           ),

@@ -13,7 +13,8 @@ import 'package:fluttergirdi/services/notification_service.dart';
 // import 'package:fluttergirdi/services/push_token_service.dart'; // Eğer dosya adı buysa aktif et
 import 'package:fluttergirdi/auth/login_page.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-
+import 'package:fluttergirdi/screens/initial_loading_screen.dart';
+import 'package:fluttergirdi/services/global_data_service.dart';
 // App Check importu
 import 'package:firebase_app_check/firebase_app_check.dart';
 
@@ -132,11 +133,13 @@ class _MyAppState extends State<MyApp> {
                     WatchedMoviesService.instance.initWatchedHistory();
                   });
                 }
-
-                return const HomeShell();
+                // DİREKT HomeShell AÇMAK YERİNE ÖNCE YÜKLEME EKRANINI AÇ:
+                return const InitialLoadingScreen();
               } else {
                 // Kullanıcı çıkış yaptıysa veya oturum yoksa bayrağı sıfırla
                 _servicesStarted = false;
+                // Önbelleği temizle (Başka hesaba girilirse eski veriler görünmesin)
+                GlobalDataService.instance.stopPreloading(); 
                 return const LoginPage();
               }
             },

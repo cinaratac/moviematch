@@ -160,6 +160,16 @@ exports.sendChatNotification = functions.firestore
       data: { type: "chat", chatId: context.params.chatId, click_action: "FLUTTER_NOTIFICATION_CLICK" }
     };
     // Modern sendEachForMulticast kullanımı
+    // userDoc: Mesajı alacak olan kullanıcının Firestore dokümanı
+const userDoc = await admin.firestore().collection('users').doc(recipientId).get();
+const userData = userDoc.data();
+const mutedChats = userData.mutedChats || [];
+
+// Eğer bu sohbetin ID'si sessize alınanlar listesindeyse işlemi durdur
+if (mutedChats.includes(chatId)) {
+    console.log(`Kullanıcı ${recipientId} bu sohbeti sessize almış. Bildirim atlanıyor.`);
+    return null; 
+}
     await admin.messaging().sendEachForMulticast({ tokens: tokens, ...payload });
   });
 

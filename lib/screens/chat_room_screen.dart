@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
+import 'package:fluttergirdi/services/notification_settings_service.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import '../services/text_filter_service.dart';
 
@@ -50,6 +50,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isBlocked = false;
   bool _hasBlockedMe = false;
   bool _isLoadingBlock = true;
+
+  late Stream<List<String>> _mutedChatsStream;
 
   Future<void> _loadBlockStatus() async {
     if (widget.isGroup) {
@@ -116,7 +118,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             _svc.markAsRead(widget.chatId, myUid);
           }
         });
-
+    _mutedChatsStream = NotificationSettingsService.instance.getMutedChatsStream();
     _checkAndShowGuide();
     _loadBlockStatus();
   }
@@ -370,6 +372,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ),
         elevation: 0,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
+        actions: [
+          StreamBuilder<List<String>>(
+            stream: _mutedChatsStream,
+            builder: (context, snapshot) {
+              final isMuted = snapshot.data?.contains(widget.chatId) ?? false;
+              
+              return IconButton(
+                icon: Icon(
+                  isMuted ? Icons.notifications_off : Icons.notifications,
+                  color: isMuted ? Colors.grey : Theme.of(context).iconTheme.color,
+                ),
+                onPressed: () {
+                  NotificationSettingsService.instance.toggleMuteChat(widget.chatId, !isMuted);
+                },
+              );
+            },
+          ),
+        ],
       ),
       body: _isLoadingBlock
     ? const Center(
@@ -411,15 +431,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           final docs = snap.data?.docs ?? _messageCache[widget.chatId] ?? [];
 
                           // --- MERKEZİ CACHE KULLANIMI: Sohbet edenleri anında RAM'e al ---
-                          final Set<String> authorIds = {widget.otherUid};
-                          for (var doc in docs) {
-                            final m = doc.data();
-                            final aId = (m['authorId'] ?? m['from'])?.toString();
-                            if (aId != null && aId.isNotEmpty) {
-                              authorIds.add(aId);
+                            final Set<String> authorIds = {};
+                            // Eğer otherUid boş değilse listeye ekle (Grup sohbetlerinde boş gelebilir)
+                            if (widget.otherUid.isNotEmpty) {
+                              authorIds.add(widget.otherUid);
                             }
-                          }
-                          final missingIds = authorIds.where((id) => UserCacheService.instance.getFromCache(id) == null).toList();
+
+                            for (var doc in docs) {
+                              final m = doc.data();
+                              final aId = (m['authorId'] ?? m['from'])?.toString();
+                              if (aId != null && aId.trim().isNotEmpty) {
+                                authorIds.add(aId);
+                              }
+                            }
+
+                            // Ekstra güvenlik: Sorguya gidecek ID'lerin kesinlikle boş olmadığından emin ol
+                            final missingIds = authorIds.where((id) => id.isNotEmpty && UserCacheService.instance.getFromCache(id) == null).toList();
                           if (missingIds.isNotEmpty) {
                             Future.microtask(() async {
                               await UserCacheService.instance.fetchUsers(missingIds);
