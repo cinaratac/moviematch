@@ -144,35 +144,42 @@ exports.sendChatNotification = functions.firestore
   .onCreate(async (snapshot, context) => {
     const messageData = snapshot.data();
     const authorId = messageData.authorId;
-    const chatDoc = await admin.firestore().collection("chats").doc(context.params.chatId).get();
-    if (!chatDoc.exists) return;
+    const chatId = context.params.chatId; // chatId değişkenini burada tanımladık
+
+    const chatDoc = await admin.firestore().collection("chats").doc(chatId).get();
+    if (!chatDoc.exists) return null;
 
     const participants = chatDoc.data().participants || [];
+    
+    // Alıcıyı receiverId olarak bulduk
     const receiverId = participants.find((uid) => uid !== authorId);
-    if (!receiverId) return;
+    if (!receiverId) return null;
 
+    // 1. KONTROL: Kullanıcı bu sohbeti sessize almış mı?
+    // (recipientId yerine receiverId kullanıyoruz)
+    const userDoc = await admin.firestore().collection('users').doc(receiverId).get();
+    const userData = userDoc.data() || {};
+    const mutedChats = userData.mutedChats || [];
+
+    if (mutedChats.includes(chatId)) {
+        console.log(`Kullanıcı ${receiverId} bu sohbeti sessize almış. Bildirim atlanıyor.`);
+        return null; // Sessize alınmışsa işlemi burada durdur
+    }
+
+    // 2. BİLDİRİM GÖNDERME
     const tokensSnap = await admin.firestore().collection("users").doc(receiverId).collection("fcmTokens").get();
-    if (tokensSnap.empty) return;
+    if (tokensSnap.empty) return null;
+    
     const tokens = tokensSnap.docs.map(doc => doc.id);
 
     const payload = {
       notification: { title: "Yeni Mesaj", body: messageData.text || "Bir mesajınız var." },
-      data: { type: "chat", chatId: context.params.chatId, click_action: "FLUTTER_NOTIFICATION_CLICK" }
+      data: { type: "chat", chatId: chatId, click_action: "FLUTTER_NOTIFICATION_CLICK" }
     };
-    // Modern sendEachForMulticast kullanımı
-    // userDoc: Mesajı alacak olan kullanıcının Firestore dokümanı
-const userDoc = await admin.firestore().collection('users').doc(recipientId).get();
-const userData = userDoc.data();
-const mutedChats = userData.mutedChats || [];
-
-// Eğer bu sohbetin ID'si sessize alınanlar listesindeyse işlemi durdur
-if (mutedChats.includes(chatId)) {
-    console.log(`Kullanıcı ${recipientId} bu sohbeti sessize almış. Bildirim atlanıyor.`);
-    return null; 
-}
+    
     await admin.messaging().sendEachForMulticast({ tokens: tokens, ...payload });
+    return null;
   });
-
 // ==================================================================
 // 5. DİĞER KRİTİK SİSTEM FONKSİYONLARI
 // ==================================================================

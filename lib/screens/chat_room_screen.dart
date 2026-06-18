@@ -37,9 +37,14 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
+  ValueNotifier<bool>? _isMutedNotifier;
   static final Map<String, bool> _blockedCache = {};
+  bool _initialMuteStatus = false; // Ekran açıldığındaki orjinal durum
+  
   static final Map<String, bool> _blockedMeCache = {};
   static final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _messageCache = {};
+  
+  Timer? _muteDebounceTimer;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
   final _svc = ChatService.instance;
   final _ctrl = TextEditingController();
@@ -86,6 +91,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    
     final myUid = FirebaseAuth.instance.currentUser!.uid;
     if (_blockedCache.containsKey(widget.otherUid)) {
       _isBlocked = _blockedCache[widget.otherUid]!;
@@ -119,8 +125,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           }
         });
     _mutedChatsStream = NotificationSettingsService.instance.getMutedChatsStream();
+    _mutedChatsStream.first.then((list) {
+      if (mounted) {
+        _isMutedNotifier = ValueNotifier<bool>(list.contains(widget.chatId));
+        setState(() {}); // Notifier hazır olduğunda arayüzü bir kere tetikle
+      }
+    });
     _checkAndShowGuide();
     _loadBlockStatus();
+    _loadInitialMuteStatus();
+    
+    
+  }
+  Future<void> _loadInitialMuteStatus() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final mutedChats = List<String>.from(doc.data()?['mutedChats'] ?? []);
+      
+      if (mounted) {
+        _initialMuteStatus = mutedChats.contains(widget.chatId);
+        _isMutedNotifier = ValueNotifier<bool>(_initialMuteStatus);
+        setState(() {}); // Butonu ekranda göstermek için arayüzü tetikle
+      }
+    } catch (e) {
+      debugPrint('Bildirim ayarı yüklenemedi: $e');
+    }
   }
 
   Future<void> _checkAndShowGuide() async {
@@ -140,6 +170,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   void dispose() {
+    if (_isMutedNotifier != null && _isMutedNotifier!.value != _initialMuteStatus) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        final isMutedNow = _isMutedNotifier!.value;
+        
+        // İşlemi arka planda ateşle ve unut (await yok, UI'ı bağlamaz)
+        if (isMutedNow) {
+          FirebaseFirestore.instance.collection('users').doc(uid).update({
+            'mutedChats': FieldValue.arrayUnion([widget.chatId])
+          }).catchError((_) {});
+        } else {
+          FirebaseFirestore.instance.collection('users').doc(uid).update({
+            'mutedChats': FieldValue.arrayRemove([widget.chatId])
+          }).catchError((_) {});
+        }
+      }
+    }
+    
+    _isMutedNotifier?.dispose();
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid != null) _svc.markAsRead(widget.chatId, myUid);
     
@@ -148,6 +197,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _scrollController.dispose();
     _showGuideNotifier.dispose();
     super.dispose();
+    _muteDebounceTimer?.cancel();
+    _isMutedNotifier?.dispose();
   }
 
   Future<void> _sendMessage() async {
@@ -373,22 +424,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         elevation: 0,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
         actions: [
-          StreamBuilder<List<String>>(
-            stream: _mutedChatsStream,
-            builder: (context, snapshot) {
-              final isMuted = snapshot.data?.contains(widget.chatId) ?? false;
-              
-              return IconButton(
-                icon: Icon(
-                  isMuted ? Icons.notifications_off : Icons.notifications,
-                  color: isMuted ? Colors.grey : Theme.of(context).iconTheme.color,
-                ),
-                onPressed: () {
-                  NotificationSettingsService.instance.toggleMuteChat(widget.chatId, !isMuted);
-                },
-              );
-            },
-          ),
+          if (_isMutedNotifier == null)
+            const SizedBox(width: 48, child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+          else
+            ValueListenableBuilder<bool>(
+              valueListenable: _isMutedNotifier!,
+              builder: (context, isMuted, child) {
+                return IconButton(
+                  icon: Icon(
+                    isMuted ? Icons.notifications_off : Icons.notifications,
+                    color: isMuted ? Colors.grey : Theme.of(context).iconTheme.color,
+                  ),
+                  onPressed: () {
+                    // SADECE EKRANDAKİ İKONU DEĞİŞTİR (Anında tepki verir, kitlenme imkansızdır)
+                    _isMutedNotifier!.value = !isMuted;
+                  },
+                );
+              },
+            ),
         ],
       ),
       body: _isLoadingBlock

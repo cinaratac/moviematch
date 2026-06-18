@@ -7,19 +7,25 @@ class NotificationSettingsService {
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<void> toggleMuteChat(String chatId, bool isMuted) async {
+  Future<void> toggleMuteChat(String chatId, bool isMuted, List<String> currentList) async {
     final currentUid = FirebaseAuth.instance.currentUser!.uid;
     final userRef = _firestore.collection('users').doc(currentUid);
 
+    // Mevcut listenin bir kopyasını alıyoruz
+    List<String> updatedList = List<String>.from(currentList);
+
     if (isMuted) {
-      await userRef.update({
-        'mutedChats': FieldValue.arrayUnion([chatId])
-      });
+      if (!updatedList.contains(chatId)) {
+        updatedList.add(chatId);
+      }
     } else {
-      await userRef.update({
-        'mutedChats': FieldValue.arrayRemove([chatId])
-      });
+      updatedList.remove(chatId);
     }
+
+    // arrayUnion veya arrayRemove YERİNE listenin tamamını üzerine yazıyoruz
+    await userRef.update({
+      'mutedChats': updatedList
+    });
   }
 
   Stream<List<String>> getMutedChatsStream() {
