@@ -28,26 +28,30 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
-  final FeedController _controller = FeedController();
+  // ARTIK SINGLETON KULLANIYORUZ
+  final FeedController _controller = FeedController.instance; 
   final ScrollController _scrollController = ScrollController();
+  
   void _onControllerUpdate() {
     if (mounted) setState(() {});
   }
+  
   @override
   void initState() {
     super.initState();
-    // Artık isimlendirdiğimiz fonksiyonu veriyoruz
     _controller.addListener(_onControllerUpdate);
     
-    _controller.init();
+    // Eğer arkada yüklenmediyse yükle (Sigorta amaçlı)
+    if (!_controller.isInitialized) {
+      _controller.init();
+    }
     _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
-    // Aynı isimli fonksiyonu kaldırarak referansın eşleşmesini sağlıyoruz
+    // SADECE listener'ı kaldır. Controller singleton olduğu için DİSPOSE ETME!
     _controller.removeListener(_onControllerUpdate); 
-    _controller.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -349,12 +353,11 @@ class _FollowingFeed extends StatefulWidget {
 }
 
 class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveClientMixin {
-  bool _loading = true;
-  List<DocumentSnapshot<Map<String, dynamic>>> _items = [];
-  final Map<String, Map<String, String>> _localAuthorCache = {};
-  
-  Set<String> _myLikedPostIds = {};
-  Set<String> _myFollowingUserIds = {};
+  final FeedController _controller = FeedController.instance; // SINGLETON KULLANIMI
+
+  void _onControllerUpdate() {
+    if (mounted) setState(() {});
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -362,123 +365,16 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   @override
   void initState() {
     super.initState();
-    _load();
+    _controller.addListener(_onControllerUpdate);
+    if (!_controller.isFollowingInitialized) {
+      _controller.initFollowing();
+    }
   }
 
-  Future<void> _fetchAuthors(List<DocumentSnapshot> posts) async {
-    final uids = <String>{};
-    for(var d in posts) {
-      final u = d.data() as Map<String, dynamic>?;
-      final id = u?['authorId'] as String?;
-      if(id != null && !_localAuthorCache.containsKey(id)) uids.add(id);
-    }
-    if(uids.isEmpty) return;
-    await UserCacheService.instance.fetchUsers(uids.toList());
-  }
-
-  Future<void> _load() async {
-    _localAuthorCache.clear();
-    if (_items.isEmpty) setState(() => _loading = true);
-    try {
-      final me = FirebaseAuth.instance.currentUser?.uid;
-      if (me == null) {
-        if(mounted) setState(() { _items = []; _loading = false; });
-        return;
-      }
-
-      final interactionsFuture = Future.wait([
-        FeedService.instance.fetchUserLikedPostIds(me),
-        FeedService.instance.fetchUserFollowingIds(me),
-      ]);
-
-      // YENİ MİMARİ: Fanout feed'den sadece bu kullanıcıya özel post ID'lerini çek (TEK SORGU!)
-      final feedQs = await FirebaseFirestore.instance
-          .collection('feeds')
-          .doc(me)
-          .collection('user_feed')
-          .orderBy('createdAt', descending: true)
-          .limit(20)
-          .get();
-
-      List<DocumentSnapshot<Map<String, dynamic>>> finalItems = [];
-
-      if (feedQs.docs.isNotEmpty) {
-        // SUNUCU KUTUMUZU DOLDURMUŞ: Postları hızlıca getir
-        final postIds = feedQs.docs.map((d) => d.data()['postId'] as String).toList();
-        
-        if (postIds.isNotEmpty) {
-           List<Future<QuerySnapshot<Map<String, dynamic>>>> postFutures = [];
-           for (var i = 0; i < postIds.length; i += 10) {
-              final chunk = postIds.sublist(i, (i + 10 > postIds.length) ? postIds.length : i + 10);
-              postFutures.add(FirebaseFirestore.instance
-                  .collection('posts')
-                  .where(FieldPath.documentId, whereIn: chunk)
-                  .get());
-           }
-           
-           final postResults = await Future.wait(postFutures);
-           for (var qs in postResults) {
-             finalItems.addAll(qs.docs);
-           }
-           
-           // DocumentID ile çektiğimiz için sıralama bozulabilir, tekrar feed sırasına diziyoruz
-           finalItems.sort((a, b) {
-              final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
-              final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
-              if (ta == null) return 1; if (tb == null) return -1;
-              return tb.compareTo(ta); 
-           });
-        }
-      } else {
-        // ESKİ MİMARİ FALLBACK (Eski postlar kaybolmasın diye sistem yavaş yavaş yeniye geçene kadar çalışacak yedek plan)
-        final followingQs = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(me)
-            .collection('following')
-            .limit(200) 
-            .get();
-            
-        final uids = followingQs.docs.map((d) => d.id).toList();
-
-        if (uids.isNotEmpty) {
-          List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
-          for (var i = 0; i < uids.length; i += 10) {
-            final chunk = uids.sublist(i, (i + 10 > uids.length) ? uids.length : i + 10);
-            futures.add(
-              FirebaseFirestore.instance
-                .collection('posts')
-                .where('authorId', whereIn: chunk)
-                .orderBy('createdAt', descending: true)
-                .limit(5)
-                .get() 
-            );
-          }
-          final results = await Future.wait(futures);
-          for (var qs in results) {
-            finalItems.addAll(qs.docs);
-          }
-          finalItems.sort((a, b) {
-            final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
-            final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
-            if (ta == null) return 1; if (tb == null) return -1;
-            return tb.compareTo(ta); 
-          });
-          finalItems = finalItems.take(20).toList();
-        }
-      }
-
-      await _fetchAuthors(finalItems);
-
-      final interactionResults = await interactionsFuture;
-      _myLikedPostIds = interactionResults[0];
-      _myFollowingUserIds = interactionResults[1];
-
-      if (mounted) {
-        setState(() { _items = finalItems; _loading = false; });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _loading = false);
-    }
+  @override
+  void dispose() {
+    _controller.removeListener(_onControllerUpdate);
+    super.dispose();
   }
 
   int? _parseTmdbId(Map<String, dynamic> m) {
@@ -488,7 +384,6 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       rawId = movieMap['tmdbId'] ?? movieMap['id'];
     }
     rawId ??= m['tmdbId'];
-
     if (rawId is int) return rawId;
     if (rawId is String) return int.tryParse(rawId);
     if (rawId is double) return rawId.toInt();
@@ -499,7 +394,7 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
   Widget build(BuildContext context) {
     super.build(context);
     
-    if (_loading) {
+    if (_controller.isFollowingLoading) {
       return ListView.builder(
         itemCount: 5,
         padding: const EdgeInsets.all(8),
@@ -507,9 +402,9 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
       );
     }
     
-    if (_items.isEmpty) {
+    if (_controller.followingPosts.isEmpty) {
       return RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _controller.refreshFollowing,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -532,13 +427,13 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
     }
 
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _controller.refreshFollowing,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: _items.length,
+        itemCount: _controller.followingPosts.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, i) {
-          final d = _items[i];
+          final d = _controller.followingPosts[i];
           final m = d.data() ?? {};
           final authorId = (m['authorId'] ?? '') as String;
           
@@ -548,18 +443,13 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
           final photoURL = cachedUser?.photoURL ?? (m['photoURL'] ?? '') as String;
           
           final createdAt = (m['createdAt'] as Timestamp?);
-          final timeLabel = createdAt == null ? '' : _FeedPageState._timeAgo(createdAt.toDate());
+          final timeLabel = createdAt == null ? '' : DateHelper.timeAgo(createdAt.toDate());
           final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '').toString();
           final moviePoster = ((m['moviePoster'] ?? (m['movie']?['poster'] ?? m['movie']?['posterUrl'])) ?? '').toString();
           
           int? movieTmdbId = _parseTmdbId(m);
           final postImage = (m['postImage'] ?? '') as String;
           
-          final double? rating = (m['rating'] as num?)?.toDouble();
-          final bool isSpoiler = (m['isSpoiler'] == true);
-          final String? reviewTitle = m['reviewTitle'] as String?;
-          final List<String> tags = List<String>.from(m['tags'] ?? []);
-
           return PostTile(
             key: ValueKey(d.id),
             postId: d.id,
@@ -572,44 +462,24 @@ class _FollowingFeedState extends State<_FollowingFeed> with AutomaticKeepAliveC
             moviePoster: moviePoster.isEmpty ? null : moviePoster,
             movieTmdbId: movieTmdbId,
             postImage: postImage.isEmpty ? null : postImage,
-            // --- EKLENDİ: Çoklu Fotoğraf Desteği (Takip Akışı İçin) ---
             postImages: List<String>.from(m['photoURLs'] ?? []),
-            // ----------------------------------------------------------
             text: (m['text'] ?? '') as String,
             likeCount: ((m['likeCount'] ?? 0) as num).toInt(),
             replyCount: ((m['replyCount'] ?? 0) as num).toInt(),
-            rating: rating,
-            isSpoiler: isSpoiler,
-            reviewTitle: reviewTitle,
-            tags: tags,
+            rating: (m['rating'] as num?)?.toDouble(),
+            isSpoiler: (m['isSpoiler'] == true),
+            reviewTitle: m['reviewTitle'] as String?,
+            tags: List<String>.from(m['tags'] ?? []),
             
-            initialIsLiked: _myLikedPostIds.contains(d.id),
-            initialIsFollowing: _myFollowingUserIds.contains(authorId),
+            // Tüm etkileşim verilerini (Like ve Follow state'ini) Ana Controller üzerinden çekiyoruz!
+            initialIsLiked: _controller.myLikedPostIds.contains(d.id),
+            initialIsFollowing: _controller.myFollowingUserIds.contains(authorId),
             
-            onToggleLike: (pid, like) {
-               if (like) {
-                 _myLikedPostIds.add(pid);
-               } else {
-                 _myLikedPostIds.remove(pid);
-               }
-               FeedService.instance.toggleLike(postId: pid, like: like);
-            },
-            
+            onToggleLike: (pid, like) => _controller.toggleLike(pid, like),
             onStartChat: (String _) async {},
-            onFollow: (uid) async {
-               setState(() {
-                 _myFollowingUserIds.add(uid);
-               });
-               await FeedService.instance.followUser(uid);
-            },
+            onFollow: (uid) => _controller.followUser(uid),
             onReport: (pid) => FeedService.instance.reportPost(pid),
-            onDelete: () {
-              if (mounted) {
-                setState(() {
-                  _items.removeWhere((element) => element.id == d.id);
-                });
-              }
-            },
+            onDelete: () => _controller.removeFollowingPost(d.id),
           );
         },
       ),

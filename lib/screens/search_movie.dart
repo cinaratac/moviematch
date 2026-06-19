@@ -176,7 +176,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
     return slug;
   }
 
-  void _showMovieDetails(dynamic movie) {
+  Future<void> _showMovieDetails(dynamic movie) async {
     final theme = Theme.of(context);
     final posterPath = movie['poster_path'];
     final posterUrl = (posterPath is String && posterPath.isNotEmpty)
@@ -188,7 +188,8 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
     final String year = release.length >= 4 ? release.substring(0, 4) : '';
     final String overview = (movie['overview'] ?? '').toString();
 
-    showModalBottomSheet(
+    // ÇÖZÜM: BottomSheet sonucunu bir değişkende bekliyoruz
+    final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: theme.colorScheme.surface,
@@ -322,64 +323,44 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                                   'poster': posterUrl,
                                   'releaseDate': release,
                                 };
-                                Navigator.of(sheetContext).pop();
-                                Navigator.of(context).pop(selectedMovie);
+                                // Seçim modundaysa BottomSheet'i kapatırken veriyi de yolla
+                                Navigator.pop(contextInner, selectedMovie);
                                 return;
                               }
 
-                              setSheetState(() {
-                                isSaving = true;
-                              });
-
-                              // GÜVENLİ CONTEXT DEĞİŞKENLERİ (Await'ten önce alınır)
-                              final navigator = Navigator.of(context);
-                              final sheetNavigator = Navigator.of(sheetContext);
+                              setSheetState(() => isSaving = true);
                               final messenger = ScaffoldMessenger.of(context);
-
                               bool isSuccess = false;
 
                               try {
-                                final uid =
-                                    FirebaseAuth.instance.currentUser?.uid;
+                                final uid = FirebaseAuth.instance.currentUser?.uid;
                                 if (uid == null) {
-                                  sheetNavigator.pop();
+                                  Navigator.pop(contextInner);
                                   return;
                                 }
 
                                 final int tmdbId = (movie['id'] as num).toInt();
                                 final int yearInt = int.tryParse(year) ?? 0;
-
                                 final db = FirebaseFirestore.instance;
 
-                                final sourceForSlug = originalTitle.isNotEmpty
-                                    ? originalTitle
-                                    : title;
-                                final String guessLbSlug = _slugify(
-                                  sourceForSlug,
-                                );
+                                final sourceForSlug = originalTitle.isNotEmpty ? originalTitle : title;
+                                final String guessLbSlug = _slugify(sourceForSlug);
                                 final String primaryKey = 'film:$guessLbSlug';
 
-                                await db
-                                    .collection('catalog_films')
-                                    .doc(primaryKey)
-                                    .set({
+                                await db.collection('catalog_films').doc(primaryKey).set({
                                       'title': title,
                                       'originalTitle': originalTitle,
                                       'posterUrl': posterUrl,
                                       'tmdbId': tmdbId,
                                       'year': yearInt,
                                       'titleLc': title.toLowerCase(),
-                                      'aliases': FieldValue.arrayUnion([
-                                        'tmdb:$tmdbId',
-                                      ]),
+                                      'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']),
                                       'source': 'tmdb',
                                       'updatedAt': FieldValue.serverTimestamp(),
                                     }, SetOptions(merge: true));
 
                                 if (widget.target != null) {
-                                  final previousList = await UserProfileService
-                                      .instance
-                                      .moveMovieToTarget(
+                                  final previousList = await UserProfileService.instance.moveMovieToTarget(
                                         uid: uid,
                                         movieId: primaryKey,
                                         target: widget.target!,
@@ -393,74 +374,49 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                                   };
                                   switch (widget.target!) {
                                     case ShelfTarget.fiveStar:
-                                      UserShelfCache.fiveStar = List.from(
-                                        UserShelfCache.fiveStar,
-                                      )..add(newLocalItem);
+                                      UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)..add(newLocalItem);
                                       break;
                                     case ShelfTarget.favorites:
-                                      UserShelfCache.favorites = List.from(
-                                        UserShelfCache.favorites,
-                                      )..add(newLocalItem);
+                                      UserShelfCache.favorites = List.from(UserShelfCache.favorites)..add(newLocalItem);
                                       break;
                                     case ShelfTarget.watchlist:
-                                      UserShelfCache.watchlist = List.from(
-                                        UserShelfCache.watchlist,
-                                      )..add(newLocalItem);
+                                      UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)..add(newLocalItem);
                                       break;
                                     case ShelfTarget.disliked:
-                                      UserShelfCache.disliked = List.from(
-                                        UserShelfCache.disliked,
-                                      )..add(newLocalItem);
+                                      UserShelfCache.disliked = List.from(UserShelfCache.disliked)..add(newLocalItem);
                                       break;
                                   }
 
-                                  String targetName = '';
-                                  switch (widget.target!) {
-                                    case ShelfTarget.fiveStar:
-                                      targetName = 'Sevdiklerim';
-                                      break;
-                                    case ShelfTarget.disliked:
-                                      targetName = 'Sevmedim';
-                                      break;
-                                    case ShelfTarget.favorites:
-                                      targetName = 'Favoriler';
-                                      break;
-                                    case ShelfTarget.watchlist:
-                                      targetName = 'İzlenecekler';
-                                      break;
-                                  }
+                                  String targetName = switch (widget.target!) {
+                                    ShelfTarget.fiveStar => 'Sevdiklerim',
+                                    ShelfTarget.disliked => 'Sevmedim',
+                                    ShelfTarget.favorites => 'Favoriler',
+                                    ShelfTarget.watchlist => 'İzlenecekler',
+                                  };
 
                                   String message = previousList != null
                                       ? "'$title', $previousList listesinden çıkarılıp $targetName listesine eklendi."
                                       : "'$title', $targetName listesine eklendi.";
 
-                                  messenger.showSnackBar(
-                                    SnackBar(
+                                  messenger.showSnackBar(SnackBar(
                                       content: Text(message),
                                       backgroundColor: Colors.green.shade700,
                                       behavior: SnackBarBehavior.floating,
                                       duration: const Duration(seconds: 2),
-                                    ),
-                                  );
+                                  ));
                                 }
 
                                 isSuccess = true;
                               } catch (e) {
-                                messenger.showSnackBar(
-                                  SnackBar(content: Text('Hata: $e')),
-                                );
+                                messenger.showSnackBar(SnackBar(content: Text('Hata: $e')));
                               }
 
-                              // Başarılıysa pencereleri kapat (Pencere yok olacağı için setState yapmıyoruz, hata almıyoruz)
-                              if (isSuccess) {
-                                sheetNavigator.pop();
-                                navigator.pop(true);
-                              } else {
-                                // Başarısız olduysa sadece o zaman animasyonu durdur
-                                if (mounted) {
-                                  setSheetState(() {
-                                    isSaving = false;
-                                  });
+                              // KESİN ÇÖZÜM: Sadece BottomSheet'i kapat ve true döndür
+                              if (contextInner.mounted) {
+                                if (isSuccess) {
+                                  Navigator.pop(contextInner, true);
+                                } else {
+                                  setSheetState(() => isSaving = false);
                                 }
                               }
                             },
@@ -473,6 +429,12 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
         );
       },
     );
+
+    // ÇÖZÜMÜN DEVAMI: BottomSheet başarılı şekilde ("true" veya obje ile) 
+    // kapandıysa arama sayfasını DA o sonuçla güvenle kapat.
+    if (result != null && mounted) {
+       Navigator.pop(context, result);
+    }
   }
 
   @override

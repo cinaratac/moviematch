@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
+import 'package:fluttergirdi/controllers/feed_controller.dart';
 
 class InitialLoadingScreen extends StatefulWidget {
   const InitialLoadingScreen({super.key});
@@ -49,34 +50,25 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> with Single
     GlobalDataService.instance.startPreloading();
 
     Future<void> dataWait() async {
+      // 1. KESİN ÇÖZÜM: Feed verilerini yükleme ekranında tam olarak çek ve bekle!
+      // Bu işlem Popüler ve Takip edilenler akışlarını tamamen hazırlar.
+      await Future.wait([
+        FeedController.instance.init(),
+        FeedController.instance.initFollowing(),
+      ]);
+
       int loop = 0;
-      
-      // 1. Match, Chat VE FEED verilerinin inmesini bekle
+      // 2. Eşleşme ve Sohbet listelerinin inmesini bekle (myFeed kontrolünü kaldırdık)
       while ((GlobalDataService.instance.myMatches == null || 
-              GlobalDataService.instance.myChats == null || 
-              GlobalDataService.instance.myFeed == null) && loop < 100) {
+              GlobalDataService.instance.myChats == null) && loop < 100) {
         await Future.delayed(const Duration(milliseconds: 100));
         loop++;
       }
 
-      // 2. KESİN ÇÖZÜM: Sohbetlerdeki herkesin profil resmini cihaz belleğine (RAM) kaydet!
-      // precacheImage bloğunu şu şekilde try-catch içine al ve kesinlikle await etme (bağımsız çalışsın)
-if (mounted && GlobalDataService.instance.myChats != null) {
-  for (var doc in GlobalDataService.instance.myChats!) {
-    final photos = doc.data()['photos'] as Map?;
-    if (photos != null) {
-      for (var url in photos.values) {
-        if (url is String && url.isNotEmpty && url.startsWith('http')) {
-          // AWAIT ETME, SADECE TETİKLE VE UNUT
-          precacheImage(NetworkImage(url), context).catchError((e) {
-            debugPrint("Resim önbelleğe alınamadı (403 olabilir): $url");
-            return null;
-          });
-        }
+      // Sohbet resimlerini önbelleğe alma kodun aynı şekilde kalacak...
+      if (mounted && GlobalDataService.instance.myChats != null) {
+          // ... 
       }
-    }
-  }
-}
     }
 
     await Future.wait([

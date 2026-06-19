@@ -37,9 +37,10 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
-  ValueNotifier<bool>? _isMutedNotifier;
+  
   static final Map<String, bool> _blockedCache = {};
   bool _initialMuteStatus = false; // Ekran açıldığındaki orjinal durum
+  late final ValueNotifier<bool> _isMutedNotifier;
   
   static final Map<String, bool> _blockedMeCache = {};
   static final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _messageCache = {};
@@ -55,7 +56,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isBlocked = false;
   bool _hasBlockedMe = false;
   bool _isLoadingBlock = true;
-
+ 
   late Stream<List<String>> _mutedChatsStream;
 
   Future<void> _loadBlockStatus() async {
@@ -73,32 +74,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         targetUserId: widget.otherUid,
       );
       
+      // KİLİT BURADA: Eğer veritabanından cevap gelene kadar kullanıcı sayfadan çıktıysa işlemi iptal et!
+      if (!mounted) return; 
+
       _blockedCache[widget.otherUid] = status['iBlockedThem'] ?? false;
       _blockedMeCache[widget.otherUid] = status['theyBlockedMe'] ?? false;
 
-      if (mounted) {
-        setState(() {
-          _isBlocked = status['iBlockedThem'] ?? false;
-          _hasBlockedMe = status['theyBlockedMe'] ?? false;
-          _isLoadingBlock = false;
-        });
-      }
+      setState(() {
+        _isBlocked = status['iBlockedThem'] ?? false;
+        _hasBlockedMe = status['theyBlockedMe'] ?? false;
+        _isLoadingBlock = false;
+      });
+      
     } catch (_) {
       if (mounted) setState(() => _isLoadingBlock = false);
     }
   }
-
   @override
   void initState() {
     super.initState();
     
+    // 1. EKRAN AÇILDIĞI AN İKONU "AÇIK" OLARAK GÖSTER
+    _isMutedNotifier = ValueNotifier<bool>(false);
+    
     final myUid = FirebaseAuth.instance.currentUser!.uid;
-    if (_blockedCache.containsKey(widget.otherUid)) {
-      _isBlocked = _blockedCache[widget.otherUid]!;
-      _hasBlockedMe = _blockedMeCache[widget.otherUid] ?? false;
-      _isLoadingBlock = false; 
-    }
 
+    // 2. IŞIK HIZINDA SORGUMUZ (Eski cache'i tetikler, anında açılır)
     _messagesStream = FirebaseFirestore.instance
         .collection('chats')
         .doc(widget.chatId)
@@ -107,8 +108,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         .limit(60)
         .snapshots();
 
+    // 3. Cache üzerinden engelleme durumunu kontrol et
+    if (_blockedCache.containsKey(widget.otherUid)) {
+      _isBlocked = _blockedCache[widget.otherUid]!;
+      _hasBlockedMe = _blockedMeCache[widget.otherUid] ?? false;
+      _isLoadingBlock = false; 
+    }
+
     _svc.markAsRead(widget.chatId, myUid);
 
+    // 4. En son mesajın okundu bilgisi için dinleyici
     _latestSub = FirebaseFirestore.instance
         .collection('chats')
         .doc(widget.chatId)
@@ -124,35 +133,39 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             _svc.markAsRead(widget.chatId, myUid);
           }
         });
-    _mutedChatsStream = NotificationSettingsService.instance.getMutedChatsStream();
-    _mutedChatsStream.first.then((list) {
-      if (mounted) {
-        _isMutedNotifier = ValueNotifier<bool>(list.contains(widget.chatId));
-        setState(() {}); // Notifier hazır olduğunda arayüzü bir kere tetikle
-      }
+
+    // 5. KESİN ÇÖZÜM: Ağır işlemleri sayfa açılış animasyonu bitene kadar (300ms) ertele
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      _checkAndShowGuide();
+      _loadBlockStatus();
+      _loadInitialMuteStatus();
     });
-    _checkAndShowGuide();
-    _loadBlockStatus();
-    _loadInitialMuteStatus();
-    
-    
   }
+  
+
+ 
   Future<void> _loadInitialMuteStatus() async {
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      // Çok daha hızlı olması için önce yerel önbellekten (cache) okumayı dener:
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid)
+          .get(const GetOptions(source: Source.cache))
+          .catchError((_) => FirebaseFirestore.instance.collection('users').doc(uid).get());
+          
+      // KİLİT BURADA: Eğer sayfadan çıkıldıysa notifer'a dokunma, çöker!
+      if (!mounted) return;
+
       final mutedChats = List<String>.from(doc.data()?['mutedChats'] ?? []);
       
-      if (mounted) {
-        _initialMuteStatus = mutedChats.contains(widget.chatId);
-        _isMutedNotifier = ValueNotifier<bool>(_initialMuteStatus);
-        setState(() {}); // Butonu ekranda göstermek için arayüzü tetikle
-      }
+      _initialMuteStatus = mutedChats.contains(widget.chatId);
+      // Arka planda gerçek durumu sessizce güncelle (Ekranda loading vs dönmez)
+      _isMutedNotifier.value = _initialMuteStatus; 
+      
     } catch (e) {
       debugPrint('Bildirim ayarı yüklenemedi: $e');
     }
   }
-
   Future<void> _checkAndShowGuide() async {
     await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
@@ -168,14 +181,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  @override
+ @override
   void dispose() {
-    if (_isMutedNotifier != null && _isMutedNotifier!.value != _initialMuteStatus) {
+    // 1. Önce sunucuya kaydedilecek bir şey varsa onu hallet
+    if (_isMutedNotifier.value != _initialMuteStatus) {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
-        final isMutedNow = _isMutedNotifier!.value;
+        final isMutedNow = _isMutedNotifier.value;
         
-        // İşlemi arka planda ateşle ve unut (await yok, UI'ı bağlamaz)
         if (isMutedNow) {
           FirebaseFirestore.instance.collection('users').doc(uid).update({
             'mutedChats': FieldValue.arrayUnion([widget.chatId])
@@ -188,17 +201,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       }
     }
     
-    _isMutedNotifier?.dispose();
+    // 2. Kapatma, iptal etme ve temizleme işlemleri (Sadece BİR KERE)
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid != null) _svc.markAsRead(widget.chatId, myUid);
     
     _latestSub?.cancel();
+    _muteDebounceTimer?.cancel();
+    
     _ctrl.dispose();
     _scrollController.dispose();
     _showGuideNotifier.dispose();
+    _isMutedNotifier.dispose(); 
+    
+    // 3. super.dispose() HER ZAMAN EN SONDA OLMALIDIR!
     super.dispose();
-    _muteDebounceTimer?.cancel();
-    _isMutedNotifier?.dispose();
   }
 
   Future<void> _sendMessage() async {
@@ -424,24 +440,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         elevation: 0,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
         actions: [
-          if (_isMutedNotifier == null)
-            const SizedBox(width: 48, child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
-          else
-            ValueListenableBuilder<bool>(
-              valueListenable: _isMutedNotifier!,
-              builder: (context, isMuted, child) {
-                return IconButton(
-                  icon: Icon(
-                    isMuted ? Icons.notifications_off : Icons.notifications,
-                    color: isMuted ? Colors.grey : Theme.of(context).iconTheme.color,
-                  ),
-                  onPressed: () {
-                    // SADECE EKRANDAKİ İKONU DEĞİŞTİR (Anında tepki verir, kitlenme imkansızdır)
-                    _isMutedNotifier!.value = !isMuted;
-                  },
-                );
-              },
-            ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _isMutedNotifier,
+            builder: (context, isMuted, child) {
+              return IconButton(
+                icon: Icon(
+                  isMuted ? Icons.notifications_off : Icons.notifications,
+                  color: isMuted ? Colors.grey : Theme.of(context).iconTheme.color,
+                ),
+                onPressed: () {
+                  _isMutedNotifier.value = !isMuted;
+                },
+              );
+            },
+          ),
         ],
       ),
       body: _isLoadingBlock

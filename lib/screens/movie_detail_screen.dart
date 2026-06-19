@@ -16,6 +16,7 @@ import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:fluttergirdi/services/user_profile_service.dart';
+import 'package:fluttergirdi/services/streak_service.dart';
 
 class MovieDetailScreen extends StatefulWidget {
   final int tmdbId;
@@ -251,6 +252,12 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       catalogDocId: _catalogDocId,
       isCurrentlyAdded: isCurrentlyAdded,
     );
+
+    // --- STREAK TETİKLEYİCİSİ BURAYA EKLENDİ ---
+    // Eğer listeye yeni ekleniyorsa (çıkarılmıyorsa) seriyi kontrol et
+    if (!isCurrentlyAdded) {
+      StreakService.instance.triggerAction(context);
+    }
   }
 
   Future<void> _toggleStandardList(
@@ -286,8 +293,15 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       isCurrentlyAdded: isCurrentlyAdded,
       posterUrl: widget.posterUrl,
     );
+
+    // --- STREAK TETİKLEYİCİSİ BURAYA EKLENDİ ---
+    // Eğer listeye yeni ekleniyorsa VE bu liste Watchlist DEĞİLSE seriyi kontrol et
+    if (!isCurrentlyAdded && target != ShelfTarget.watchlist) {
+      StreakService.instance.triggerAction(context);
+    }
   }
 
+  
   Future<void> _addToCustomList(String listId, String listTitle) async {
     if (_movieData == null) return;
     final messenger = ScaffoldMessenger.of(context);

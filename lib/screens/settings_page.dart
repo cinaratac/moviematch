@@ -325,22 +325,23 @@ class _SettingsPageState extends State<SettingsPage> {
               // 1. Önce diyaloğu kapat
               Navigator.pop(ctx);
 
-              // --- DÜZELTME BAŞLANGICI ---
               // 2. Önbellekteki (resimler vb.) her şeyi temizle
               await DefaultCacheManager().emptyCache();
 
               // 3. Yerel ayarları (Shared Prefs) temizle
               final prefs = await SharedPreferences.getInstance();
               await prefs.clear();
-              // --- DÜZELTME BİTİŞİ ---
 
-              // 4. Firebase'den çıkış yap
-              await FirebaseAuth.instance.signOut();
-
-              // 5. KRİTİK ADIM: Tüm sayfaları kapat ve en başa (Login'e) dön
+              // 4. KRİTİK ADIM: Önce tüm sayfaları kapat ve en başa (Login'e) dön
               if (mounted) {
-                Navigator.of(context).popUntil((route) => route.isFirst);
+                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                  (route) => false,
+                );
               }
+
+              // 5. Ekran temizlendikten sonra güvenle Firebase'den çık
+              await FirebaseAuth.instance.signOut();
             },
           ),
         ],

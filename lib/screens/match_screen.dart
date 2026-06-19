@@ -1,83 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:math' as math;
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:fluttergirdi/services/match_service.dart' as global_match;
-import 'package:fluttergirdi/services/follow_system_service.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart';
-import 'package:fluttergirdi/widgets/poster_image.dart';
-import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'dart:async';
+
+import 'package:fluttergirdi/services/match_service.dart' as global_match;
 import 'package:fluttergirdi/services/global_data_service.dart';
-
-class FilmItem {
-  final String id;
-  final String title;
-  final String posterUrl;
-  final int? tmdbId;
-
-  const FilmItem({
-    required this.id,
-    required this.title,
-    required this.posterUrl,
-    this.tmdbId,
-  });
-}
-
-// GARANTİLİ FİLM ÇEKME FONKSİYONU
-final Map<String, FilmItem> _filmItemCache = {};
-final Set<String> _missingFilmKeys = {};
-
-FilmItem _filmItemFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-  final data = doc.data();
-  final rawTmdbId = data['tmdbId'];
-  return FilmItem(
-    id: doc.id,
-    title: (data['title'] ?? data['name'] ?? '').toString(),
-    posterUrl: (data['posterUrl'] ?? data['poster'] ?? '').toString(),
-    tmdbId: rawTmdbId is num ? rawTmdbId.toInt() : null,
-  );
-}
-
-Future<List<FilmItem>> fetchFilmsByKeys(List<String> keys) async {
-  if (keys.isEmpty) return [];
-  final db = FirebaseFirestore.instance;
-  final cleanKeys = keys
-      .map((k) => k.trim())
-      .where((k) => k.isNotEmpty)
-      .toSet()
-      .toList();
-  final missingKeys = cleanKeys
-      .where((key) => !_filmItemCache.containsKey(key))
-      .where((key) => !_missingFilmKeys.contains(key))
-      .toList();
-
-  for (var i = 0; i < missingKeys.length; i += 10) {
-    final chunk = missingKeys.sublist(i, math.min(i + 10, missingKeys.length));
-    try {
-      final qs = await db
-          .collection('catalog_films')
-          .where(FieldPath.documentId, whereIn: chunk)
-          .get();
-      final foundIds = <String>{};
-      for (final doc in qs.docs) {
-        foundIds.add(doc.id);
-        _filmItemCache[doc.id] = _filmItemFromDoc(doc);
-      }
-      for (final id in chunk) {
-        if (!foundIds.contains(id)) {
-          _missingFilmKeys.add(id);
-        }
-      }
-    } catch (_) {}
-  }
-
-  return [
-    for (final key in cleanKeys)
-      if (_filmItemCache[key] != null) _filmItemCache[key]!,
-  ];
-}
+import 'package:fluttergirdi/widgets/match_card.dart'; // YENİ DOSYAMIZI İÇERİ ALIYORUZ
 
 class MatchListScreen extends StatefulWidget {
   const MatchListScreen({super.key});
@@ -91,8 +18,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
   bool _loading = true;
   final PageController _pageController = PageController();
   String? _lastMarkedSeenUid;
-
-  // DÜZELTME BURADA: StreamSubscription sınıfın İÇİNE taşındı
   StreamSubscription<List<global_match.MatchResult>>? _matchSubscription;
 
   @override
@@ -103,7 +28,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
   @override
   void dispose() {
-    // DÜZELTME BURADA: Sayfa kapanırken Firebase dinlemesi İPTAL EDİLİYOR
     _matchSubscription?.cancel();
     _pageController.dispose();
     super.dispose();
@@ -111,16 +35,14 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
   void _loadMatches({bool forceRefresh = false}) {
     final me = FirebaseAuth.instance.currentUser;
-    if (me == null) {
-      if (mounted) setState(() => _loading = false);
-      return;
-    }
+    if (me == null) return;
 
     if (forceRefresh) {
       global_match.MatchService.instance.clearCache();
     }
 
-    // --- KESİN ÇÖZÜM: ARKAPLANDA HAZIR DATA VARSA YÜKLEME EKRANINI GÖSTERMEDEN DİREKT BAS ---
+    setState(() => _loading = true);
+
     if (!forceRefresh && GlobalDataService.instance.myMatches != null && GlobalDataService.instance.myMatches!.isNotEmpty) {
       if (mounted) {
         setState(() {
@@ -128,8 +50,6 @@ class _MatchListScreenState extends State<MatchListScreen> {
           _loading = false;
         });
       }
-    } else {
-      if (mounted) setState(() => _loading = true);
     }
 
     _matchSubscription?.cancel();
@@ -140,19 +60,19 @@ class _MatchListScreenState extends State<MatchListScreen> {
             if (!mounted) return;
             setState(() {
               _all = results;
-              _loading = false; 
+              _loading = false;
             });
             if (_all.isNotEmpty) {
               _markVisibleAsSeen(me.uid, _all.first.uid);
             }
           },
           onError: (e) {
+            debugPrint("Match yükleme hatası: $e");
             if (!mounted) return;
             setState(() {
               _loading = false;
               if (_all.isEmpty) _all = [];
             });
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Öneriler alınamadı: $e')));
           },
         );
   }
@@ -189,530 +109,26 @@ class _MatchListScreenState extends State<MatchListScreen> {
           ),
         ),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.refresh_rounded,
-              color: Colors.white,
-              size: 28,
-            ),
-            onPressed: () {
-              if (_pageController.hasClients) {
-                _pageController.jumpToPage(0);
-              }
-              _loadMatches(forceRefresh: true);
-            },
-          ),
-        ],
       ),
-      body: _loading
+      body: _loading && _all.isEmpty
           ? const Center(child: CircularProgressIndicator(color: Colors.green))
           : _all.isEmpty
           ? const _NoMatchesCharacter()
           : PageView.builder(
-                scrollDirection: Axis.vertical,
-                controller: _pageController,
-                physics: const BouncingScrollPhysics(),
-                allowImplicitScrolling: true, // <--- BURASI FALSE YERİNE TRUE OLMALI
-                onPageChanged: (index) {
-                  _markVisibleAsSeen(me.uid, _all[index].uid);
-                },
-                itemCount: _all.length,
-                itemBuilder: (context, index) {
-                  final m = _all[index];
-                  return _VerticalUserCard(key: ValueKey(m.uid), result: m);
-                },
-              ),
-    );
-  }
-}
-
-// ==========================================
-// GELİŞMİŞ DİKEY KULLANICI KARTI (YENİLENMİŞ)
-// ==========================================
-class _VerticalUserCard extends StatefulWidget {
-  final global_match.MatchResult result;
-
-  const _VerticalUserCard({super.key, required this.result});
-
-  @override
-  State<_VerticalUserCard> createState() => _VerticalUserCardState();
-}
-
-class _VerticalUserCardState extends State<_VerticalUserCard>
-    with AutomaticKeepAliveClientMixin {
-  bool _isAdded = false;
-  bool _isLoading = false;
-
-  Map<String, dynamic>? _userData;
-  List<FilmItem>? _commonFilms;
-  List<FilmItem>? _favoriteFilms;
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _initData();
-  }
-
-  Future<void> _initData() async {
-    final me = FirebaseAuth.instance.currentUser?.uid;
-    if (me == null) return;
-
-    final m = widget.result;
-    final commonKeys = <String>{
-      ...m.commonFavorites,
-      ...m.commonFiveStars,
-      ...m.commonWatchlist,
-    }.take(5).toList();
-
-    Future<DocumentSnapshot<Map<String, dynamic>>?> loadFollow() async {
-      try {
-        return await FirebaseFirestore.instance
-            .collection('users')
-            .doc(me)
-            .collection('following')
-            .doc(widget.result.uid)
-            .get();
-      } catch (_) {
-        return null;
-      }
-    }
-
-    Future<DocumentSnapshot<Map<String, dynamic>>?> loadUser() async {
-      try {
-        return await FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.result.uid)
-            .get();
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final commonFuture = commonKeys.isEmpty
-        ? Future.value(<FilmItem>[])
-        : fetchFilmsByKeys(commonKeys);
-    final userFuture = loadUser();
-    final followFuture = loadFollow();
-
-    try {
-      final films = await commonFuture;
-      if (mounted) setState(() => _commonFilms = films);
-    } catch (_) {
-      if (mounted) setState(() => _commonFilms = []);
-    }
-
-    try {
-      final doc = await userFuture;
-      if (mounted && doc != null && doc.exists) {
-        setState(() => _userData = doc.data());
-        final data = doc.data()!;
-        var favKeys = List<String>.from(data['favoritesKeys'] ?? []);
-        if (favKeys.isEmpty) {
-          favKeys = List<String>.from(data['fiveStarKeys'] ?? []);
-        }
-
-        final films = favKeys.isEmpty
-            ? <FilmItem>[]
-            : await fetchFilmsByKeys(favKeys.take(5).toList());
-        if (mounted) setState(() => _favoriteFilms = films);
-      } else {
-        if (mounted) setState(() => _favoriteFilms = []);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _favoriteFilms = []);
-    }
-
-    try {
-      final followDoc = await followFuture;
-      if (mounted && followDoc != null) {
-        setState(() => _isAdded = followDoc.exists);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _addFriend() async {
-    setState(() => _isLoading = true);
-    final me = FirebaseAuth.instance.currentUser?.uid;
-    if (me != null) {
-      try {
-        await FollowSystemService.I.followUser(widget.result.uid);
-        if (mounted) setState(() => _isAdded = true);
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Hata: $e')));
-        }
-      }
-    }
-    if (mounted) setState(() => _isLoading = false);
-  }
-
-  Future<void> _handleFilmTap(BuildContext context, FilmItem film) async {
-    int? id = film.tmdbId;
-    String currentPoster = film.posterUrl;
-
-    if (id == null) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (c) =>
-            const Center(child: CircularProgressIndicator(color: Colors.green)),
-      );
-
-      try {
-        final result = await FirebaseFunctions.instance
-            .httpsCallable('callTMDB')
-            .call({
-              'endpoint': '/3/search/movie',
-              'params': {
-                'query': film.title,
-                'language': 'tr-TR',
-                'include_adult': 'false',
+              scrollDirection: Axis.vertical,
+              controller: _pageController,
+              physics: const BouncingScrollPhysics(),
+              allowImplicitScrolling: true,
+              onPageChanged: (index) {
+                _markVisibleAsSeen(me.uid, _all[index].uid);
               },
-            });
-
-        if (!context.mounted) return;
-        Navigator.pop(context);
-
-        final data = result.data as Map<String, dynamic>;
-        final results = data['results'] as List?;
-
-        if (results != null && results.isNotEmpty) {
-          id = results[0]['id'];
-          final fetchedPosterPath = results[0]['poster_path'];
-          if (fetchedPosterPath != null) {
-            currentPoster = 'https://image.tmdb.org/t/p/w500$fetchedPosterPath';
-          }
-
-          if (film.id.isNotEmpty && id != null) {
-            FirebaseFirestore.instance
-                .collection('catalog_films')
-                .doc(film.id)
-                .set({
-                  'tmdbId': id,
-                  if (fetchedPosterPath != null) 'posterUrl': currentPoster,
-                }, SetOptions(merge: true));
-          }
-        } else {
-          if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Film detayları bulunamadı.')),
-          );
-          return;
-        }
-      } catch (e) {
-        if (!context.mounted) return;
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
-        return;
-      }
-    }
-
-    if (currentPoster.startsWith('/')) {
-      currentPoster = 'https://image.tmdb.org/t/p/w500$currentPoster';
-    } else if (currentPoster.contains('ltrbxd.com')) {
-      currentPoster = ''; 
-    }
-
-    if (id != null && context.mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MovieDetailScreen(
-            tmdbId: id!,
-            title: film.title,
-            posterUrl: currentPoster,
-          ),
-        ),
-      );
-    }
-  }
-
-  Widget _buildFilmRow(String title, List<FilmItem> films) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.8),
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          SizedBox(
-            height: 80, // AFİŞLER KÜÇÜLTÜLDÜ (Eski değer: 110)
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: math.min(films.length, 5),
+              itemCount: _all.length,
               itemBuilder: (context, index) {
-                final film = films[index];
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: GestureDetector(
-                    onTap: () => _handleFilmTap(context, film),
-                    child: AspectRatio(
-                      aspectRatio: 2 / 3,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: PosterImage(
-                          posterUrl: film.posterUrl,
-                          title: film.title,
-                          tmdbId: film.tmdbId,
-                          enableFallback: true,
-                          cacheWidth: 120,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
+                final m = _all[index];
+                // Dışarıdan çağırdığımız o temiz widget'ı basıyoruz
+                return MatchCard(key: ValueKey(m.uid), result: m);
               },
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Kümeleme tag/chip oluşturucu yardımcı widget
-  Widget _buildPrefChip(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.4), width: 1),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-
-    final m = widget.result;
-    final pct = m.score.clamp(0, 100).toStringAsFixed(0);
-
-    String? photoUrl = _userData?['photoURL'];
-    String? username = _userData?['username'];
-    
-    // --- YENİ EKLENEN VERİ ALANLARI ---
-    final int? age = _userData?['age'];
-    final String bio = (_userData?['bio'] ?? '').toString().trim();
-    
-    final List<dynamic> genres = _userData?['favGenres'] ?? [];
-    final List<dynamic> directors = _userData?['favDirectors'] ?? [];
-    final List<dynamic> actors = _userData?['favActors'] ?? [];
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (photoUrl != null && photoUrl.isNotEmpty)
-          Image.network(photoUrl, fit: BoxFit.cover)
-        else
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF1E1E1E), Color(0xFF121212)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: const Icon(Icons.person, size: 120, color: Colors.white24),
-          ),
-
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.80),
-                Colors.black.withValues(alpha: 0.99),
-              ],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              stops: const [0.05, 0.40, 1.0],
-            ),
-          ),
-        ),
-
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 10.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Uyum Oranı Başlığı
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.greenAccent, width: 1.2),
-                  ),
-                  child: Text(
-                    '%$pct Sinema Uyumu',
-                    style: const TextStyle(
-                      color: Colors.greenAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-
-                // İsim ve Yaş Alanı
-                GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: m.uid)),
-                    );
-                  },
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          m.displayName ?? 'İsimsiz Sinefil',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 26,
-                            fontWeight: FontWeight.bold,
-                            height: 1.1,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (age != null && age > 0) ...[
-                        const SizedBox(width: 10),
-                        Text(
-                          '$age',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w400,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                
-                if (username != null)
-                  Text(
-                    '@$username',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.6),
-                      fontSize: 14,
-                    ),
-                  ),
-
-                // --- BİYOGRAFİ ALANI ---
-                if (bio.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-                    child: Text(
-                      bio,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-
-                // --- SEVİLEN TÜR, YÖNETMEN VE OYUNCULAR (CHIP DÜZENİ) ---
-                if (genres.isNotEmpty || directors.isNotEmpty || actors.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6.0, bottom: 6.0),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        // İlk 2 Tür
-                        ...genres.take(2).map((g) => _buildPrefChip(g.toString(), Colors.blueAccent)),
-                        // İlk 2 Yönetmen
-                        ...directors.take(2).map((d) {
-                          final String name = d is Map ? (d['name'] ?? '') : d.toString();
-                          return name.isNotEmpty ? _buildPrefChip(name, Colors.amberAccent) : const SizedBox.shrink();
-                        }),
-                        // İlk 2 Oyuncu
-                        ...actors.take(2).map((a) {
-                          final String name = a is Map ? (a['name'] ?? '') : a.toString();
-                          return name.isNotEmpty ? _buildPrefChip(name, Colors.purpleAccent) : const SizedBox.shrink();
-                        }),
-                      ],
-                    ),
-                  ),
-
-                // Küçültülmüş Film Rowları
-                if (_commonFilms == null && _favoriteFilms == null)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20.0),
-                    child: Center(
-                      child: SizedBox(
-                        height: 20, width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
-                      ),
-                    ),
-                  )
-                else ...[
-                  if (_commonFilms != null && _commonFilms!.isNotEmpty)
-                    _buildFilmRow('Ortak Filmleriniz', _commonFilms!),
-                  if (_favoriteFilms != null && _favoriteFilms!.isNotEmpty)
-                    _buildFilmRow('Favori Filmleri', _favoriteFilms!),
-                ],
-
-                const SizedBox(height: 14),
-
-                // Arkadaş Ekle Butonu
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _isAdded || _isLoading ? null : _addFriend,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isAdded ? Colors.white24 : const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.white24, 
-                      disabledForegroundColor: Colors.white70,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
-                    ),
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 18, height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : Icon(
-                            _isAdded ? Icons.how_to_reg_rounded : Icons.person_add_alt_1_rounded,
-                            size: 20,
-                          ),
-                    label: Text(
-                      _isAdded ? 'Arkadaş Eklendi' : 'Arkadaş Ekle',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -725,25 +141,11 @@ class _NoMatchesCharacter extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.theater_comedy_rounded,
-            size: 100,
-            color: Colors.grey[700],
-          ),
+          Icon(Icons.theater_comedy_rounded, size: 100, color: Colors.grey[700]),
           const SizedBox(height: 16),
-          const Text(
-            'Şimdilik bu kadar!',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
+          const Text('Şimdilik bu kadar!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
           const SizedBox(height: 8),
-          const Text(
-            'Daha fazla ortak zevk için filmlerini puanla.',
-            style: TextStyle(color: Colors.grey),
-          ),
+          const Text('Daha fazla ortak zevk için filmlerini puanla.', style: TextStyle(color: Colors.grey)),
         ],
       ),
     );

@@ -13,6 +13,7 @@ import 'package:fluttergirdi/screens/clubs_tab.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
+import 'package:fluttergirdi/auth/login_page.dart';
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -257,7 +258,16 @@ class _CustomDrawerState extends State<CustomDrawer> {
                           // 2. Shared Preferences temizliği
                           final prefs = await SharedPreferences.getInstance();
                           await prefs.clear();
-                          // 3. Çıkış
+                          
+                          // 3. KRİTİK ADIM: Önce tüm sayfaları (ve Stream'leri) yok edip Login'e git!
+                          if (context.mounted) {
+                            Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                              MaterialPageRoute(builder: (_) => const LoginPage()),
+                              (route) => false, // Arkada açık kalan ne kadar sayfa varsa hepsini siler
+                            );
+                          }
+
+                          // 4. Navigasyondan hemen sonra çıkış yap (Böylece permission-denied hatası asla olmaz)
                           await FirebaseAuth.instance.signOut();
                         },
                         child: const Text(

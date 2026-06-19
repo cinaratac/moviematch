@@ -7,6 +7,7 @@ import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:fluttergirdi/screens/full_shelf_screen.dart';
 import 'dart:async';
+import 'package:fluttergirdi/services/streak_service.dart'; // STREAK SERVISI
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/screens/edit_profile_page.dart';
@@ -2119,8 +2120,17 @@ class _AddPosterTile extends StatelessWidget {
           context,
           MaterialPageRoute(builder: (_) => SearchMoviePage(target: target)),
         );
+        // Arama ekranından başarıyla film eklendiyse result döner
         if (result == true) {
+          
+          // --- ÇÖKME KORUMASI BURADA ---
+          if (!context.mounted) return;
+          
           onRefresh?.call();
+          
+          if (target != ShelfTarget.watchlist) {
+             StreakService.instance.triggerAction(context);
+          }
         }
       },
       child: ClipRRect(
