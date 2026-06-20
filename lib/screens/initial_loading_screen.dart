@@ -12,25 +12,25 @@ class InitialLoadingScreen extends StatefulWidget {
   State<InitialLoadingScreen> createState() => _InitialLoadingScreenState();
 }
 
-class _InitialLoadingScreenState extends State<InitialLoadingScreen> with SingleTickerProviderStateMixin {
+class _InitialLoadingScreenState extends State<InitialLoadingScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  String _randomFact = "";
+  String _randomFact = '';
 
   final List<String> _cinemaFacts = [
-    "Matrix serisindeki ikonik yeşil kodlar aslında Japon suşi tariflerinden oluşur.",
-    "Yüzüklerin Efendisi filminin bütçesi, gerçek Titanik gemisinin yapım maliyetinden daha yüksekti.",
-    "Ucuz Roman (Pulp Fiction) filmindeki bütün saatler 4:20'yi gösterir.",
-    "İlk Star Wars filmi için tasarlanan Millennium Falcon uzay gemisi, bir hamburgerden ilham alınmıştır.",
-    "Terminatör'de Arnold Schwarzenegger, film boyunca sadece 74 kelime konuşmuştur.",
-    "Rocky filmindeki ikonik koşu sahnesinde, pazar yerindeki insanların çoğu çekim yapıldığından habersiz gerçek halktı.",
-    "Leon (Sevginin Gücü) filmindeki polis baskını sahnesi o kadar gerçekçiydi ki, civardaki bir soyguncu gerçek polis sanıp teslim olmuştur.",
+    'Matrix serisindeki ikonik yeşil kodlar aslında Japon suşi tariflerinden oluşur.',
+    'Yüzüklerin Efendisi filminin bütçesi, gerçek Titanik gemisinin yapım maliyetinden daha yüksekti.',
+    'Ucuz Roman (Pulp Fiction) filmindeki bütün saatler 4:20\'yi gösterir.',
+    'İlk Star Wars filmi için tasarlanan Millennium Falcon uzay gemisi, bir hamburgerden ilham alınmıştır.',
+    'Terminatör\'de Arnold Schwarzenegger, film boyunca sadece 74 kelime konuşmuştur.',
+    'Rocky filmindeki ikonik koşu sahnesinde, pazar yerindeki insanların çoğu çekim yapıldığından habersiz gerçek halktı.',
+    'Leon (Sevginin Gücü) filmindeki polis baskını sahnesi o kadar gerçekçiydi ki, civardaki bir soyguncu gerçek polis sanıp teslim olmuştur.',
   ];
 
   @override
   void initState() {
     super.initState();
-    final random = Random();
-    _randomFact = _cinemaFacts[random.nextInt(_cinemaFacts.length)];
+    _randomFact = _cinemaFacts[Random().nextInt(_cinemaFacts.length)];
 
     _controller = AnimationController(
       vsync: this,
@@ -47,55 +47,71 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> with Single
   }
 
   Future<void> _preloadAndGo() async {
+    // Preloading zaten main.dart'ta başladı ama shell'de de çağrılıyor.
+    // Burada tekrar çağırmak zararlı değil — ??= guard var içeride.
     GlobalDataService.instance.startPreloading();
 
-    Future<void> dataWait() async {
-      // 1. KESİN ÇÖZÜM: Feed verilerini yükleme ekranında tam olarak çek ve bekle!
-      // Bu işlem Popüler ve Takip edilenler akışlarını tamamen hazırlar.
-      await Future.wait([
-        FeedController.instance.init(),
-        FeedController.instance.initFollowing(),
-      ]);
-
-      int loop = 0;
-      // 2. Eşleşme ve Sohbet listelerinin inmesini bekle (myFeed kontrolünü kaldırdık)
-      while ((GlobalDataService.instance.myMatches == null || 
-              GlobalDataService.instance.myChats == null) && loop < 100) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        loop++;
-      }
-
-      // Sohbet resimlerini önbelleğe alma kodun aynı şekilde kalacak...
-      if (mounted && GlobalDataService.instance.myChats != null) {
-          // ... 
-      }
-    }
-
     await Future.wait([
-      _controller.forward(),
-      dataWait(),
+      _controller.forward(),       // Animasyonun tamamlanmasını bekle
+      _waitForCriticalData(),      // Kritik verilerin gelmesini bekle
     ]);
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Animasyon bittikten sonra kısa yumuşatma
+    await Future.delayed(const Duration(milliseconds: 200));
 
     if (mounted) {
       Navigator.pushReplacement(
         context,
         PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => const HomeShell(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 600),
+          pageBuilder: (_, __, ___) => const HomeShell(),
+          transitionsBuilder: (_, animation, __, child) =>
+              FadeTransition(opacity: animation, child: child),
+          transitionDuration: const Duration(milliseconds: 500),
         ),
       );
     }
   }
 
+  Future<void> _waitForCriticalData() async {
+    // Kritik sıra:
+    // 1. Feed controller (kullanıcı açılınca feed boş görünmesin)
+    // 2. Profil/shelf cache (film detayına girilince izlendi durumu görünsün)
+    // 3. Chat + match için kısa tolerans (bunlar olmasa da ana akış çalışır)
+
+    await Future.wait([
+      FeedController.instance.init(),
+      FeedController.instance.initFollowing(),
+      // Profil datası ilk Firestore snapshot'ından geldiğinde resolve eder.
+      // Firestore offline cache varsa ~50ms, yoksa ~500ms sürer.
+      GlobalDataService.instance.profileReady
+          .timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {}, // Timeout olursa takılma, devam et
+          ),
+    ]);
+
+    // Chat ve match için maksimum 1 saniye daha bekle.
+    // Gelmediyse zaten kademeli olarak gelecek — kullanıcıyı bekletme.
+    await Future.any([
+      Future.wait([
+        _waitUntil(() => GlobalDataService.instance.myChats != null),
+        _waitUntil(() => GlobalDataService.instance.myMatches != null),
+      ]),
+      Future.delayed(const Duration(seconds: 1)),
+    ]);
+  }
+
+  /// Belirli bir koşul sağlanana kadar 50ms aralıklarla bekler.
+  Future<void> _waitUntil(bool Function() condition) async {
+    while (!condition()) {
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    const double barWidth = 260.0;
-    const double characterSize = 55.0;
+    const double barWidth       = 260.0;
+    const double characterSize  = 55.0;
     const double travelDistance = barWidth - characterSize;
 
     return Scaffold(
@@ -108,68 +124,52 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> with Single
             children: [
               AnimatedBuilder(
                 animation: _controller,
-                builder: (context, child) {
-                  final double currentTravel = _controller.value * travelDistance;
-                  
-                  return Column(
-                    children: [
-                      SizedBox(
-                        width: barWidth,
-                        height: characterSize,
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: currentTravel,
-                              bottom: 0,
-                              child: Transform.rotate(
-                                angle: _controller.value * 2 * pi * 3, 
-                                child: const GreenEyesCharacter(
-                                  size: characterSize,
-                                ),
-                              ),
-                            ),
-                          ],
+                builder: (context, _) {
+                  final travel = _controller.value * travelDistance;
+                  return Column(children: [
+                    SizedBox(
+                      width: barWidth,
+                      height: characterSize,
+                      child: Stack(children: [
+                        Positioned(
+                          left: travel,
+                          bottom: 0,
+                          child: Transform.rotate(
+                            angle: _controller.value * 2 * pi * 3,
+                            child: const GreenEyesCharacter(size: characterSize),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 5),
-                      SizedBox(
-                        width: barWidth,
-                        height: 8,
-                        child: Stack(
-                          children: [
-                            Container(
-                              width: barWidth,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: Colors.grey.withValues(alpha: 0.2), 
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                            Container(
-                              width: currentTravel + characterSize,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2E7D32),
-                                borderRadius: BorderRadius.circular(4),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF2E7D32).withValues(alpha: 0.4),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
+                      ]),
+                    ),
+                    const SizedBox(height: 5),
+                    SizedBox(
+                      width: barWidth,
+                      height: 8,
+                      child: Stack(children: [
+                        Container(
+                          width: barWidth, height: 8,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                         ),
-                      ),
-                    ],
-                  );
+                        Container(
+                          width: travel + characterSize, height: 8,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E7D32),
+                            borderRadius: BorderRadius.circular(4),
+                            boxShadow: [BoxShadow(
+                              color: const Color(0xFF2E7D32).withValues(alpha: 0.4),
+                              blurRadius: 8, offset: const Offset(0, 2),
+                            )],
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ]);
                 },
               ),
-              
               const SizedBox(height: 40),
-              
               Text(
                 'Biliyor muydunuz?',
                 style: TextStyle(
@@ -179,14 +179,17 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> with Single
                 ),
               ),
               const SizedBox(height: 8),
-              
               Text(
                 _randomFact,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 15,
                   height: 1.4,
-                  color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
+                  color: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.color
+                      ?.withValues(alpha: 0.7),
                   fontStyle: FontStyle.italic,
                 ),
               ),
