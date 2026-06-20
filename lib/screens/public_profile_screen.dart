@@ -818,66 +818,87 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                               ),
                                             ),
 
-                                          // Rozetler
+                                          // Rozetler ve Streak
                                           StreamBuilder<DocumentSnapshot>(
                                             stream: FirebaseFirestore.instance
                                                 .collection('users')
                                                 .doc(widget.uid)
                                                 .snapshots(),
                                             builder: (context, snap) {
-                                              if (!snap.hasData ||
-                                                  !snap.data!.exists)
+                                              if (!snap.hasData || !snap.data!.exists)
                                                 return const SizedBox.shrink();
-                                              final uData =
-                                                  snap.data!.data()
-                                                      as Map<String, dynamic>?;
-                                              final badges = List<String>.from(
-                                                uData?['badges'] ?? [],
-                                              );
-                                              if (badges.isEmpty)
+                                              final uData = snap.data!.data() as Map<String, dynamic>?;
+                                              final badges = List<String>.from(uData?['badges'] ?? []);
+                                              // DÜZELTME BURADA: 'streakCount' olarak güncellendi
+                                              final int streakCount = (uData?['streakCount'] ?? 0) as int;
+
+                                              if (badges.isEmpty && streakCount <= 0)
                                                 return const SizedBox.shrink();
 
                                               return Padding(
-                                                padding: const EdgeInsets.only(
-                                                  bottom: 6.0,
-                                                ),
-                                                child: Wrap(
-                                                  spacing: 6,
-                                                  runSpacing: 4,
-                                                  children: badges.map((
-                                                    badgeId,
-                                                  ) {
-                                                    final badge = AppBadge
-                                                        .allBadges
-                                                        .firstWhere(
-                                                          (b) =>
-                                                              b.id == badgeId,
-                                                          orElse: () => AppBadge
-                                                              .allBadges
-                                                              .first,
-                                                        );
-                                                    return Container(
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            4,
-                                                          ),
-                                                      decoration: BoxDecoration(
-                                                        color: badge.color
-                                                            .withOpacity(0.15),
-                                                        shape: BoxShape.circle,
+                                                padding: const EdgeInsets.only(bottom: 6.0),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    // STREAK (SERİ) ATEŞİ
+                                                    if (streakCount > 0)
+                                                      Container(
+                                                        margin: const EdgeInsets.only(bottom: 6),
+                                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.orange.withOpacity(0.15),
+                                                          borderRadius: BorderRadius.circular(20),
+                                                          border: Border.all(color: Colors.orangeAccent, width: 1.2),
+                                                          boxShadow: [
+                                                            BoxShadow(
+                                                              color: Colors.orange.withOpacity(0.1),
+                                                              blurRadius: 8,
+                                                              spreadRadius: 1,
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            const Icon(Icons.local_fire_department_rounded, color: Colors.orangeAccent, size: 16),
+                                                            const SizedBox(width: 4),
+                                                            Text(
+                                                              '$streakCount Gün Serisi',
+                                                              style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                                            ),
+                                                          ],
+                                                        ),
                                                       ),
-                                                      child: Icon(
-                                                        badge.icon,
-                                                        size: 12,
-                                                        color: badge.color,
+                                                      
+                                                    // MEVCUT ROZETLER
+                                                    if (badges.isNotEmpty)
+                                                      Wrap(
+                                                        spacing: 6,
+                                                        runSpacing: 4,
+                                                        children: badges.map((badgeId) {
+                                                          final badge = AppBadge.allBadges.firstWhere(
+                                                            (b) => b.id == badgeId,
+                                                            orElse: () => AppBadge.allBadges.first,
+                                                          );
+                                                          return Container(
+                                                            padding: const EdgeInsets.all(4),
+                                                            decoration: BoxDecoration(
+                                                              color: badge.color.withOpacity(0.15),
+                                                              shape: BoxShape.circle,
+                                                            ),
+                                                            child: Icon(
+                                                              badge.icon,
+                                                              size: 12,
+                                                              color: badge.color,
+                                                            ),
+                                                          );
+                                                        }).toList(),
                                                       ),
-                                                    );
-                                                  }).toList(),
+                                                  ],
                                                 ),
                                               );
                                             },
                                           ),
-
                                           // Takipçi Sayıları
                                           Wrap(
                                             spacing: 8,

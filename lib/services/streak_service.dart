@@ -7,17 +7,12 @@ class StreakService {
   static final StreakService instance = StreakService._internal();
   StreakService._internal();
 
-  // 🔥 TEST MODU: true iken 1 seride bile gösterir.
-  // Çalıştığını gördükten sonra false yap.
+  // 🔥 TEST MODU: false yapıldı.
   final bool isTestMode = false;
 
   _StreakState? _cached;
   String?       _cachedUid;
 
-  // ---------------------------------------------------------------------------
-  // GlobalDataService'in profil listener'ından doğrudan besle.
-  // Bu sayede uygulama açılırken zaten cache doluyor.
-  // ---------------------------------------------------------------------------
   void applyProfileData(Map<String, dynamic> data) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -30,28 +25,12 @@ class StreakService {
     _cachedUid = uid;
   }
 
-  // ---------------------------------------------------------------------------
-  // Harici preload (profil sayfasından veya başka yerden çağrılabilir)
-  // ---------------------------------------------------------------------------
   Future<void> preload(String uid) async {
     if (_cachedUid == uid && _cached != null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get(const GetOptions(source: Source.cache));
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       _applyDoc(uid, doc);
-    } catch (_) {
-      try {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get(const GetOptions(source: Source.server));
-        _applyDoc(uid, doc);
-      } catch (e) {
-        debugPrint('Streak preload hatası: $e');
-      }
-    }
+    } catch (_) {}
   }
 
   void _applyDoc(String uid, DocumentSnapshot doc) {
@@ -67,13 +46,23 @@ class StreakService {
   }
 
   // ---------------------------------------------------------------------------
-  // Ana giriş noktası — önce UI'ı göster, sonra Firestore'a yaz
+  // Ana giriş noktası
   // ---------------------------------------------------------------------------
   Future<void> triggerAction(BuildContext context) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    // Root navigator'ı context ölmeden yakala
+    // 1. KESİN ÇÖZÜM: Uygulama yeniden başlatıldıysa hafıza (RAM) boşalmıştır.
+    // İşlem yapmadan önce mutlaka veritabanındaki gerçek 'son tarihi' ve 'seriyi' çekiyoruz!
+    if (_cached == null || _cachedUid != uid) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        _applyDoc(uid, doc);
+      } catch (e) {
+        debugPrint('Streak okuma hatası: $e');
+      }
+    }
+
     final rootNavigator = Navigator.of(context, rootNavigator: true);
 
     final now        = DateTime.now();
@@ -84,10 +73,10 @@ class StreakService {
 
     final cached = (_cachedUid == uid) ? _cached : null;
 
-    // Spam koruma (test modunda pas geç)
+    // Spam koruma (Bugün zaten eklediyse ve test modunda değilsek atla)
     if (cached?.lastActiveDate == todayStr && !isTestMode) return;
 
-    // Yeni state'i hesapla (saf fonksiyon, IO yok)
+    // Yeni durumu hesapla
     final next = _computeNext(
       current:      cached,
       todayStr:     todayStr,
@@ -96,12 +85,12 @@ class StreakService {
       weekday:      weekday,
     );
 
-    // Cache'i hemen güncelle
+    // Hafızayı anında güncelle
     _cached    = next;
     _cachedUid = uid;
 
-    // UI'ı HEMEN göster (tek frame bekle, Firestore bitmesini bekleme)
-    final required = isTestMode ? 1 : 1;
+    // Arayüzü Göster (Seri 2 ve üstüyse animasyonu gösterir)
+    final required = isTestMode ? 1 : 2;
     if (next.streakCount >= required) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (rootNavigator.mounted) {
@@ -119,13 +108,13 @@ class StreakService {
       });
     }
 
-    // Firestore'a arka planda kaydet
+    // Firebase'e gerçek zamanlı kaydet
     _saveToFirestore(uid, next)
         .catchError((e) => debugPrint('Streak kayıt hatası: $e'));
   }
 
   // ---------------------------------------------------------------------------
-  // Hesaplama (saf fonksiyon — IO yok, test edilebilir)
+  // Hesaplama Mantığı
   // ---------------------------------------------------------------------------
   _StreakState _computeNext({
     required _StreakState? current,
@@ -144,6 +133,7 @@ class StreakService {
     if (dbWeekKey != weekKey) activeDays.clear();
 
     if (!isAlreadyActiveToday) {
+      // DÜN giriş yapmışsa seriye +1 ekle, yoksa (gün atlamışsa) 1'den baştan başlat!
       streak = (lastDate == yesterdayStr) ? streak + 1 : 1;
     } else if (isTestMode && streak == 0) {
       streak = 1;
@@ -159,9 +149,6 @@ class StreakService {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Firestore yazma (arka planda)
-  // ---------------------------------------------------------------------------
   Future<void> _saveToFirestore(String uid, _StreakState state) async {
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
       'lastActiveDate':   state.lastActiveDate,

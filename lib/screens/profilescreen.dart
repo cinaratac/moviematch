@@ -251,7 +251,7 @@ Widget _profileHeaderSection({
                 overflow: TextOverflow.ellipsis,
               ),
 
-              // --- ROZET ALANI ---
+             // --- ROZET VE STREAK ALANI ---
               StreamBuilder<DocumentSnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('users')
@@ -262,39 +262,79 @@ Widget _profileHeaderSection({
                     return const SizedBox.shrink();
                   final userData = snap.data!.data() as Map<String, dynamic>?;
                   final badges = List<String>.from(userData?['badges'] ?? []);
-                  if (badges.isEmpty) return const SizedBox.shrink();
+                  // DÜZELTME BURADA: 'currentStreak' yerine 'streakCount' yazıldı
+                  final int streakCount = (userData?['streakCount'] ?? 0) as int;
+
+                  if (badges.isEmpty && streakCount <= 0) return const SizedBox.shrink();
 
                   return Padding(
                     padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: badges.map((badgeId) {
-                        final badge = AppBadge.allBadges.firstWhere(
-                          (b) => b.id == badgeId,
-                          orElse: () => AppBadge.allBadges.first,
-                        );
-                        return Tooltip(
-                          message: '${badge.name}: ${badge.description}',
-                          triggerMode: TooltipTriggerMode.tap,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // STREAK (SERİ) ATEŞİ
+                        if (streakCount > 0)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: badge.color.withOpacity(0.15),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: badge.color.withOpacity(0.6),
-                                width: 1,
-                              ),
+                              color: Colors.orange.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.orangeAccent, width: 1.2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.orange.withOpacity(0.1),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                ),
+                              ],
                             ),
-                            child: Icon(
-                              badge.icon,
-                              size: 12,
-                              color: badge.color,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.local_fire_department_rounded, color: Colors.orangeAccent, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '$streakCount Gün Serisi',
+                                  style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                              ],
                             ),
                           ),
-                        );
-                      }).toList(),
+                        
+                        // MEVCUT ROZETLER
+                        if (badges.isNotEmpty)
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: badges.map((badgeId) {
+                              final badge = AppBadge.allBadges.firstWhere(
+                                (b) => b.id == badgeId,
+                                orElse: () => AppBadge.allBadges.first,
+                              );
+                              return Tooltip(
+                                message: '${badge.name}: ${badge.description}',
+                                triggerMode: TooltipTriggerMode.tap,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: badge.color.withOpacity(0.15),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: badge.color.withOpacity(0.6),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    badge.icon,
+                                    size: 12,
+                                    color: badge.color,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                      ],
                     ),
                   );
                 },
@@ -2434,7 +2474,7 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
                       contentPadding: const EdgeInsets.all(12),
-                      leading: customList.coverImageUrl != null
+                      leading: (customList.coverImageUrl != null && customList.coverImageUrl!.startsWith('http'))
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(8),
                               child: Image.network(
@@ -2442,6 +2482,10 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                                 width: 50,
                                 height: 50,
                                 fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  width: 50, height: 50, color: Colors.black26,
+                                  child: const Icon(Icons.error, color: Colors.white54),
+                                ),
                               ),
                             )
                           : Container(

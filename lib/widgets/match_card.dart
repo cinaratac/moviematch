@@ -10,6 +10,10 @@ import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 
+// --- YENİ EKLENEN IMPORTLAR ---
+import 'package:fluttergirdi/screens/actors_screen.dart';
+import 'package:fluttergirdi/screens/director_screen.dart';
+
 // ==========================================
 // 1. FİLM VERİSİ VE CACHE MANTIĞI
 // ==========================================
@@ -312,12 +316,13 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
     );
   }
 
-  Widget _buildDetailRowWithChips(String title, List<dynamic> items, Color chipColor) {
-    final validItems = items
-        .map((e) => e is Map ? (e['name'] ?? '') : e.toString())
-        .where((e) => e.toString().trim().isNotEmpty)
-        .take(3)
-        .toList();
+  // Tıklama desteği için güncellenmiş çip fonksiyonu
+  Widget _buildDetailRowWithChips(String title, List<dynamic> items, Color chipColor, {void Function(int id, String name)? onTapChip}) {
+    // ID ve isimleri korumak için filtreleme yapıyoruz
+    final validItems = items.where((e) {
+      if (e is Map) return (e['name'] ?? '').toString().trim().isNotEmpty;
+      return e.toString().trim().isNotEmpty;
+    }).take(3).toList();
         
     if (validItems.isEmpty) return const SizedBox.shrink();
     
@@ -334,7 +339,34 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
             child: Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: validItems.map((item) => _buildPrefChip(item.toString(), chipColor)).toList(),
+              children: validItems.map((item) {
+                String name = '';
+                int? id;
+                
+                // Map objesiyse ID'yi ve İsmi al, düz metinse sadece ismi al
+                if (item is Map) {
+                  name = (item['name'] ?? '').toString();
+                  id = item['id'] is num ? (item['id'] as num).toInt() : null;
+                } else {
+                  name = item.toString();
+                }
+
+                return GestureDetector(
+                  onTap: () {
+                    if (onTapChip != null) {
+                      if (id != null) {
+                        onTapChip(id, name);
+                      } else {
+                        // Uygulamanın eski versiyonlarında sadece String olarak kaydedildiyse:
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Bu kişi için detay bulunamadı.')),
+                        );
+                      }
+                    }
+                  },
+                  child: _buildPrefChip(name, chipColor),
+                );
+              }).toList(),
             ),
           ),
         ],
@@ -417,7 +449,6 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                     child: Text(bio, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3), maxLines: 2, overflow: TextOverflow.ellipsis),
                   ),
 
-                // --- ALT ALTA YENİ LİSTE TASARIMI ---
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8.0),
                   child: Column(
@@ -425,12 +456,32 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                     children: [
                       if (age != null && age > 0)
                         _buildTextRow('Yaş:', age.toString()),
+                      
+                      // TÜR TIKLANAMAZ (ID'si yok)
                       if (genres.isNotEmpty)
                         _buildDetailRowWithChips('Sevilen Türler:', genres, Colors.blueAccent),
+                      
+                      // YÖNETMENE TIKLAYINCA YÖNETMEN SAYFASINA GİDER
                       if (directors.isNotEmpty)
-                        _buildDetailRowWithChips('Yönetmenler:', directors, Colors.amberAccent),
+                        _buildDetailRowWithChips(
+                          'Yönetmenler:', 
+                          directors, 
+                          Colors.amberAccent,
+                          onTapChip: (id, name) {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => DirectorScreen(directorId: id, directorName: name)));
+                          }
+                        ),
+                      
+                      // OYUNCUYA TIKLAYINCA OYUNCU SAYFASINA GİDER
                       if (actors.isNotEmpty)
-                        _buildDetailRowWithChips('Oyuncular:', actors, Colors.purpleAccent),
+                        _buildDetailRowWithChips(
+                          'Oyuncular:', 
+                          actors, 
+                          Colors.purpleAccent,
+                          onTapChip: (id, name) {
+                            Navigator.push(context, MaterialPageRoute(builder: (_) => ActorScreen(actorId: id, actorName: name)));
+                          }
+                        ),
                     ],
                   ),
                 ),
