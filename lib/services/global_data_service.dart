@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/match_service.dart' as global_match;
 import 'package:fluttergirdi/services/shelf_state_cache.dart';
 import 'package:fluttergirdi/services/streak_service.dart';
+import 'package:fluttergirdi/services/user_cache_service.dart';
 
 class GlobalDataService {
   static final GlobalDataService instance = GlobalDataService._internal();
@@ -19,11 +20,8 @@ class GlobalDataService {
   StreamSubscription? _matchSub;
   StreamSubscription? _feedSub;
 
-  // Profil ve shelf verisi hazır olduğunda resolve eden completer.
-  // InitialLoadingScreen bunu await edebilir.
   Completer<void>? _profileReady;
-  Future<void> get profileReady =>
-      _profileReady?.future ?? Future.value();
+  Future<void> get profileReady => _profileReady?.future ?? Future.value();
 
   void startPreloading() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -31,7 +29,7 @@ class GlobalDataService {
 
     _profileReady = Completer<void>();
 
-    // 1. Profil + ShelfStateCache + StreakService — tek listener, üç işi birden
+    // 1. Profil + ShelfStateCache + StreakService
     _profileSub ??= FirebaseFirestore.instance
         .collection('users')
         .doc(uid)
@@ -40,25 +38,22 @@ class GlobalDataService {
       if (!snap.exists) return;
       final data = snap.data()!;
       myProfileData = data;
-
-      // ShelfStateCache'i doldur → MovieDetailScreen anında okuyabilir
       ShelfStateCache.instance.updateAll(uid, data);
-
-      // StreakService cache'ini doldur → triggerAction() Firestore'a gitmez
       StreakService.instance.applyProfileData(data);
-
-      // İlk veri geldiğinde completer'ı tamamla
       if (_profileReady != null && !_profileReady!.isCompleted) {
         _profileReady!.complete();
       }
     });
 
-    // 2. Sohbetler
+    // 2. Sohbetler — gelince kullanıcıları UserCacheService'e ısıt
     _chatSub ??= FirebaseFirestore.instance
         .collection('chats')
         .where('participants', arrayContains: uid)
         .snapshots()
-        .listen((snap) => myChats = snap.docs);
+        .listen((snap) {
+      myChats = snap.docs;
+      _prewarmUsersFromChats(uid, snap.docs);
+    });
 
     // 3. Eşleşmeler
     _matchSub ??= global_match.MatchService.instance
@@ -72,6 +67,47 @@ class GlobalDataService {
         .limit(15)
         .snapshots()
         .listen((snap) => myFeed = snap.docs);
+  }
+
+  /// Chat listesindeki karşı taraf uid'lerini UserCacheService'e önceden yükle.
+  /// titles/photos denormalize verisi varsa Firestore çağrısı bile yapmaz.
+  void _prewarmUsersFromChats(
+      String myUid,
+      List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    final uidsToFetch = <String>[];
+
+    for (final doc in docs) {
+      final data = doc.data();
+      if (data['isGroup'] == true || data['isClub'] == true) continue;
+
+      final parts = List<String>.from(data['participants'] ?? []);
+      final otherUid = parts.firstWhere(
+        (id) => id != myUid,
+        orElse: () => '',
+      );
+      if (otherUid.isEmpty) continue;
+      if (UserCacheService.instance.getFromCache(otherUid) != null) continue;
+
+      final titles = data['titles'] as Map?;
+      final photos = data['photos'] as Map?;
+      final name = titles?[myUid] as String?;
+      final photo = photos?[myUid] as String?;
+
+      if (name != null && name.isNotEmpty) {
+        // Denormalize veri var — direkt cache'e yaz, Firestore çağrısı yok
+        UserCacheService.instance.injectToCache(
+          uid: otherUid,
+          displayName: name,
+          photoURL: photo ?? '',
+        );
+      } else {
+        uidsToFetch.add(otherUid);
+      }
+    }
+
+    if (uidsToFetch.isNotEmpty) {
+      UserCacheService.instance.fetchUsers(uidsToFetch);
+    }
   }
 
   void stopPreloading() {

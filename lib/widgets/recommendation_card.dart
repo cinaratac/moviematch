@@ -388,7 +388,31 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
           ),
           borderRadius: BorderRadius.circular(16), 
         ),
-        child: const Center(child: CircularProgressIndicator()),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 20),
+              Text(
+                'Yapay zeka sana göre filmler seçiyor...',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: cs.onPrimaryContainer,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Geçmişin, yönetmenlerin ve sevdiğin oyuncular taranıyor.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: cs.onPrimaryContainer.withOpacity(0.7),
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
       );
     }
 

@@ -101,7 +101,7 @@ class StreakService {
     _cachedUid = uid;
 
     // UI'ı HEMEN göster (tek frame bekle, Firestore bitmesini bekleme)
-    final required = isTestMode ? 1 : 2;
+    final required = isTestMode ? 1 : 1;
     if (next.streakCount >= required) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (rootNavigator.mounted) {

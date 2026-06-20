@@ -135,7 +135,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         });
 
     // 5. KESİN ÇÖZÜM: Ağır işlemleri sayfa açılış animasyonu bitene kadar (300ms) ertele
-    Future.delayed(const Duration(milliseconds: 300), () {
+    Future.delayed(Duration.zero, () {
       if (!mounted) return;
       _checkAndShowGuide();
       _loadBlockStatus();

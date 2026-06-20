@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/auth/register_page.dart';
-import 'package:fluttergirdi/widgets/green_characters.dart'; // YEŞİL KARAKTER İÇİN EKLENDİ
-import 'package:cloud_firestore/cloud_firestore.dart'; // Firestore eklendi
+import 'package:fluttergirdi/widgets/green_characters.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:fluttergirdi/auth/google_register_page.dart';
 import 'package:fluttergirdi/widgets/background_3d_posters.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart'; // APPLE PAKETİ EKLENDİ
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:fluttergirdi/auth/auth_gate.dart'; // KESİN YÖNLENDİRME İÇİN EKLENDİ
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -24,7 +25,7 @@ class _LoginPageState extends State<LoginPage> {
   // Durum değişkenleri
   bool _isLoading = false;
   bool _isGoogleLoading = false;
-  bool _isAppleLoading = false; // APPLE İÇİN EKLENDİ
+  bool _isAppleLoading = false; 
   bool _isPasswordVisible = false;
 
   // Standart E-posta Giriş Fonksiyonu
@@ -44,8 +45,19 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      // Başarılı olursa main.dart'taki StreamBuilder kullanıcıyı otomatik yönlendirir.
+      
+      // KESİN ÇÖZÜM: Tüm ekran yığınını temizle ve sistemi zorla AuthGate'e yönlendir
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const AuthGate()),
+          (route) => false,
+        );
+      }
+      return; // Başarılıysa dur, setState çalıştırma ki ekran kilitlenmesin
+      
     } on FirebaseAuthException catch (e) {
+      if (mounted) setState(() => _isLoading = false); // Sadece hatada loading'i kapat
+      
       String message = 'Giriş başarısız.';
       if (e.code == 'user-not-found') {
         message = 'Bu e-posta ile kayıtlı kullanıcı bulunamadı.';
@@ -65,13 +77,11 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
-      }
-    } finally {
       if (mounted) setState(() => _isLoading = false);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+      }
     }
   }
 
@@ -80,9 +90,7 @@ class _LoginPageState extends State<LoginPage> {
     if (_emailController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Şifre sıfırlamak için lütfen e-posta adresinizi girin.',
-          ),
+          content: Text('Şifre sıfırlamak için lütfen e-posta adresinizi girin.'),
         ),
       );
       return;
@@ -94,30 +102,25 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Sıfırlama bağlantısı e-posta adresinize gönderildi.',
-            ),
+            content: Text('Sıfırlama bağlantısı e-posta adresinize gönderildi.'),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     }
   }
 
   // Google ile Giriş
-  
   Future<void> _signInWithGoogle() async {
     setState(() => _isGoogleLoading = true);
 
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) {
-        setState(() => _isGoogleLoading = false);
+        if (mounted) setState(() => _isGoogleLoading = false);
         return;
       }
 
@@ -127,22 +130,25 @@ class _LoginPageState extends State<LoginPage> {
         idToken: googleAuth.idToken,
       );
 
-      // SADECE Firebase'e giriş yapıyoruz.
-      // Firestore kontrolü ve Navigator.push kısımları SİLİNDİ.
-      // Çünkü main.dart içindeki AuthGate bu girişi algılayıp,
-      // eksik bilgi varsa GoogleRegisterPage'e, tamsa Ana sayfaya kendi yönlendirecek.
       await FirebaseAuth.instance.signInWithCredential(credential);
 
+      // KESİN ÇÖZÜM: Yığınları temizle ve AuthGate'e yönlendir
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const AuthGate()),
+          (route) => false,
+        );
+      }
+      return;
+      
     } catch (e) {
+      if (mounted) setState(() => _isGoogleLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
-    } finally {
-      if (mounted) setState(() => _isGoogleLoading = false);
     }
   }
 
-  // --- YENİ EKLENEN: Apple ile Giriş ---
   // Apple ile Giriş
   Future<void> _signInWithApple() async {
     setState(() => _isAppleLoading = true);
@@ -156,27 +162,31 @@ class _LoginPageState extends State<LoginPage> {
             ],
           );
 
-      // Firebase için OAuth Credential oluşturma
       final OAuthProvider oAuthProvider = OAuthProvider('apple.com');
       final OAuthCredential credential = oAuthProvider.credential(
         idToken: appleCredential.identityToken,
         accessToken: appleCredential.authorizationCode,
       );
 
-      // SADECE Firebase'e giriş yapıyoruz. 
-      // AuthGate yönlendirmeyi otomatik yapacak.
       await FirebaseAuth.instance.signInWithCredential(credential);
 
-    } catch (e) {
+      // KESİN ÇÖZÜM: Yığınları temizle ve AuthGate'e yönlendir
       if (mounted) {
-        // Kullanıcı FaceID/TouchID onaylamaktan vazgeçerse hata mesajı göstermemek için
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const AuthGate()),
+          (route) => false,
+        );
+      }
+      return;
+      
+    } catch (e) {
+      if (mounted) setState(() => _isAppleLoading = false);
+      if (mounted) {
         if (e is SignInWithAppleAuthorizationException && e.code == AuthorizationErrorCode.canceled) {
           return;
         }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
-    } finally {
-      if (mounted) setState(() => _isAppleLoading = false);
     }
   }
 
@@ -381,14 +391,13 @@ class _LoginPageState extends State<LoginPage> {
 
                         const SizedBox(height: 16),
 
-                        // --- YENİ EKLENEN: APPLE İLE GİRİŞ YAP BUTONU ---
+                        // --- APPLE İLE GİRİŞ YAP BUTONU ---
                         SizedBox(
                           height: 56,
                           child: ElevatedButton.icon(
                             onPressed: isAnyLoading ? null : _signInWithApple,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  Colors.black, // Apple Standart Rengi
+                              backgroundColor: Colors.black,
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
