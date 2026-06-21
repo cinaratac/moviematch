@@ -59,10 +59,14 @@ class FeedController extends ChangeNotifier {
       final userId = FirebaseAuth.instance.currentUser?.uid;
       QuerySnapshot<Map<String, dynamic>> postSnapshot;
 
+      // Algoritmanın iyi çalışması ve daha iyi kıyaslama yapması için
+      // 20 yerine tek seferde 40 post çekiyoruz.
+      final int fetchLimit = 40; 
+
       if (initial) {
         if (userId != null) {
           final results = await Future.wait([
-            FeedService.instance.fetchInitial(limit: _pageSize),
+            FeedService.instance.fetchInitial(limit: fetchLimit),
             FeedService.instance.fetchUserLikedPostIds(userId),
             FeedService.instance.fetchUserFollowingIds(userId),
             BlockingService.instance.getBlockedAndBlockerIds(userId),
@@ -73,21 +77,44 @@ class FeedController extends ChangeNotifier {
           myFollowingUserIds = results[2] as Set<String>;
           _blockedUserIds = results[3] as Set<String>;
         } else {
-          postSnapshot = await FeedService.instance.fetchInitial(limit: _pageSize);
+          postSnapshot = await FeedService.instance.fetchInitial(limit: fetchLimit);
         }
       } else {
-        postSnapshot = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: _pageSize);
+        postSnapshot = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: fetchLimit);
       }
 
-      var newDocs = postSnapshot.docs;
+      // KRONOLOJİK SON DÖKÜMANI KAYDET (ÇOK ÖNEMLİ!)
+      // Sıralama yapacağımız için sayfa kaydırma (pagination) sisteminin 
+      // bozulmaması adına tarihe göre en sonuncu dökümanı saklıyoruz.
+      if (postSnapshot.docs.isNotEmpty) {
+         _lastDoc = postSnapshot.docs.last;
+      }
+
+      var newDocs = List<DocumentSnapshot<Map<String, dynamic>>>.from(postSnapshot.docs);
+      
       if (_blockedUserIds.isNotEmpty) {
         newDocs = newDocs.where((doc) {
-          final authorId = doc.data()['authorId'] as String?;
+          final authorId = doc.data()!['authorId'] as String?;
           return !_blockedUserIds.contains(authorId);
         }).toList();
       }
 
-      final authorIds = newDocs.map((d) => d.data()['authorId'] as String?).where((id) => id != null).cast<String>().toList();
+      // ==============================================================
+      // YENİ: POPÜLERLİK (HOTNESS) ALGORİTMASI İLE SIRALAMA
+      // ==============================================================
+      newDocs.sort((a, b) {
+        final dataA = a.data() ?? {};
+        final dataB = b.data() ?? {};
+
+        double scoreA = _calculateHotness(dataA);
+        double scoreB = _calculateHotness(dataB);
+
+        // Büyük olan (puanı yüksek olan) üste çıksın
+        return scoreB.compareTo(scoreA); 
+      });
+      // ==============================================================
+
+      final authorIds = newDocs.map((d) => d.data()!['authorId'] as String?).where((id) => id != null).cast<String>().toList();
       await UserCacheService.instance.fetchUsers(authorIds);
 
       if (initial) {
@@ -96,8 +123,7 @@ class FeedController extends ChangeNotifier {
         posts.addAll(newDocs);
       }
 
-      _lastDoc = newDocs.isNotEmpty ? newDocs.last : _lastDoc;
-      hasMore = newDocs.length == _pageSize;
+      hasMore = postSnapshot.docs.length == fetchLimit;
     } catch (e) {
       debugPrint("LoadData Error: $e");
     } finally {
@@ -107,6 +133,28 @@ class FeedController extends ChangeNotifier {
     }
   }
 
+  // --- YARDIMCI FONKSİYON: POPÜLERLİK HESAPLAYICI ---
+  // Bu fonksiyonu _loadData fonksiyonunun hemen altına yapıştırın.
+  double _calculateHotness(Map<String, dynamic> data) {
+    final likes = (data['likeCount'] ?? 0) as num;
+    final replies = (data['replyCount'] ?? 0) as num;
+    final createdAt = data['createdAt'] as Timestamp?;
+
+    // 1 Beğeni = 2 Puan, 1 Yorum = 4 Puan (Yorum daha fazla etkileşim demektir)
+    double score = (likes * 2.0) + (replies * 4.0);
+
+    if (createdAt != null) {
+      // Post atılalı kaç saat olmuş?
+      final hoursDiff = DateTime.now().difference(createdAt.toDate()).inHours;
+      
+      // ZAMAN CEZASI: Üzerinden geçen her saat için 0.5 puan düşür.
+      // Etkileşim almayan ama çok yeni olan bir post, 
+      // etkileşim almayan ama 10 saat önce atılmış bir postun ÜSTÜNDE çıkar.
+      score -= (hoursDiff * 0.5); 
+    }
+
+    return score;
+  }
   // ==========================================
   // 2. TAKİP EDİLENLER AKIŞI METOTLARI
   // ==========================================

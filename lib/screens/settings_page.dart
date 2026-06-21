@@ -10,6 +10,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // Önbellek temizliği için
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:fluttergirdi/screens/blocked_users_screen.dart';
+import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -588,7 +589,67 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-
+  void _showPdfDialog(String title, String assetPath) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      builder: (context) {
+        return SizedBox(
+          height: MediaQuery.of(context).size.height * 0.9,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: const PDF(
+                  enableSwipe: true,
+                  swipeHorizontal: false,
+                  autoSpacing: false,
+                  pageFling: false,
+                ).fromAsset(
+                  assetPath,
+                  errorWidget: (dynamic error) => Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.error_outline, size: 40, color: Colors.red),
+                          const SizedBox(height: 10),
+                          Text(
+                            "Belge görüntülenemedi.\nHata: $error",
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -673,10 +734,31 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
 
                 // BÖLÜM 3: DESTEK & BİLGİ
+                // BÖLÜM 4: UYGULAMA & YASAL
                 _SettingsSection(
                   title: "UYGULAMA",
                   sectionColor: sectionColor,
                   children: [
+                    _SettingsTile(
+                      icon: Icons.article_rounded,
+                      iconColor: Colors.blueGrey,
+                      title: "Kullanım Koşulları",
+                      onTap: () {
+                        // Register sayfasında kullandığınız mevcut PDF
+                        _showPdfDialog("Kullanım Koşulları", "assets/docs/sozlesme.pdf");
+                      },
+                    ),
+                    _SettingsTile(
+                      icon: Icons.privacy_tip_rounded,
+                      iconColor: Colors.blueGrey,
+                      title: "Gizlilik Politikası",
+                      onTap: () {
+                        // Eğer gizlilik sözleşmesi için ayrı bir PDF'iniz varsa 
+                        // ismini aşağıdan değiştirebilirsiniz (Örn: gizlilik.pdf)
+                        // Şimdilik aynı PDF'i açıyor.
+                        _showPdfDialog("Gizlilik Politikası", "assets/docs/sozlesme.pdf");
+                      },
+                    ),
                     _SettingsTile(
                       icon: Icons.mail_rounded,
                       iconColor: Colors.green,
