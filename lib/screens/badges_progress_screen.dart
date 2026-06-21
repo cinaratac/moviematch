@@ -11,7 +11,25 @@ class BadgesProgressScreen extends StatefulWidget {
   @override
   State<BadgesProgressScreen> createState() => _BadgesProgressScreenState();
 }
+// --- RAM ÖNBELLEK SİSTEMİ (GİR-ÇIK YAPINCA YENİDEN YÜKLEMEYİ ÖNLER) ---
+class _BadgeProgressCache {
+  static Map<String, double>? progress;
+  static Map<String, String>? labels;
+  static DateTime? lastFetch;
 
+  // Veriler son 5 dakika içinde yüklendiyse geçerli sayılır
+  static bool get isValid =>
+      progress != null &&
+      labels != null &&
+      lastFetch != null &&
+      DateTime.now().difference(lastFetch!) < const Duration(minutes: 5);
+
+  static void update(Map<String, double> p, Map<String, String> l) {
+    progress = p;
+    labels = l;
+    lastFetch = DateTime.now();
+  }
+}
 class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
   bool _loading = true;
   final Map<String, double> _progress = {}; // BadgeID -> Yüzde (0.0 - 1.0)
@@ -25,78 +43,90 @@ class _BadgesProgressScreenState extends State<BadgesProgressScreen> {
 
   Future<void> _calculateProgress() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    // DÜZELTME 1: Kullanıcı yoksa yüklemeyi durdur, aksi halde sonsuz döngü olur.
     if (uid == null) {
       if (mounted) setState(() => _loading = false);
+      return;
+    }
+
+    // 1. ÖNBELLEK KONTROLÜ: Eğer veriler yakın zamanda çekildiyse hiç beklemeden anında göster!
+    if (_BadgeProgressCache.isValid) {
+      setState(() {
+        _progress.addAll(_BadgeProgressCache.progress!);
+        _labels.addAll(_BadgeProgressCache.labels!);
+        _loading = false;
+      });
       return;
     }
 
     final db = FirebaseFirestore.instance;
     
     try {
-      final userDoc = await db.collection('users').doc(uid).get();
-      final userData = userDoc.data() ?? {};
+      // 2. PARALEL SORGULAR: Tüm verileri arka arkaya değil, "Aynı Anda" çek (Yüklemeyi 4 Kat Hızlandırır)
+      final results = await Future.wait([
+        db.collection('users').doc(uid).get(const GetOptions(source: Source.serverAndCache)),
+        db.collection('posts').where('authorId', isEqualTo: uid).where('isReview', isEqualTo: true).count().get(),
+        db.collection('custom_lists').where('ownerId', isEqualTo: uid).count().get(),
+        FollowSystemService.I.fetchFollowerCountOnce(uid),
+      ]);
 
-      // DÜZELTME 2: Kullanıcının zaten sahip olduğu rozetleri çekiyoruz.
+      // Sonuçları değişkenlere dağıt
+      final userDoc = results[0] as DocumentSnapshot<Map<String, dynamic>>;
+      final postsSnap = results[1] as AggregateQuerySnapshot;
+      final listSnap = results[2] as AggregateQuerySnapshot;
+      final followersCount = results[3] as int;
+
+      final userData = userDoc.data() ?? {};
       final List<String> ownedBadges = List<String>.from(userData['badges'] ?? []);
 
-      // 1. Film Kurdu Verisi
+      // Film Kurdu Verisi (Bir önceki düzeltmemiz olan "watchedKeys" de burada duruyor)
       final uniqueMovies = {
         ...List.from(userData['favoritesKeys'] ?? []),
         ...List.from(userData['fiveStarKeys'] ?? []),
         ...List.from(userData['watchlistKeys'] ?? []),
-        ...List.from(userData['dislikedKeys'] ?? [])
+        ...List.from(userData['dislikedKeys'] ?? []),
+        ...List.from(userData['watchedKeys'] ?? []) // <-- İZLEDİM LİSTESİ BURADA!
       }.length;
 
-      // 2. Eleştirmen Verisi
-      final postsSnap = await db.collection('posts')
-          .where('authorId', isEqualTo: uid)
-          .where('isReview', isEqualTo: true)
-          .count()
-          .get();
       final reviewCount = postsSnap.count ?? 0;
-
-      // 3. Arşivci Verisi
-      final listSnap = await db.collection('custom_lists')
-          .where('ownerId', isEqualTo: uid)
-          .count()
-          .get();
       final listCount = listSnap.count ?? 0;
-
-      // 4. Popüler Verisi
-      final followersCount = await FollowSystemService.I.fetchFollowerCountOnce(uid);
 
       if (!mounted) return;
 
-      setState(() {
-        for (var badge in AppBadge.allBadges) {
-          int current = 0;
-          switch (badge.type) {
-            case BadgeType.filmBuff: current = uniqueMovies; break;
-            case BadgeType.critic: current = reviewCount; break;
-            case BadgeType.archivist: current = listCount; break;
-            case BadgeType.socialite: current = followersCount; break;
-            default: current = 0;
-          }
+      final Map<String, double> tempProgress = {};
+      final Map<String, String> tempLabels = {};
 
-          // DÜZELTME 3: Eğer kullanıcı rozete zaten sahipse, istatistik düşse bile %100 göster.
-          double pct = (current / badge.threshold).clamp(0.0, 1.0);
-          if (ownedBadges.contains(badge.id)) {
-            pct = 1.0;
-          }
-          
-          _progress[badge.id] = pct;
-          _labels[badge.id] = '$current / ${badge.threshold}';
+      for (var badge in AppBadge.allBadges) {
+        int current = 0;
+        switch (badge.type) {
+          case BadgeType.filmBuff: current = uniqueMovies; break;
+          case BadgeType.critic: current = reviewCount; break;
+          case BadgeType.archivist: current = listCount; break;
+          case BadgeType.socialite: current = followersCount; break;
+          default: current = 0;
         }
+
+        double pct = (current / badge.threshold).clamp(0.0, 1.0);
+        if (ownedBadges.contains(badge.id)) {
+          pct = 1.0;
+        }
+        
+        tempProgress[badge.id] = pct;
+        tempLabels[badge.id] = '$current / ${badge.threshold}';
+      }
+
+      // 3. Çekilen ve hesaplanan bu yeni veriyi RAM'e (Önbelleğe) yaz
+      _BadgeProgressCache.update(tempProgress, tempLabels);
+
+      setState(() {
+        _progress.addAll(tempProgress);
+        _labels.addAll(tempLabels);
         _loading = false;
       });
 
     } catch (e) {
-   
       if (mounted) setState(() => _loading = false);
     }
   }
-
   int get _earnedCount => _progress.values.where((p) => p >= 1.0).length;
 
   @override

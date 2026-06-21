@@ -61,6 +61,13 @@ Future<void> main() async {
         ? AppleProvider.appAttest 
         : AppleProvider.debug,
   );
+    if (!kReleaseMode) {
+    try {
+      await FirebaseAppCheck.instance.getToken(true);
+    } catch (e) {
+      debugPrint("App Check Debug Token alınamadı: $e");
+    }
+    }
  
   // Firestore Ayarları
   FirebaseFirestore.instance.settings = const Settings(

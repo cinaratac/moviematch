@@ -818,22 +818,14 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                               ),
                                             ),
 
-                                          // Rozetler ve Streak
-                                          StreamBuilder<DocumentSnapshot>(
-                                            stream: FirebaseFirestore.instance
-                                                .collection('users')
-                                                .doc(widget.uid)
-                                                .snapshots(),
-                                            builder: (context, snap) {
-                                              if (!snap.hasData || !snap.data!.exists)
-                                                return const SizedBox.shrink();
-                                              final uData = snap.data!.data() as Map<String, dynamic>?;
-                                              final badges = List<String>.from(uData?['badges'] ?? []);
-                                              // DÜZELTME BURADA: 'streakCount' olarak güncellendi
-                                              final int streakCount = (uData?['streakCount'] ?? 0) as int;
+                                          // Rozetler ve Streak (İç içe StreamBuilder SİLİNDİ, dışarıdaki 'data' kullanılıyor)
+                                          Builder(
+                                            builder: (context) {
+                                              // Veriyi en dıştaki ana Stream'den (data değişkeninden) bedavaya alıyoruz!
+                                              final badges = List<String>.from(data['badges'] ?? []);
+                                              final int streakCount = (data['streakCount'] ?? 0) as int;
 
-                                              if (badges.isEmpty && streakCount <= 0)
-                                                return const SizedBox.shrink();
+                                              if (badges.isEmpty && streakCount <= 0) return const SizedBox.shrink();
 
                                               return Padding(
                                                 padding: const EdgeInsets.only(bottom: 6.0),
@@ -869,7 +861,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                                           ],
                                                         ),
                                                       ),
-                                                      
+                                                    
                                                     // MEVCUT ROZETLER
                                                     if (badges.isNotEmpty)
                                                       Wrap(

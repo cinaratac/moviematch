@@ -50,10 +50,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
       if (forceRefresh) {
         RecommendationEngine.instance.clearMemoryCache();
       }
-      var recs = await RecommendationEngine.instance.getCachedRecommendations(uid);
-      if (recs == null || recs.isEmpty) {
-        recs = await RecommendationEngine.instance.generateRecommendations(uid);
-      }
+      final recs = await RecommendationEngine.instance.generateRecommendations(uid);
 
       if (mounted) {
         setState(() {

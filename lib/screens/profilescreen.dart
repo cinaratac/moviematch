@@ -472,6 +472,14 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       }
     });
+    final prefs = await SharedPreferences.getInstance();
+    final lastCheck = prefs.getString('last_badge_check') ?? '';
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    
+    if (lastCheck != today) {
+      await GamificationService.instance.checkAndAwardBadges();
+      await prefs.setString('last_badge_check', today);
+    }
   }
 
   Future<void> _forceWriteLbUsernameIfMissing() async {
@@ -599,6 +607,7 @@ bool _listEquals(List a, List b) {
     _followSub?.cancel();
     _showGuideNotifier.dispose();
     UserShelfCache.clear();
+    _userSub?.cancel();
     super.dispose();
   }
 

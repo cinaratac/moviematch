@@ -11,7 +11,9 @@ class TextFilterService {
   // Anahtar Kelimeler (Kökler ve Türevler)
   'amcık', 'amcik', 'yarrak', 'yarak', 'yaraq',
   'göt', 'got', 'götveren', 'götlek', 'götoş',
-  'orospu', 'ospu', 'orosbu',
+  'orospu', 'ospu', 'orosbu','oropsu', 'orosbucocugu', 'orospuçocuğu', 'orospu çocuğu',
+  'sikmek', 'sikiyim', 'sikerim', 'sikiyorum', 'sikiyom', 'sikeyim',
+  'sik', 's1k', 's1kik', 's1kikim', 's1keyim', 's1kecem',
   'piç', 'pic', 'piç kurusu',
   'yavşak', 'yavsak',
   'kahpe', 'kaltak', 'kaşar', 'fahişe', 'sürtük',
@@ -25,7 +27,9 @@ class TextFilterService {
   'öküz', 'beyinsiz', 'ezik', 'bok', 'boktan',
   
   // İngilizce (Genel)
+  // İngilizce (Genişletilmiş)
   'fuck', 'shit', 'bitch', 'asshole', 'dick', 'pussy', 'bastard',
+  'cunt', 'motherfucker', 'slut', 'whore', 'crap', 'bullshit',
   
   // Diğer Varyasyonlar
   'aq', 'aqw', 'amq', 'ams', 'amck', 'yarrk', 'yrrk',

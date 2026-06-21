@@ -73,32 +73,22 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
   }
 
   Future<void> _waitForCriticalData() async {
-    // Kritik sıra:
-    // 1. Feed controller (kullanıcı açılınca feed boş görünmesin)
-    // 2. Profil/shelf cache (film detayına girilince izlendi durumu görünsün)
-    // 3. Chat + match için kısa tolerans (bunlar olmasa da ana akış çalışır)
-
-    await Future.wait([
-      FeedController.instance.init(),
-      FeedController.instance.initFollowing(),
-      // Profil datası ilk Firestore snapshot'ından geldiğinde resolve eder.
-      // Firestore offline cache varsa ~50ms, yoksa ~500ms sürer.
-      GlobalDataService.instance.profileReady
-          .timeout(
-            const Duration(seconds: 3),
-            onTimeout: () {}, // Timeout olursa takılma, devam et
-          ),
-    ]);
-
-    // Chat ve match için maksimum 1 saniye daha bekle.
-    // Gelmediyse zaten kademeli olarak gelecek — kullanıcıyı bekletme.
-    await Future.any([
-      Future.wait([
-        _waitUntil(() => GlobalDataService.instance.myChats != null),
-        _waitUntil(() => GlobalDataService.instance.myMatches != null),
-      ]),
-      Future.delayed(const Duration(seconds: 1)),
-    ]);
+    // 1. Önce sadece ana akış yüklensin
+    await FeedController.instance.init();
+    
+    // Yığılmayı önlemek için araya çeyrek saniyelik nefes payı koyuyoruz
+    await Future.delayed(const Duration(milliseconds: 250));
+    
+    // 2. Takip edilenler akışı yüklensin
+    await FeedController.instance.initFollowing();
+    
+    // 3. Profil ve diğer global veriler yüklensin (Zaman aşımı korumalı)
+    try {
+      await GlobalDataService.instance.profileReady
+          .timeout(const Duration(seconds: 3));
+    } catch (_) {
+      debugPrint("Profil yüklemesi zaman aşımına uğradı, devam ediliyor.");
+    }
   }
 
   /// Belirli bir koşul sağlanana kadar 50ms aralıklarla bekler.

@@ -79,30 +79,40 @@ class _MovieReviewSectionState extends State<MovieReviewSection> {
   void _startStream() {
     setState(() => _loadingLive = _cachedDocs == null);
 
-    // Firestore compound Filter.or() yerine tek field sorgusu:
-    // movie.tmdbId hem int hem string olarak kaydediliyor olabilir.
-    // İkisini de ayrı ayrı çekip birleştirmek daha hızlı (index gerektirmez).
     final db = FirebaseFirestore.instance;
 
-    // Birincil sorgu: tmdbId integer
+    // SİZİN ORİJİNAL KODUNUZ: 'movie.tmdbId' üzerinden arıyoruz.
+    // DİKKAT: Sadece orderBy() KALDIRILDI! (Çökmeyi ve döngüyü önlemek için)
     final q1 = db
         .collection('posts')
         .where('movie.tmdbId', isEqualTo: widget.tmdbId)
-        .orderBy('createdAt', descending: true)
         .limit(10);
 
     _sub = q1.snapshots().listen(
       (snap) {
         if (!mounted) return;
-        final docs = snap.docs;
+        final docs = snap.docs.toList();
+
+        // Eğer sonuç yoksa orijinal kodunuzdaki gibi String ID ile eski postları ara
+        if (docs.isEmpty) {
+          _tryStringFallback();
+          return;
+        }
+
+        // Firebase Index'i çökmesin diye sıralamayı (orderBy) UYGULAMA İÇİNDE yapıyoruz
+        docs.sort((a, b) {
+          final tA = a['createdAt'] as Timestamp?;
+          final tB = b['createdAt'] as Timestamp?;
+          if (tA == null) return 1;
+          if (tB == null) return -1;
+          return tB.compareTo(tA);
+        });
+
         _ReviewCache.instance.set(widget.tmdbId, docs);
         setState(() {
           _liveDocs   = docs;
           _loadingLive = false;
         });
-
-        // Eğer hiç sonuç yoksa string ID ile de dene (eski kayıtlar için)
-        if (docs.isEmpty) _tryStringFallback();
       },
       onError: (_) {
         if (mounted) setState(() => _loadingLive = false);
@@ -110,30 +120,51 @@ class _MovieReviewSectionState extends State<MovieReviewSection> {
     );
   }
 
-  // Eski kayıtlarda movie.id string olabilir — tek seferlik fetch
+  // SİZİN ORİJİNAL KODUNUZ: Eski kayıtlar için String kontrolü
   Future<void> _tryStringFallback() async {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('posts')
           .where('movie.id', isEqualTo: widget.tmdbId.toString())
-          .orderBy('createdAt', descending: true)
-          .limit(10)
+          .limit(10) // orderBy BURADAN DA KALDIRILDI
           .get(const GetOptions(source: Source.serverAndCache));
 
-      if (!mounted || snap.docs.isEmpty) return;
+      if (!mounted || snap.docs.isEmpty) {
+        if (mounted) setState(() => _loadingLive = false);
+        return;
+      }
 
       final merged = <QueryDocumentSnapshot>[
         ...(_liveDocs ?? []),
         ...snap.docs,
       ];
+      
       // Duplicate postId temizle
       final seen  = <String>{};
       final dedup = merged.where((d) => seen.add(d.id)).toList();
 
+      // Sıralamayı LOKAL olarak yapıyoruz
+      dedup.sort((a, b) {
+        final tA = a['createdAt'] as Timestamp?;
+        final tB = b['createdAt'] as Timestamp?;
+        if (tA == null) return 1;
+        if (tB == null) return -1;
+        return tB.compareTo(tA);
+      });
+
       _ReviewCache.instance.set(widget.tmdbId, dedup);
-      if (mounted) setState(() => _liveDocs = dedup);
-    } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _liveDocs = dedup;
+          _loadingLive = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingLive = false);
+    }
   }
+
+  
 
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);

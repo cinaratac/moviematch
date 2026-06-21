@@ -28,14 +28,15 @@ class GamificationService {
     final watch = List<String>.from(data['watchlistKeys'] ?? []);
     final disliked = List<String>.from(data['dislikedKeys'] ?? []); 
 
+    final watched = List<String>.from(data['watchedKeys'] ?? []);
     // Benzersiz film sayısını hesapla
-    final uniqueMovies = {...favs, ...fives, ...watch, ...disliked}.length;
+    final uniqueMovies = {...favs, ...fives, ...watch, ...disliked, ...watched}.length;
 
     // ÖNEMLİ: Bu sayıyı veritabanına yaz ki liderlik tablosunda kullanabilelim
     await userDocRef.update({'totalMovies': uniqueMovies});
 
     _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.filmBuff), uniqueMovies, currentBadges, newBadges);
-
+    
     // 2. Eleştirmen Kontrolü
     final postsQuery = await _db.collection('posts')
         .where('authorId', isEqualTo: user.uid)

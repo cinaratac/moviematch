@@ -126,18 +126,28 @@ class NotificationService {
 
   /* --- Senin Chat Dinleyicilerin --- */
   Future<void> _bindChatsAndMessages(String myUid) async {
-    for (final s in _chatSubs.values) { await s.cancel(); }
-    _chatSubs.clear();
+    // KESİN ÇÖZÜM: Tüm chat'leri değil, sadece son 10 güncel chat'i dinle.
+    final recentChats = await FirebaseFirestore.instance
+        .collection('chats')
+        .where('participants', arrayContains: myUid)
+        .orderBy('updatedAt', descending: true)
+        .limit(10) // Sınır getirildi
+        .get();
 
-    final chats = await FirebaseFirestore.instance
-        .collection('chats').where('participants', arrayContains: myUid).limit(50).get();
+    for (final c in recentChats.docs) {
+      _listenMessagesForChat(myUid, c.id);
+    }
 
-    for (final c in chats.docs) { _listenMessagesForChat(myUid, c.id); }
-
-    FirebaseFirestore.instance.collection('chats').where('participants', arrayContains: myUid)
-        .snapshots().listen((qs) {
+    // Yeni eklenen sohbetleri dinlemeye devam et
+    FirebaseFirestore.instance
+        .collection('chats')
+        .where('participants', arrayContains: myUid)
+        .snapshots()
+        .listen((qs) {
       for (final ch in qs.docChanges) {
-        if (ch.type == DocumentChangeType.added) { _listenMessagesForChat(myUid, ch.doc.id); }
+        if (ch.type == DocumentChangeType.added) {
+          _listenMessagesForChat(myUid, ch.doc.id);
+        }
       }
     });
   }
