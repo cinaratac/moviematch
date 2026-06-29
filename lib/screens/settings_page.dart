@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../auth/login_page.dart';
@@ -7,7 +10,7 @@ import 'package:fluttergirdi/theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart'; // Önbellek temizliği için
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:fluttergirdi/screens/blocked_users_screen.dart';
 import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
@@ -34,6 +37,80 @@ class _SettingsPageState extends State<SettingsPage> {
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<T?> _showSettingsDialog<T>({
+    required String title,
+    required Widget child,
+    List<Widget> actions = const [],
+    IconData? icon,
+    Color? iconColor,
+    bool barrierDismissible = true,
+  }) {
+    return showDialog<T>(
+      context: context,
+      barrierDismissible: barrierDismissible,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+        backgroundColor: Colors.transparent,
+        child: _SettingsPopupSurface(
+          title: title,
+          icon: icon,
+          iconColor: iconColor,
+          actions: actions,
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Future<bool?> _showConfirmDialog({
+    required String title,
+    required String message,
+    required String confirmText,
+    IconData? icon,
+    Color? iconColor,
+    bool destructive = false,
+  }) {
+    final color = destructive
+        ? Colors.red
+        : (iconColor ?? Theme.of(context).primaryColor);
+
+    return _showSettingsDialog<bool>(
+      title: title,
+      icon: icon,
+      iconColor: color,
+      child: Text(
+        message,
+        style: TextStyle(
+          fontSize: 14,
+          height: 1.35,
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white70
+              : Colors.black87,
+        ),
+      ),
+      actions: [
+        _SettingsPopupButton(
+          label: 'Vazgeç',
+          onPressed: () => Navigator.pop(context, false),
+        ),
+        _SettingsPopupButton(
+          label: confirmText,
+          color: color,
+          filled: true,
+          onPressed: () => Navigator.pop(context, true),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _copySupportEmail() async {
+    const email = 'cinematch.app.dev@gmail.com';
+    await Clipboard.setData(const ClipboardData(text: email));
+    if (!mounted) return;
+    Navigator.pop(context);
+    _toast('E-posta adresi kopyalandı.');
   }
 
   Future<void> _loadNotificationPreferences() async {
@@ -70,17 +147,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
     if (value) {
       try {
-        // 1. Önce cihazdaki mevcut bildirim izni durumunu kontrol et
         var settings = await FirebaseMessaging.instance
             .getNotificationSettings();
 
-        // 2. Eğer henüz izin verilmemişse (veya reddedilmişse) izin penceresini aç
         if (settings.authorizationStatus != AuthorizationStatus.authorized &&
             settings.authorizationStatus != AuthorizationStatus.provisional) {
           settings = await FirebaseMessaging.instance.requestPermission();
         }
 
-        // 3. Hala izin verilmediyse işlemi iptal et
         if (settings.authorizationStatus != AuthorizationStatus.authorized &&
             settings.authorizationStatus != AuthorizationStatus.provisional) {
           setState(() => _notificationsEnabled = false);
@@ -90,7 +164,6 @@ class _SettingsPageState extends State<SettingsPage> {
           return;
         }
       } catch (e) {
-        // PushTokenService ile çakışırsa çökmeyi engelle ve devam et
         if (e.toString().contains('already running')) {
           _toast('Bildirim izinleri kontrol ediliyor...');
         } else {
@@ -101,7 +174,6 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
 
-    // İzinler tamamsa (veya çakışma atlatıldıysa) Firebase'e kaydet!
     try {
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'notificationsEnabled': value,
@@ -115,8 +187,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _toast('Firebase Hatası: $e');
     }
   }
-
-  // --- Yardımcı Fonksiyonlar ---
 
   Future<void> _resetPassword() async {
     final user = _user;
@@ -139,22 +209,12 @@ class _SettingsPageState extends State<SettingsPage> {
     final user = _user;
     if (user == null) return;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Bağlantıyı Kaldır'),
-        content: const Text('Letterboxd verileri silinecek. Devam edilsin mi?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Vazgeç'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Kaldır', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
+    final ok = await _showConfirmDialog(
+      title: 'Bağlantıyı Kaldır',
+      message: 'Letterboxd verileri silinecek. Devam edilsin mi?',
+      confirmText: 'Kaldır',
+      icon: Icons.link_off_rounded,
+      destructive: true,
     );
     if (ok != true) return;
 
@@ -203,8 +263,9 @@ class _SettingsPageState extends State<SettingsPage> {
           .collection('users')
           .doc(_user!.uid)
           .get();
-      if (snap.data()?['themeMode'] is String)
+      if (snap.data()?['themeMode'] is String) {
         current = snap.data()!['themeMode'];
+      }
     } catch (_) {}
 
     if (!mounted) return;
@@ -212,69 +273,56 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final result = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) => StatefulBuilder(
         builder: (ctx, setSheetState) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 16),
-              Text(
-                "Görünüm",
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              _ThemeOption(
-                label: 'Aydınlık',
-                val: 'light',
-                group: selected,
-                icon: Icons.light_mode_rounded,
-                onTap: (v) => setSheetState(() => selected = v),
-              ),
-              _ThemeOption(
-                label: 'Karanlık',
-                val: 'dark',
-                group: selected,
-                icon: Icons.dark_mode_rounded,
-                onTap: (v) => setSheetState(() => selected = v),
-              ),
-              _ThemeOption(
-                label: 'Sistem',
-                val: 'system',
-                group: selected,
-                icon: Icons.settings_suggest_rounded,
-                onTap: (v) => setSheetState(() => selected = v),
-              ),
-              const SizedBox(height: 24),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      elevation: 0,
-                      backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: () => Navigator.pop(context, selected),
-                    child: const Text(
-                      "Uygula",
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: _SettingsPopupSurface(
+              title: 'Görünüm',
+              icon: Icons.palette_rounded,
+              iconColor: Colors.blueAccent,
+              showHandle: true,
+              // ignore: sort_child_properties_last
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ThemeOption(
+                    label: 'Aydınlık',
+                    val: 'light',
+                    group: selected,
+                    icon: Icons.light_mode_rounded,
+                    onTap: (v) => setSheetState(() => selected = v),
                   ),
-                ),
+                  _ThemeOption(
+                    label: 'Karanlık',
+                    val: 'dark',
+                    group: selected,
+                    icon: Icons.dark_mode_rounded,
+                    onTap: (v) => setSheetState(() => selected = v),
+                  ),
+                  _ThemeOption(
+                    label: 'Sistem',
+                    val: 'system',
+                    group: selected,
+                    icon: Icons.settings_suggest_rounded,
+                    onTap: (v) => setSheetState(() => selected = v),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-            ],
+              actions: [
+                _SettingsPopupButton(
+                  label: 'Vazgeç',
+                  onPressed: () => Navigator.pop(context),
+                ),
+                _SettingsPopupButton(
+                  label: 'Uygula',
+                  filled: true,
+                  onPressed: () => Navigator.pop(context, selected),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -307,92 +355,57 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _logout() async {
-    showCupertinoDialog(
-      context: context,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('Çıkış Yap'),
-        content: const Text(
-          'Hesabınızdan çıkış yapmak istediğinize emin misiniz?',
-        ),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Vazgeç'),
-            onPressed: () => Navigator.pop(ctx),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            child: const Text('Çıkış'),
-            onPressed: () async {
-              // 1. Önce diyaloğu kapat
-              Navigator.pop(ctx);
-
-              // 2. Önbellekteki (resimler vb.) her şeyi temizle
-              await DefaultCacheManager().emptyCache();
-
-              // 3. Yerel ayarları (Shared Prefs) temizle
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
-
-              // 4. KRİTİK ADIM: Önce tüm sayfaları kapat ve en başa (Login'e) dön
-              if (mounted) {
-                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                  (route) => false,
-                );
-              }
-
-              // 5. Ekran temizlendikten sonra güvenle Firebase'den çık
-              await FirebaseAuth.instance.signOut();
-            },
-          ),
-        ],
-      ),
+    final ok = await _showConfirmDialog(
+      title: 'Çıkış Yap',
+      message: 'Hesabınızdan çıkış yapmak istediğinize emin misiniz?',
+      confirmText: 'Çıkış',
+      icon: Icons.logout_rounded,
+      destructive: true,
     );
+    if (ok != true) return;
+
+    await DefaultCacheManager().emptyCache();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (route) => false,
+      );
+    }
+
+    await FirebaseAuth.instance.signOut();
   }
 
   Future<void> _deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    bool confirm =
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text("Hesabı Sil"),
-            content: const Text(
-              "Hesabınızı ve tüm verilerinizi kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text("İptal"),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: const Text("Evet, Sil"),
-              ),
-            ],
-          ),
-        ) ??
-        false;
+    final confirm = await _showConfirmDialog(
+      title: 'Hesabı Sil',
+      message:
+          'Hesabınızı ve tüm verilerinizi kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.',
+      confirmText: 'Evet, Sil',
+      icon: Icons.delete_forever_rounded,
+      destructive: true,
+    );
 
-    if (!confirm) return;
+    if (confirm != true) return;
 
     try {
-      // 1. Kullanıcının hangi yöntemle girdiğini bul (Google, Apple, Şifre)
       bool isGoogleUser = user.providerData.any(
         (info) => info.providerId == 'google.com',
       );
       bool isAppleUser = user.providerData.any(
         (info) => info.providerId == 'apple.com',
-      ); // YENİ EKLENDİ
+      );
 
       if (isGoogleUser) {
-        // --- GOOGLE İLE RE-AUTHENTICATE ---
         final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
 
-        if (googleUser == null) return; // İptal etti
+        if (googleUser == null) return;
 
         final GoogleSignInAuthentication googleAuth =
             await googleUser.authentication;
@@ -403,7 +416,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
         await user.reauthenticateWithCredential(credential);
       } else if (isAppleUser) {
-        // --- APPLE İLE RE-AUTHENTICATE (YENİ EKLENDİ) ---
         final AuthorizationCredentialAppleID appleCredential =
             await SignInWithApple.getAppleIDCredential(
               scopes: [
@@ -420,9 +432,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
         await user.reauthenticateWithCredential(credential);
       } else {
-        // --- E-POSTA/ŞİFRE İLE RE-AUTHENTICATE ---
         String? password = await _showPasswordDialog();
-        if (password == null) return; // İptal etti
+        if (password == null) return;
 
         final AuthCredential credential = EmailAuthProvider.credential(
           email: user.email!,
@@ -432,25 +443,17 @@ class _SettingsPageState extends State<SettingsPage> {
         await user.reauthenticateWithCredential(credential);
       }
 
-      // 2. Önce Firestore Verilerini Temizle
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .delete();
 
-      // Ekstra Not: Eğer 'userTasteProfiles' veya 'marketing_emails' tablolarında
-      // bu kullanıcıya ait belge varsa onları da burada silmeniz veri gizliliği için çok iyi olur.
-      // Örnek: await FirebaseFirestore.instance.collection('userTasteProfiles').doc(user.uid).delete();
-
-      // 3. Cihazdaki Önbelleği ve Verileri Temizle
       await DefaultCacheManager().emptyCache();
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
 
-      // 4. Auth Hesabını Sil
       await user.delete();
 
-      // 5. Çıkış Yap ve Login Ekranına At
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -461,7 +464,6 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       }
     } on SignInWithAppleAuthorizationException catch (e) {
-      // YENİ EKLENDİ: Kullanıcı FaceID/TouchID ekranında işlemi iptal ederse hata popup'ı çıkmasın
       if (e.code == AuthorizationErrorCode.canceled) {
         return;
       }
@@ -477,8 +479,9 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) {
         String errorMsg = "Bir hata oluştu.";
         if (e.code == 'wrong-password') errorMsg = "Girdiğiniz şifre yanlış.";
-        if (e.code == 'requires-recent-login')
+        if (e.code == 'requires-recent-login') {
           errorMsg = "Güvenlik gereği tekrar giriş yapmalısınız.";
+        }
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
@@ -493,163 +496,181 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // Şifre ile girenlerden şifre istemek için yardımcı fonksiyon
   Future<String?> _showPasswordDialog() async {
     String? password;
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Şifrenizi Girin"),
-        content: TextField(
-          obscureText: true,
-          onChanged: (value) => password = value,
-          decoration: const InputDecoration(
-            hintText: "Mevcut şifreniz",
-            border: OutlineInputBorder(),
-          ),
+    return _showSettingsDialog<String>(
+      title: 'Şifrenizi Girin',
+      icon: Icons.lock_rounded,
+      child: TextField(
+        obscureText: true,
+        autofocus: true,
+        onChanged: (value) => password = value,
+        decoration: InputDecoration(
+          hintText: "Mevcut şifreniz",
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("İptal"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, password),
-            child: const Text("Onayla"),
-          ),
-        ],
       ),
+      actions: [
+        _SettingsPopupButton(
+          label: 'İptal',
+          onPressed: () => Navigator.pop(context),
+        ),
+        _SettingsPopupButton(
+          label: 'Onayla',
+          filled: true,
+          onPressed: () => Navigator.pop(context, password),
+        ),
+      ],
     );
   }
 
   void _showAboutApp() {
-    showCupertinoDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('CineMatch'),
-        content: const Column(
-          children: [
-            SizedBox(height: 10),
-            Icon(Icons.movie_filter_rounded, size: 40, color: Colors.grey),
-            SizedBox(height: 10),
-            Text(
-              'Sürüm 1.0.0\n\nFilm zevklerini eşleştiren sosyal platform.\n© 2024 Kozmosoft',
-            ),
-          ],
-        ),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Lisanslar'),
-            onPressed: () {
-              Navigator.pop(ctx);
-              showLicensePage(
-                context: context,
-                applicationName: 'CineMatch',
-                applicationVersion: '1.0.0',
-                applicationLegalese: '© 2024 Kozmosoft',
-                applicationIcon: const Icon(
-                  Icons.movie_filter_rounded,
-                  size: 48,
-                ),
-              );
-            },
-          ),
-          CupertinoDialogAction(
-            child: const Text('Tamam'),
-            onPressed: () => Navigator.pop(ctx),
+    _showSettingsDialog<void>(
+      title: 'CineMatch',
+      icon: Icons.movie_filter_rounded,
+      iconColor: Colors.teal,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Text(
+            'Sürüm 1.0.0\n\nFilm zevklerini eşleştiren sosyal platform.\n© 2024 Kozmosoft',
+            textAlign: TextAlign.center,
+            style: TextStyle(height: 1.35),
           ),
         ],
       ),
+      actions: [
+        _SettingsPopupButton(
+          label: 'Lisanslar',
+          onPressed: () {
+            Navigator.pop(context);
+            showLicensePage(
+              context: context,
+              applicationName: 'CineMatch',
+              applicationVersion: '1.0.0',
+              applicationLegalese: '© 2024 Kozmosoft',
+              applicationIcon: const Icon(Icons.movie_filter_rounded, size: 48),
+            );
+          },
+        ),
+        _SettingsPopupButton(
+          label: 'Tamam',
+          color: Colors.black,
+          filled: true,
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
     );
   }
 
   void _showSupportDialog() {
-    showCupertinoDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('Destek'),
-        content: const Column(
-          children: [
-            Text('Görüş ve önerileriniz için:'),
-            SizedBox(height: 8),
-            Text(
-              'cinematch.app.dev@gmail.com',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Tamam'),
-            onPressed: () => Navigator.pop(ctx),
+    const email = 'cinematch.app.dev@gmail.com';
+
+    _showSettingsDialog<void>(
+      title: 'Destek',
+      icon: Icons.mail_rounded,
+      iconColor: Colors.green,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Görüş ve önerileriniz için:',
+            textAlign: TextAlign.center,
           ),
-        ],
-      ),
-    );
-  }
-  void _showPdfDialog(String title, String assetPath) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      enableDrag: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (context) {
-        return SizedBox(
-          height: MediaQuery.of(context).size.height * 0.9,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+          const SizedBox(height: 12),
+          Material(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: _copySupportEmail,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context),
+                    Icon(Icons.copy_rounded, size: 18),
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        email,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1),
-              Expanded(
-                child: const PDF(
-                  enableSwipe: true,
-                  swipeHorizontal: false,
-                  autoSpacing: false,
-                  pageFling: false,
-                ).fromAsset(
-                  assetPath,
-                  errorWidget: (dynamic error) => Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.error_outline, size: 40, color: Colors.red),
-                          const SizedBox(height: 10),
-                          Text(
-                            "Belge görüntülenemedi.\nHata: $error",
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        _SettingsPopupButton(
+          label: 'Tamam',
+          color: Colors.black,
+          filled: true,
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
+    );
+  }
+
+  void _showPdfDialog(String title, String assetPath) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          appBar: AppBar(
+            title: Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            centerTitle: true,
+          ),
+          body:
+              PDF(
+                enableSwipe: true,
+                swipeHorizontal: false,
+                autoSpacing: true,
+                pageFling: true,
+                pageSnap: false,
+                fitPolicy: FitPolicy.WIDTH,
+                fitEachPage: true,
+                gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                  Factory<OneSequenceGestureRecognizer>(
+                    () => EagerGestureRecognizer(),
+                  ),
+                },
+              ).fromAsset(
+                assetPath,
+                errorWidget: (dynamic error) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          size: 40,
+                          color: Colors.red,
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          "Belge görüntülenemedi.\nHata: $error",
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -677,7 +698,6 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.symmetric(vertical: 20),
               children: [
-                // BÖLÜM 1: GENEL
                 _SettingsSection(
                   title: "TERCİHLER",
                   sectionColor: sectionColor,
@@ -699,8 +719,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
-
-                // BÖLÜM 2: HESAP & VERİ
                 _SettingsSection(
                   title: "HESAP",
                   sectionColor: sectionColor,
@@ -732,9 +750,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
-
-                // BÖLÜM 3: DESTEK & BİLGİ
-                // BÖLÜM 4: UYGULAMA & YASAL
                 _SettingsSection(
                   title: "UYGULAMA",
                   sectionColor: sectionColor,
@@ -744,8 +759,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       iconColor: Colors.blueGrey,
                       title: "Kullanım Koşulları",
                       onTap: () {
-                        // Register sayfasında kullandığınız mevcut PDF
-                        _showPdfDialog("Kullanım Koşulları", "assets/docs/sozlesme.pdf");
+                        _showPdfDialog(
+                          "Kullanım Koşulları",
+                          "assets/docs/sozlesme.pdf",
+                        );
                       },
                     ),
                     _SettingsTile(
@@ -753,10 +770,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       iconColor: Colors.blueGrey,
                       title: "Gizlilik Politikası",
                       onTap: () {
-                        // Eğer gizlilik sözleşmesi için ayrı bir PDF'iniz varsa 
-                        // ismini aşağıdan değiştirebilirsiniz (Örn: gizlilik.pdf)
-                        // Şimdilik aynı PDF'i açıyor.
-                        _showPdfDialog("Gizlilik Politikası", "assets/docs/sozlesme.pdf");
+                        _showPdfDialog(
+                          "Gizlilik Politikası",
+                          "assets/docs/sozlesme.pdf",
+                        );
                       },
                     ),
                     _SettingsTile(
@@ -774,7 +791,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                // BÖLÜM 4: OTURUM
                 _SettingsSection(
                   sectionColor: sectionColor,
                   children: [
@@ -787,7 +803,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
                 const SizedBox(height: 5),
-                // BÖLÜM 5: TEHLİKELİ BÖLGE
                 _SettingsSection(
                   footer: "Hesabınızı silmek geri alınamaz bir işlemdir.",
                   sectionColor: sectionColor,
@@ -801,7 +816,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                _buildTmdbAttribution(), // TMDB Atıf Widget'ı
+                _buildTmdbAttribution(),
                 const SizedBox(height: 40),
               ],
             ),
@@ -809,7 +824,167 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-// --- TASARIM BİLEŞENLERİ (APPLE STİLİ) ---
+class _SettingsPopupSurface extends StatelessWidget {
+  final String title;
+  final Widget child;
+  final List<Widget> actions;
+  final IconData? icon;
+  final Color? iconColor;
+  final bool showHandle;
+
+  const _SettingsPopupSurface({
+    required this.title,
+    required this.child,
+    this.actions = const [],
+    this.icon,
+    this.iconColor,
+    this.showHandle = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surface = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final border = isDark ? Colors.white12 : Colors.black12;
+    final accent = iconColor ?? Theme.of(context).primaryColor;
+
+    return Material(
+      color: surface,
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: border),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (showHandle) ...[
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (icon != null) ...[
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(icon, color: accent, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              child,
+              if (actions.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    for (int i = 0; i < actions.length; i++) ...[
+                      Expanded(child: actions[i]),
+                      if (i != actions.length - 1) const SizedBox(width: 10),
+                    ],
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsPopupButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onPressed;
+  final bool filled;
+  final Color? color;
+
+  const _SettingsPopupButton({
+    required this.label,
+    required this.onPressed,
+    this.filled = false,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final effectiveColor =
+        color ?? (isDark ? Colors.white : Theme.of(context).primaryColor);
+
+    if (filled) {
+      return SizedBox(
+        height: 46,
+        child: FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: effectiveColor,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          onPressed: onPressed,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 46,
+      child: TextButton(
+        style: TextButton.styleFrom(
+          foregroundColor: effectiveColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        onPressed: onPressed,
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+}
 
 class _SettingsSection extends StatelessWidget {
   final String? title;
@@ -932,7 +1107,6 @@ class _SettingsTile extends StatelessWidget {
               ),
               const SizedBox(width: 16),
             ],
-
             Expanded(
               child: Text(
                 title,
@@ -944,7 +1118,6 @@ class _SettingsTile extends StatelessWidget {
                 ),
               ),
             ),
-
             if (isSwitch)
               Transform.scale(
                 scale: 0.8,
@@ -1001,61 +1174,67 @@ class _ThemeOption extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool isSelected = val == group;
     final theme = Theme.of(context);
-    return ListTile(
-      leading: Icon(icon, color: isSelected ? theme.primaryColor : Colors.grey),
-      title: Text(
-        label,
-        style: TextStyle(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: isSelected
+            ? theme.primaryColor.withValues(alpha: 0.13)
+            : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04)),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => onTap(val),
+          child: ListTile(
+            leading: Icon(
+              icon,
+              color: isSelected ? theme.primaryColor : Colors.grey,
+            ),
+            title: Text(
+              label,
+              style: TextStyle(
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            trailing: isSelected
+                ? Icon(Icons.check_circle, color: theme.primaryColor)
+                : const Icon(Icons.circle_outlined, color: Colors.grey),
+          ),
         ),
       ),
-      trailing: isSelected
-          ? Icon(Icons.check_circle, color: theme.primaryColor)
-          : const Icon(Icons.circle_outlined, color: Colors.grey),
-      onTap: () => onTap(val),
-      
     );
-    
-    
-    
-    
   }
 }
 
-// TMDB Atıf Widget'ı
 Widget _buildTmdbAttribution() {
   return Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const Divider(), // Üstüne ince bir çizgi çeker, şık durur
+      const Divider(),
       const SizedBox(height: 20),
-
-      // LOGO KISMI
       Opacity(
-        opacity: 0.8, // Logoyu çok az şeffaf yapar, bağırmaz
+        opacity: 0.8,
         child: Image.asset(
-          'assets/images/tmdb_logo.png', // Dosya yolun burası
-          width: 60, // İdeal boyut
+          'assets/images/tmdb_logo.png',
+          width: 60,
           height: 60,
         ),
       ),
-
       const SizedBox(height: 10),
-
-      // ZORUNLU METİN KISMI
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 30.0),
         child: Text(
           "This product uses the TMDB API but is not endorsed or certified by TMDB.",
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: Colors.grey.shade600, // Silik gri renk
-            fontSize: 10, // Çok küçük font (Caption tarzı)
+            color: Colors.grey.shade600,
+            fontSize: 10,
             fontStyle: FontStyle.italic,
           ),
         ),
       ),
-      const SizedBox(height: 30), // En altta biraz boşluk bırakır
+      const SizedBox(height: 30),
     ],
   );
 }
