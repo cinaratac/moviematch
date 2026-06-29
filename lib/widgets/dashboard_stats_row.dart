@@ -1,112 +1,86 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:fluttergirdi/models/gamification.dart';
+import 'package:fluttergirdi/screens/badges_progress_screen.dart';
+import 'package:fluttergirdi/screens/clubs_tab.dart';
+import 'package:fluttergirdi/screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/utils/date_helper.dart';
-
-// --- EKLENEN IMPORT ---
-// Rozet sayısını dinamik çekmek için gerekli model dosyası
-import 'package:fluttergirdi/models/gamification.dart'; 
-
-import 'package:fluttergirdi/screens/badges_progress_screen.dart'; 
-import 'package:fluttergirdi/screens/clubs_tab.dart';           
-import 'package:fluttergirdi/screens/trivia_welcome_screen.dart';  
 
 class DashboardStatsRow extends StatelessWidget {
   const DashboardStatsRow({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-      child: Row(
-        children: [
-          // 1. KART: ROZET İLERLEMESİ
-          Expanded(child: _BadgeProgressCard()),
-          const SizedBox(width: 10),
-
-          // 2. KART: TRIVIA BİRİNCİSİ
-          Expanded(child: _TriviaLeaderCard()),
-          const SizedBox(width: 10),
-
-          // 3. KART: EN POPÜLER KULÜP
-          Expanded(child: _TopClubCard()),
-        ],
+    return SizedBox(
+      height: 154,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+        itemCount: 3,
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          return SizedBox(
+            width: 156,
+            child: switch (index) {
+              0 => const _BadgeProgressCard(),
+              1 => const _TriviaLeaderCard(),
+              _ => const _TopClubCard(),
+            },
+          );
+        },
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// 1. KART: ROZET İLERLEMESİ
-// ---------------------------------------------------------------------------
 class _BadgeProgressCard extends StatelessWidget {
+  const _BadgeProgressCard();
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    
-    // --- DÜZELTME BURADA YAPILDI ---
-    // Artık sabit '5' yerine, tanımlı rozet listesinin uzunluğunu alıyoruz.
-    final int totalBadges = AppBadge.allBadges.length;
-    // -------------------------------
+    final totalBadges = AppBadge.allBadges.length;
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(user?.uid).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user?.uid)
+          .snapshots(),
       builder: (context, snapshot) {
-        double percent = 0;
-        
+        var earnedBadges = 0;
+
         if (snapshot.hasData && snapshot.data!.exists) {
           final data = snapshot.data!.data() as Map<String, dynamic>;
-          final myBadges = (data['badges'] as List?) ?? [];
-          if (totalBadges > 0) {
-            percent = (myBadges.length / totalBadges).clamp(0.0, 1.0);
-          }
+          earnedBadges = ((data['badges'] as List?) ?? const []).length;
         }
 
-        return _SquareCard(
-          color: const Color.fromARGB(255, 51, 100, 206),
+        final percent = totalBadges == 0
+            ? 0.0
+            : (earnedBadges / totalBadges).clamp(0.0, 1.0);
+
+        return _DashboardCard(
+          accent: const Color(0xFF4F7CFF),
+          icon: Icons.workspace_premium_rounded,
+          eyebrow: 'Rozetler',
+          title: '$earnedBadges/$totalBadges',
+          subtitle: 'Koleksiyon ilerlemesi',
+          progress: percent,
           onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen()));
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BadgesProgressScreen()),
+            );
           },
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Stack(
-                alignment: Alignment.center,
-                children: [
-                  CircularProgressIndicator(
-                    value: percent,
-                    backgroundColor: Colors.white24,
-                    color: Colors.amber,
-                    strokeWidth: 4,
-                  ),
-                  Text(
-                    "%${(percent * 100).toInt()}",
-                    style: const TextStyle(
-                      color: Colors.white, 
-                      fontWeight: FontWeight.bold, 
-                      fontSize: 10
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                "Rozetler",
-                style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
         );
       },
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2. KART: TRIVIA BİRİNCİSİ
-// ---------------------------------------------------------------------------
 class _TriviaLeaderCard extends StatelessWidget {
+  const _TriviaLeaderCard();
+
   @override
   Widget build(BuildContext context) {
     final weekId = DateHelper.getCurrentWeekId();
@@ -120,150 +94,202 @@ class _TriviaLeaderCard extends StatelessWidget {
           .limit(1)
           .snapshots(),
       builder: (context, snapshot) {
-        String leaderName = "Lider Yok";
-        String scoreText = "-";
+        var leaderName = 'Lider Yok';
+        var scoreText = 'Bu hafta bekleniyor';
 
         if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
           final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
-          leaderName = data['displayName'] ?? "Gizli";
-          scoreText = "${data['score']}P";
+          leaderName = (data['displayName'] ?? 'Gizli').toString();
+          scoreText = '${_readInt(data['score'])} puan';
         }
 
-        return _SquareCard(
-          color: const Color(0xFF1A1A2E), 
-          border: Border.all(color: Colors.amber.withOpacity(0.5)),
+        return _DashboardCard(
+          accent: const Color(0xFFFFB020),
+          icon: Icons.emoji_events_rounded,
+          eyebrow: 'Haftanın Lideri',
+          title: leaderName,
+          subtitle: scoreText,
           onTap: () {
-            // Trivia ekranına yönlendirme
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const TriviaWelcomeScreen()));
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TriviaWelcomeScreen()),
+            );
           },
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.emoji_events, color: Colors.amber, size: 24),
-              const SizedBox(height: 4),
-              const Text(
-                "Haftanın Lideri",
-                style: TextStyle(color: Colors.white54, fontSize: 9),
-              ),
-              const SizedBox(height: 2),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: Text(
-                  leaderName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              Text(
-                scoreText,
-                style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.w900),
-              ),
-            ],
-          ),
         );
       },
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. KART: EN POPÜLER KULÜP
-// ---------------------------------------------------------------------------
 class _TopClubCard extends StatelessWidget {
+  const _TopClubCard();
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<QuerySnapshot>(
       future: FirebaseFirestore.instance
           .collection('clubs')
-          .orderBy('memberCount', descending: true) 
+          .orderBy('memberCount', descending: true)
           .limit(1)
           .get(),
       builder: (context, snapshot) {
-        String clubName = "Kulüpler";
-        int members = 0;
+        var clubName = 'Kulüpler';
+        var members = 0;
 
         if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
           final data = snapshot.data!.docs.first.data() as Map<String, dynamic>;
-          clubName = data['name'] ?? "Kulüp";
-          members = data['memberCount'] ?? 0;
+          clubName = (data['name'] ?? 'Kulüp').toString();
+          members = _readInt(data['memberCount']);
         }
 
-        return _SquareCard(
-          color: Color.fromARGB(139, 26, 138, 28),
+        return _DashboardCard(
+          accent: const Color(0xFF2EAD5F),
+          icon: Icons.groups_rounded,
+          eyebrow: 'Popüler Kulüp',
+          title: clubName,
+          subtitle: members > 0 ? '$members üye' : 'Kulüpleri keşfet',
           onTap: () {
-             Navigator.push(context, MaterialPageRoute(builder: (_) => const ClubsScreen()));
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ClubsScreen()),
+            );
           },
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.groups_rounded, color: Colors.white, size: 24),
-              const SizedBox(height: 4),
-              const Text(
-                "En Popüler",
-                style: TextStyle(color: Colors.white70, fontSize: 9),
-              ),
-              const SizedBox(height: 2),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                child: Text(
-                  clubName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              Text(
-                "$members Üye",
-                style: const TextStyle(color: Colors.white70, fontSize: 9),
-              ),
-            ],
-          ),
         );
       },
     );
   }
 }
 
-// --- ORTAK KART TASARIMI ---
-class _SquareCard extends StatelessWidget {
-  final Widget child;
-  final Color color;
+class _DashboardCard extends StatelessWidget {
+  final Color accent;
+  final IconData icon;
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+  final double? progress;
   final VoidCallback onTap;
-  final BoxBorder? border;
 
-  const _SquareCard({
-    required this.child,
-    required this.color,
+  const _DashboardCard({
+    required this.accent,
+    required this.icon,
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
     required this.onTap,
-    this.border,
+    this.progress,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1, 
-      child: GestureDetector(
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Material(
+      color: isDark
+          ? cs.surfaceContainerHighest.withValues(alpha: 0.34)
+          : cs.surface,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(8),
+        child: Ink(
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(16),
-            border: border,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.06),
+            ),
             boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              )
+              if (!isDark)
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
             ],
           ),
-          child: child,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, size: 19, color: accent),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 19,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.68),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Text(
+                eyebrow,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: cs.onSurface,
+                  fontWeight: FontWeight.w900,
+                  height: 1.05,
+                  letterSpacing: 0,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0,
+                ),
+              ),
+              if (progress != null) ...[
+                const SizedBox(height: 9),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 5,
+                    backgroundColor: cs.surfaceContainerHighest,
+                    valueColor: AlwaysStoppedAnimation<Color>(accent),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+int _readInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
 }

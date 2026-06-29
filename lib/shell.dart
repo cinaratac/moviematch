@@ -8,6 +8,8 @@ import 'package:fluttergirdi/screens/match_screen.dart';
 import 'package:fluttergirdi/screens/messagesscreen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
+import 'package:fluttergirdi/screens/news_detail_page.dart';
+import 'package:fluttergirdi/screens/news_list_page.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/services/tab_service.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
@@ -126,7 +128,33 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _handleDeepLink(Uri uri) {
-    if (uri.path.contains('/post')) {
+    final path = uri.path.toLowerCase();
+
+    if (path.contains('/news-detail')) {
+      final String? articleId = uri.queryParameters['id'];
+
+      if (articleId != null && articleId.isNotEmpty && mounted) {
+        debugPrint("Haber linki yakalandı! Article ID: $articleId");
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => NewsDetailPage(articleId: articleId),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (path.contains('/news')) {
+      if (mounted) {
+        debugPrint("Haber listesi linki yakalandı!");
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const NewsListPage()),
+        );
+      }
+      return;
+    }
+
+    if (path.contains('/post')) {
       final String? postId = uri.queryParameters['id'];
 
       if (postId != null && mounted) {

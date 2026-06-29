@@ -10,6 +10,7 @@ import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
+import 'package:fluttergirdi/screens/news_list_page.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
@@ -205,6 +206,19 @@ class _CustomDrawerState extends State<CustomDrawer> {
                             if (currentId != null) _markAnnouncementAsSeen(currentId);
                             Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
                           },
+                        );
+                      },
+                    ),
+                    _buildIOSMenuItem(
+                      context,
+                      icon: CupertinoIcons.news,
+                      title: 'Sinema Gündemi',
+                      color: Colors.blueGrey,
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const NewsListPage()),
                         );
                       },
                     ),

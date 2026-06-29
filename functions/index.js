@@ -9,6 +9,138 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 
+const NEWS_ADMIN_UIDS = new Set([
+  "RfpPtaZfaKYueG9b2dd2ASScqOO2",
+  "ZkXr7PmQ4WV0iRIVR7uUUwfNS8N2",
+  "mNCWixSnJSa6tE1hZs4iZwn3Du43",
+]);
+
+function cleanText(value, maxLength = 20000) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, maxLength);
+}
+
+function makeSlug(value) {
+  return cleanText(value, 160)
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+}
+
+async function assertNewsEditor(uid) {
+  if (!uid) throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
+  if (NEWS_ADMIN_UIDS.has(uid)) return true;
+
+  const db = admin.firestore();
+  const editorDoc = await db.collection("news_editors").doc(uid).get();
+  if (editorDoc.exists && editorDoc.data().active !== false) return true;
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  const role = userDoc.exists ? userDoc.data().role : null;
+  if (["admin", "editor", "newsEditor"].includes(role)) return true;
+
+  throw new HttpsError("permission-denied", "Bu panel için yetkiniz yok.");
+}
+
+exports.isNewsAdmin = onCall(async (request) => {
+  await assertNewsEditor(request.auth && request.auth.uid);
+  return { ok: true };
+});
+
+exports.saveNewsArticle = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertNewsEditor(uid);
+
+  const data = request.data || {};
+  const title = cleanText(data.title, 180);
+  const body = cleanText(data.body, 50000);
+  const status = ["draft", "published", "archived"].includes(data.status)
+    ? data.status
+    : "draft";
+
+  if (!title) throw new HttpsError("invalid-argument", "Başlık gerekli.");
+  if (status === "published" && !body) {
+    throw new HttpsError("invalid-argument", "Yayınlamak için haber metni gerekli.");
+  }
+
+  const db = admin.firestore();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const articleId = cleanText(data.id, 120) || db.collection("news_articles").doc().id;
+  const slug = makeSlug(data.slug || title) || articleId;
+  const tags = Array.isArray(data.tags)
+    ? data.tags.map((tag) => cleanText(tag, 40)).filter(Boolean).slice(0, 12)
+    : [];
+
+  const payload = {
+    title,
+    slug,
+    summary: cleanText(data.summary, 320),
+    body,
+    category: cleanText(data.category, 40) || "Haber",
+    movieTitle: cleanText(data.movieTitle, 120),
+    imageUrl: cleanText(data.imageUrl, 1200),
+    sourceUrl: cleanText(data.sourceUrl, 1200),
+    tags,
+    status,
+    updatedAt: now,
+    updatedBy: uid,
+  };
+
+  const ref = db.collection("news_articles").doc(articleId);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    payload.createdAt = now;
+    payload.authorId = uid;
+    payload.authorName = cleanText(data.authorName, 80) || "CineMatch Editör";
+  }
+  if (status === "published" && !snap.data()?.publishedAt) {
+    payload.publishedAt = now;
+  }
+
+  await ref.set(payload, { merge: true });
+  if (status === "published") {
+    const publicPayload = {
+      title: payload.title,
+      slug: payload.slug,
+      summary: payload.summary,
+      body: payload.body,
+      category: payload.category,
+      movieTitle: payload.movieTitle,
+      imageUrl: payload.imageUrl,
+      sourceUrl: payload.sourceUrl,
+      tags: payload.tags,
+      authorName: payload.authorName || snap.data()?.authorName || "CineMatch Editör",
+      publishedAt: payload.publishedAt || snap.data()?.publishedAt || now,
+      updatedAt: now,
+    };
+    await db.collection("public_news").doc(articleId).set(publicPayload, { merge: true });
+  } else {
+    await db.collection("public_news").doc(articleId).delete().catch(() => null);
+  }
+  return { ok: true, id: articleId, slug };
+});
+
+exports.deleteNewsArticle = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertNewsEditor(uid);
+
+  const id = cleanText(request.data && request.data.id, 120);
+  if (!id) throw new HttpsError("invalid-argument", "Haber ID gerekli.");
+
+  await admin.firestore().collection("news_articles").doc(id).delete();
+  await admin.firestore().collection("public_news").doc(id).delete().catch(() => null);
+  return { ok: true };
+});
+
 // ==================================================================
 // 1. GENEL TMDB PROXY (V2)
 // ==================================================================

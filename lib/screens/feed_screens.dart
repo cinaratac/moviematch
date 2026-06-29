@@ -3,6 +3,7 @@ import 'package:fluttergirdi/utils/date_helper.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:fluttergirdi/screens/news_list_page.dart';
 import 'package:fluttergirdi/screens/search_page.dart';
 
 import '../controllers/feed_controller.dart';
@@ -127,9 +128,19 @@ class _FeedPageState extends State<FeedPage> {
               ),
             ),
           ),
-          actions: const [
-            NotificationsButton(),
-            SizedBox(width: 8),
+          actions: [
+            IconButton(
+              tooltip: 'Sinema Gündemi',
+              icon: const Icon(Icons.newspaper_rounded),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NewsListPage()),
+                );
+              },
+            ),
+            const NotificationsButton(),
+            const SizedBox(width: 8),
           ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(50),
