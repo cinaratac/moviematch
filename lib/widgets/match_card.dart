@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:fluttergirdi/services/match_service.dart' as global_match;
 import 'package:fluttergirdi/services/follow_system_service.dart';
@@ -48,7 +49,11 @@ FilmItem _filmItemFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
 Future<List<FilmItem>> fetchFilmsByKeys(List<String> keys) async {
   if (keys.isEmpty) return [];
   final db = FirebaseFirestore.instance;
-  final cleanKeys = keys.map((k) => k.trim()).where((k) => k.isNotEmpty).toSet().toList();
+  final cleanKeys = keys
+      .map((k) => k.trim())
+      .where((k) => k.isNotEmpty)
+      .toSet()
+      .toList();
   final missingKeys = cleanKeys
       .where((key) => !_filmItemCache.containsKey(key))
       .where((key) => !_missingFilmKeys.contains(key))
@@ -57,7 +62,10 @@ Future<List<FilmItem>> fetchFilmsByKeys(List<String> keys) async {
   for (var i = 0; i < missingKeys.length; i += 10) {
     final chunk = missingKeys.sublist(i, math.min(i + 10, missingKeys.length));
     try {
-      final qs = await db.collection('catalog_films').where(FieldPath.documentId, whereIn: chunk).get();
+      final qs = await db
+          .collection('catalog_films')
+          .where(FieldPath.documentId, whereIn: chunk)
+          .get();
       final foundIds = <String>{};
       for (final doc in qs.docs) {
         foundIds.add(doc.id);
@@ -89,7 +97,8 @@ class MatchCard extends StatefulWidget {
   State<MatchCard> createState() => _MatchCardState();
 }
 
-class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixin {
+class _MatchCardState extends State<MatchCard>
+    with AutomaticKeepAliveClientMixin {
   bool _isAdded = false;
   bool _isLoading = false;
 
@@ -119,17 +128,31 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
 
     Future<DocumentSnapshot<Map<String, dynamic>>?> loadFollow() async {
       try {
-        return await FirebaseFirestore.instance.collection('users').doc(me).collection('following').doc(widget.result.uid).get();
-      } catch (_) { return null; }
+        return await FirebaseFirestore.instance
+            .collection('users')
+            .doc(me)
+            .collection('following')
+            .doc(widget.result.uid)
+            .get();
+      } catch (_) {
+        return null;
+      }
     }
 
     Future<DocumentSnapshot<Map<String, dynamic>>?> loadUser() async {
       try {
-        return await FirebaseFirestore.instance.collection('users').doc(widget.result.uid).get();
-      } catch (_) { return null; }
+        return await FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.result.uid)
+            .get();
+      } catch (_) {
+        return null;
+      }
     }
 
-    final commonFuture = commonKeys.isEmpty ? Future.value(<FilmItem>[]) : fetchFilmsByKeys(commonKeys);
+    final commonFuture = commonKeys.isEmpty
+        ? Future.value(<FilmItem>[])
+        : fetchFilmsByKeys(commonKeys);
     final userFuture = loadUser();
     final followFuture = loadFollow();
 
@@ -150,7 +173,9 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
           favKeys = List<String>.from(data['fiveStarKeys'] ?? []);
         }
 
-        final films = favKeys.isEmpty ? <FilmItem>[] : await fetchFilmsByKeys(favKeys.take(5).toList());
+        final films = favKeys.isEmpty
+            ? <FilmItem>[]
+            : await fetchFilmsByKeys(favKeys.take(5).toList());
         if (mounted) setState(() => _favoriteFilms = films);
       } else {
         if (mounted) setState(() => _favoriteFilms = []);
@@ -176,7 +201,9 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
         if (mounted) setState(() => _isAdded = true);
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Hata: $e')));
         }
       }
     }
@@ -191,14 +218,21 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (c) => const Center(child: CircularProgressIndicator(color: Colors.green)),
+        builder: (c) =>
+            const Center(child: CircularProgressIndicator(color: Colors.green)),
       );
 
       try {
-        final result = await FirebaseFunctions.instance.httpsCallable('callTMDB').call({
-          'endpoint': '/3/search/movie',
-          'params': {'query': film.title, 'language': 'tr-TR', 'include_adult': 'false'},
-        });
+        final result = await FirebaseFunctions.instance
+            .httpsCallable('callTMDB')
+            .call({
+              'endpoint': '/3/search/movie',
+              'params': {
+                'query': film.title,
+                'language': 'tr-TR',
+                'include_adult': 'false',
+              },
+            });
 
         if (!context.mounted) return;
         Navigator.pop(context);
@@ -214,20 +248,27 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
           }
 
           if (film.id.isNotEmpty && id != null) {
-            FirebaseFirestore.instance.collection('catalog_films').doc(film.id).set({
-              'tmdbId': id,
-              if (fetchedPosterPath != null) 'posterUrl': currentPoster,
-            }, SetOptions(merge: true));
+            FirebaseFirestore.instance
+                .collection('catalog_films')
+                .doc(film.id)
+                .set({
+                  'tmdbId': id,
+                  if (fetchedPosterPath != null) 'posterUrl': currentPoster,
+                }, SetOptions(merge: true));
           }
         } else {
           if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Film detayları bulunamadı.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Film detayları bulunamadı.')),
+          );
           return;
         }
       } catch (e) {
         if (!context.mounted) return;
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
         return;
       }
     }
@@ -242,7 +283,11 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => MovieDetailScreen(tmdbId: id!, title: film.title, posterUrl: currentPoster),
+          builder: (_) => MovieDetailScreen(
+            tmdbId: id!,
+            title: film.title,
+            posterUrl: currentPoster,
+          ),
         ),
       );
     }
@@ -251,15 +296,24 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
   // --- UI YARDIMCI METOTLARI ---
 
   Widget _buildFilmRow(String title, List<FilmItem> films) {
+    if (films.isEmpty) return const SizedBox.shrink();
+
     return Padding(
-      padding: const EdgeInsets.only(top: 8.0),
+      padding: const EdgeInsets.only(top: 12.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
+          Text(
+            title,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.76),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 7),
           SizedBox(
-            height: 80,
+            height: 76,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: math.min(films.length, 5),
@@ -272,8 +326,14 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                     child: AspectRatio(
                       aspectRatio: 2 / 3,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: PosterImage(posterUrl: film.posterUrl, title: film.title, tmdbId: film.tmdbId, enableFallback: true, cacheWidth: 120),
+                        borderRadius: BorderRadius.circular(8),
+                        child: PosterImage(
+                          posterUrl: film.posterUrl,
+                          title: film.title,
+                          tmdbId: film.tmdbId,
+                          enableFallback: true,
+                          cacheWidth: 120,
+                        ),
                       ),
                     ),
                   ),
@@ -288,44 +348,42 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
 
   Widget _buildPrefChip(String text, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.4), width: 1),
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34), width: 1),
       ),
-      child: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
-    );
-  }
-
-  Widget _buildTextRow(String title, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(title, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
-          ),
-          Expanded(
-            child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-          ),
-        ],
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          height: 1.1,
+        ),
       ),
     );
   }
 
   // Tıklama desteği için güncellenmiş çip fonksiyonu
-  Widget _buildDetailRowWithChips(String title, List<dynamic> items, Color chipColor, {void Function(int id, String name)? onTapChip}) {
+  Widget _buildDetailRowWithChips(
+    String title,
+    List<dynamic> items,
+    Color chipColor, {
+    void Function(int id, String name)? onTapChip,
+  }) {
     // ID ve isimleri korumak için filtreleme yapıyoruz
-    final validItems = items.where((e) {
-      if (e is Map) return (e['name'] ?? '').toString().trim().isNotEmpty;
-      return e.toString().trim().isNotEmpty;
-    }).take(3).toList();
-        
+    final validItems = items
+        .where((e) {
+          if (e is Map) return (e['name'] ?? '').toString().trim().isNotEmpty;
+          return e.toString().trim().isNotEmpty;
+        })
+        .take(3)
+        .toList();
+
     if (validItems.isEmpty) return const SizedBox.shrink();
-    
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Row(
@@ -333,7 +391,14 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
         children: [
           SizedBox(
             width: 100,
-            child: Text(title, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           Expanded(
             child: Wrap(
@@ -342,7 +407,7 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
               children: validItems.map((item) {
                 String name = '';
                 int? id;
-                
+
                 // Map objesiyse ID'yi ve İsmi al, düz metinse sadece ismi al
                 if (item is Map) {
                   name = (item['name'] ?? '').toString();
@@ -359,7 +424,9 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
                       } else {
                         // Uygulamanın eski versiyonlarında sadece String olarak kaydedildiyse:
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Bu kişi için detay bulunamadı.')),
+                          const SnackBar(
+                            content: Text('Bu kişi için detay bulunamadı.'),
+                          ),
                         );
                       }
                     }
@@ -374,6 +441,15 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
     );
   }
 
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PublicProfileScreen(uid: widget.result.uid),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -381,8 +457,8 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
     final m = widget.result;
     final pct = m.score.clamp(0, 100).toStringAsFixed(0);
     String? photoUrl = _userData?['photoURL'];
-    String? username = _userData?['username'];
-    
+    final displayName = m.displayName ?? 'İsimsiz Sinefil';
+
     final int? age = _userData?['age'];
     final String bio = (_userData?['bio'] ?? '').toString().trim();
     final List<dynamic> genres = _userData?['favGenres'] ?? [];
@@ -393,11 +469,32 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
       fit: StackFit.expand,
       children: [
         if (photoUrl != null && photoUrl.isNotEmpty)
-          Image.network(photoUrl, fit: BoxFit.cover)
+          ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Transform.scale(
+              scale: 1.06,
+              child: Image.network(
+                photoUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Container(
+                  color: const Color(0xFF101510),
+                  child: const Icon(
+                    Icons.person,
+                    size: 120,
+                    color: Colors.white24,
+                  ),
+                ),
+              ),
+            ),
+          )
         else
           Container(
             decoration: const BoxDecoration(
-              gradient: LinearGradient(colors: [Color(0xFF1E1E1E), Color(0xFF121212)], begin: Alignment.topCenter, end: Alignment.bottomCenter),
+              gradient: LinearGradient(
+                colors: [Color(0xFF1E1E1E), Color(0xFF121212)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
             ),
             child: const Icon(Icons.person, size: 120, color: Colors.white24),
           ),
@@ -405,121 +502,267 @@ class _MatchCardState extends State<MatchCard> with AutomaticKeepAliveClientMixi
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [Colors.transparent, Colors.black.withValues(alpha: 0.80), Colors.black.withValues(alpha: 0.99)],
-              begin: Alignment.topCenter, end: Alignment.bottomCenter, stops: const [0.05, 0.40, 1.0],
+              colors: [
+                Colors.black.withValues(alpha: 0.10),
+                const Color(0xFF06150D).withValues(alpha: 0.72),
+                Colors.black.withValues(alpha: 0.96),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.0, 0.46, 1.0],
             ),
           ),
         ),
 
         SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 10.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.greenAccent, width: 1.2),
-                  ),
-                  child: Text('%$pct Sinema Uyumu', style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 13)),
-                ),
-                const SizedBox(height: 8),
-
-                GestureDetector(
-                  onTap: () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: m.uid)));
-                  },
-                  child: Text(
-                    m.displayName ?? 'İsimsiz Sinefil',
-                    style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold, height: 1.1),
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                
-                if (username != null)
-                  Text('@$username', style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14)),
-
-                if (bio.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-                    child: Text(bio, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  ),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (age != null && age > 0)
-                        _buildTextRow('Yaş:', age.toString()),
-                      
-                      // TÜR TIKLANAMAZ (ID'si yok)
-                      if (genres.isNotEmpty)
-                        _buildDetailRowWithChips('Sevilen Türler:', genres, Colors.blueAccent),
-                      
-                      // YÖNETMENE TIKLAYINCA YÖNETMEN SAYFASINA GİDER
-                      if (directors.isNotEmpty)
-                        _buildDetailRowWithChips(
-                          'Yönetmenler:', 
-                          directors, 
-                          Colors.amberAccent,
-                          onTapChip: (id, name) {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => DirectorScreen(directorId: id, directorName: name)));
-                          }
-                        ),
-                      
-                      // OYUNCUYA TIKLAYINCA OYUNCU SAYFASINA GİDER
-                      if (actors.isNotEmpty)
-                        _buildDetailRowWithChips(
-                          'Oyuncular:', 
-                          actors, 
-                          Colors.purpleAccent,
-                          onTapChip: (id, name) {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => ActorScreen(actorId: id, actorName: name)));
-                          }
-                        ),
-                    ],
-                  ),
-                ),
-
-                if (_commonFilms == null && _favoriteFilms == null)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20.0),
-                    child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey))),
-                  )
-                else ...[
-                  if (_commonFilms != null && _commonFilms!.isNotEmpty)
-                    _buildFilmRow('Ortak Filmleriniz', _commonFilms!),
-                  if (_favoriteFilms != null && _favoriteFilms!.isNotEmpty)
-                    _buildFilmRow('Favori Filmleri', _favoriteFilms!),
-                ],
-
-                const SizedBox(height: 14),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _isAdded || _isLoading ? null : _addFriend,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isAdded ? Colors.white24 : const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.white24, 
-                      disabledForegroundColor: Colors.white70,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 10.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(28),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.34),
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.10),
+                      ),
                     ),
-                    icon: _isLoading
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : Icon(_isAdded ? Icons.how_to_reg_rounded : Icons.person_add_alt_1_rounded, size: 20),
-                    label: Text(_isAdded ? 'Arkadaş Eklendi' : 'Arkadaş Ekle', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.greenAccent,
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Text(
+                            '%$pct Sinema Uyumu',
+                            style: const TextStyle(
+                              color: Colors.greenAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            GestureDetector(
+                              onTap: _openProfile,
+                              child: CircleAvatar(
+                                radius: 40,
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.14,
+                                ),
+                                backgroundImage:
+                                    photoUrl != null && photoUrl.isNotEmpty
+                                    ? NetworkImage(photoUrl)
+                                    : null,
+                                child: photoUrl == null || photoUrl.isEmpty
+                                    ? const Icon(
+                                        Icons.person,
+                                        color: Colors.white70,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: _openProfile,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      displayName,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 26,
+                                        fontWeight: FontWeight.bold,
+                                        height: 1.1,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        if (bio.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              top: 8.0,
+                              bottom: 4.0,
+                            ),
+                            child: Text(
+                              bio,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                                height: 1.3,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (age != null && age > 0)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: _buildPrefChip(
+                                    '$age Yaş',
+                                    Colors.white,
+                                  ),
+                                ),
+
+                              // TÜR TIKLANAMAZ (ID'si yok)
+                              if (genres.isNotEmpty)
+                                _buildDetailRowWithChips(
+                                  'Sevilen Türler:',
+                                  genres,
+                                  Colors.blueAccent,
+                                ),
+
+                              // YÖNETMENE TIKLAYINCA YÖNETMEN SAYFASINA GİDER
+                              if (directors.isNotEmpty)
+                                _buildDetailRowWithChips(
+                                  'Yönetmenler:',
+                                  directors,
+                                  Colors.amberAccent,
+                                  onTapChip: (id, name) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => DirectorScreen(
+                                          directorId: id,
+                                          directorName: name,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+
+                              // OYUNCUYA TIKLAYINCA OYUNCU SAYFASINA GİDER
+                              if (actors.isNotEmpty)
+                                _buildDetailRowWithChips(
+                                  'Oyuncular:',
+                                  actors,
+                                  Colors.purpleAccent,
+                                  onTapChip: (id, name) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ActorScreen(
+                                          actorId: id,
+                                          actorName: name,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+
+                        if (_commonFilms == null && _favoriteFilms == null)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20.0),
+                            child: Center(
+                              child: SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                          )
+                        else ...[
+                          if (_commonFilms != null && _commonFilms!.isNotEmpty)
+                            _buildFilmRow('Ortak Filmleriniz', _commonFilms!),
+                          if (_favoriteFilms != null &&
+                              _favoriteFilms!.isNotEmpty)
+                            _buildFilmRow('Favori Filmleri', _favoriteFilms!),
+                        ],
+
+                        const SizedBox(height: 14),
+
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _isAdded || _isLoading
+                                ? null
+                                : _addFriend,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isAdded
+                                  ? Colors.white24
+                                  : const Color(0xFF2E7D32),
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.white24,
+                              disabledForegroundColor: Colors.white70,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              elevation: 0,
+                            ),
+                            icon: _isLoading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Icon(
+                                    _isAdded
+                                        ? Icons.how_to_reg_rounded
+                                        : Icons.person_add_alt_1_rounded,
+                                    size: 20,
+                                  ),
+                            label: Text(
+                              _isAdded ? 'Arkadaş Eklendi' : 'Arkadaş Ekle',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),

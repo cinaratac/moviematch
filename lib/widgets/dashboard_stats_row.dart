@@ -184,11 +184,13 @@ class _DashboardCard extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    final titleColor = isDark ? Colors.white : cs.onSurface;
+    final mutedColor = isDark
+        ? Colors.white.withValues(alpha: 0.72)
+        : cs.onSurfaceVariant;
 
     return Material(
-      color: isDark
-          ? cs.surfaceContainerHighest.withValues(alpha: 0.34)
-          : cs.surface,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -197,10 +199,18 @@ class _DashboardCard extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                accent.withValues(alpha: isDark ? 0.26 : 0.16),
+                accent.withValues(alpha: isDark ? 0.13 : 0.08),
+              ],
+            ),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.black.withValues(alpha: 0.06),
+                  ? accent.withValues(alpha: 0.28)
+                  : accent.withValues(alpha: 0.20),
             ),
             boxShadow: [
               if (!isDark)
@@ -220,7 +230,7 @@ class _DashboardCard extends StatelessWidget {
                     width: 34,
                     height: 34,
                     decoration: BoxDecoration(
-                      color: accent.withValues(alpha: isDark ? 0.18 : 0.12),
+                      color: accent.withValues(alpha: isDark ? 0.24 : 0.16),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(icon, size: 19, color: accent),
@@ -229,7 +239,7 @@ class _DashboardCard extends StatelessWidget {
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 19,
-                    color: cs.onSurfaceVariant.withValues(alpha: 0.68),
+                    color: mutedColor.withValues(alpha: 0.78),
                   ),
                 ],
               ),
@@ -239,7 +249,7 @@ class _DashboardCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: cs.onSurfaceVariant,
+                  color: mutedColor,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0,
                 ),
@@ -250,7 +260,7 @@ class _DashboardCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: cs.onSurface,
+                  color: titleColor,
                   fontWeight: FontWeight.w900,
                   height: 1.05,
                   letterSpacing: 0,
@@ -262,7 +272,7 @@ class _DashboardCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: cs.onSurfaceVariant,
+                  color: mutedColor,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0,
                 ),
@@ -274,7 +284,7 @@ class _DashboardCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: progress,
                     minHeight: 5,
-                    backgroundColor: cs.surfaceContainerHighest,
+                    backgroundColor: accent.withValues(alpha: 0.16),
                     valueColor: AlwaysStoppedAnimation<Color>(accent),
                   ),
                 ),
