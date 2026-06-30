@@ -12,7 +12,6 @@ import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
 import 'package:fluttergirdi/screens/news_list_page.dart';
 import '../screens/trivia_welcome_screen.dart';
-import 'package:fluttergirdi/screens/admin_trivia_screen.dart'; 
 import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
 import 'package:fluttergirdi/auth/login_page.dart';
 
@@ -25,15 +24,7 @@ class CustomDrawer extends StatefulWidget {
 
 class _CustomDrawerState extends State<CustomDrawer> {
   String? _lastSeenAnnouncementId;
-  bool _isAdmin = false;
   String? _currentUid;
-
-  // Admin listesini static yaparak her build işleminde yeniden oluşturulmasını engelliyoruz.
-  static const List<String> _adminUids = [
-    "RfpPtaZfaKYueG9b2dd2ASScqOO2", 
-    "ZkXr7PmQ4WV0iRIVR7uUUwfNS8N2",
-    "mNCWixSnJSa6tE1hZs4iZwn3Du43",
-  ];
 
   @override
   void initState() {
@@ -47,10 +38,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _currentUid = user.uid;
-      // Listede arama yapmak yerine direkt kontrol, state'e kaydetme
-      if (_adminUids.contains(user.uid)) {
-        _isAdmin = true;
-      }
     }
 
     // 2. Shared Preferences (Asenkron olduğu için UI'ı bloklamaz)
@@ -58,7 +45,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
     if (mounted) {
       setState(() {
         _lastSeenAnnouncementId = prefs.getString('last_seen_announcement_id');
-        // _currentUid ve _isAdmin zaten yukarıda set edildi, setState bunu UI'a yansıtır.
       });
     }
   }
@@ -227,23 +213,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
                     Divider(height: 1, color: separatorColor),
                     const SizedBox(height: 16),
                     
-                    // ADMIN PANELİ (Optimized Check)
-                    // Artık contains kontrolü yapmıyoruz, init state'de hesaplanan boolean'a bakıyoruz.
-                    if (_isAdmin) 
-                      _buildIOSMenuItem(
-                        context,
-                        icon: CupertinoIcons.lock_shield_fill,
-                        title: 'Admin Paneli (Gizli)',
-                        color: Colors.red.shade900,
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(
-                            context, 
-                            MaterialPageRoute(builder: (_) => const AdminTriviaScreen())
-                          );
-                        },
-                      ),
-
                      _buildSectionTitle("UYGULAMA"),
                       _buildIOSMenuItem(
                       context,

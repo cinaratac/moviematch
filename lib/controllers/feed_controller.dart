@@ -29,7 +29,6 @@ class FeedController extends ChangeNotifier {
 
   Set<String> _blockedUserIds = {};
   DocumentSnapshot<Map<String, dynamic>>? _lastDoc;
-  final int _pageSize = 20;
 
   // ==========================================
   // 1. POPÜLER AKIŞ METOTLARI
@@ -61,7 +60,7 @@ class FeedController extends ChangeNotifier {
 
       // Algoritmanın iyi çalışması ve daha iyi kıyaslama yapması için
       // 20 yerine tek seferde 40 post çekiyoruz.
-      final int fetchLimit = 40; 
+      final int fetchLimit = 40;
 
       if (initial) {
         if (userId != null) {
@@ -71,27 +70,34 @@ class FeedController extends ChangeNotifier {
             FeedService.instance.fetchUserFollowingIds(userId),
             BlockingService.instance.getBlockedAndBlockerIds(userId),
           ]);
-          
+
           postSnapshot = results[0] as QuerySnapshot<Map<String, dynamic>>;
           myLikedPostIds = results[1] as Set<String>;
           myFollowingUserIds = results[2] as Set<String>;
           _blockedUserIds = results[3] as Set<String>;
         } else {
-          postSnapshot = await FeedService.instance.fetchInitial(limit: fetchLimit);
+          postSnapshot = await FeedService.instance.fetchInitial(
+            limit: fetchLimit,
+          );
         }
       } else {
-        postSnapshot = await FeedService.instance.fetchMore(lastDoc: _lastDoc!, limit: fetchLimit);
+        postSnapshot = await FeedService.instance.fetchMore(
+          lastDoc: _lastDoc!,
+          limit: fetchLimit,
+        );
       }
 
       // KRONOLOJİK SON DÖKÜMANI KAYDET (ÇOK ÖNEMLİ!)
-      // Sıralama yapacağımız için sayfa kaydırma (pagination) sisteminin 
+      // Sıralama yapacağımız için sayfa kaydırma (pagination) sisteminin
       // bozulmaması adına tarihe göre en sonuncu dökümanı saklıyoruz.
       if (postSnapshot.docs.isNotEmpty) {
-         _lastDoc = postSnapshot.docs.last;
+        _lastDoc = postSnapshot.docs.last;
       }
 
-      var newDocs = List<DocumentSnapshot<Map<String, dynamic>>>.from(postSnapshot.docs);
-      
+      var newDocs = List<DocumentSnapshot<Map<String, dynamic>>>.from(
+        postSnapshot.docs,
+      );
+
       if (_blockedUserIds.isNotEmpty) {
         newDocs = newDocs.where((doc) {
           final authorId = doc.data()!['authorId'] as String?;
@@ -110,11 +116,15 @@ class FeedController extends ChangeNotifier {
         double scoreB = _calculateHotness(dataB);
 
         // Büyük olan (puanı yüksek olan) üste çıksın
-        return scoreB.compareTo(scoreA); 
+        return scoreB.compareTo(scoreA);
       });
       // ==============================================================
 
-      final authorIds = newDocs.map((d) => d.data()!['authorId'] as String?).where((id) => id != null).cast<String>().toList();
+      final authorIds = newDocs
+          .map((d) => d.data()!['authorId'] as String?)
+          .where((id) => id != null)
+          .cast<String>()
+          .toList();
       await UserCacheService.instance.fetchUsers(authorIds);
 
       if (initial) {
@@ -146,15 +156,16 @@ class FeedController extends ChangeNotifier {
     if (createdAt != null) {
       // Post atılalı kaç saat olmuş?
       final hoursDiff = DateTime.now().difference(createdAt.toDate()).inHours;
-      
+
       // ZAMAN CEZASI: Üzerinden geçen her saat için 0.5 puan düşür.
-      // Etkileşim almayan ama çok yeni olan bir post, 
+      // Etkileşim almayan ama çok yeni olan bir post,
       // etkileşim almayan ama 10 saat önce atılmış bir postun ÜSTÜNDE çıkar.
-      score -= (hoursDiff * 0.5); 
+      score -= (hoursDiff * 0.5);
     }
 
     return score;
   }
+
   // ==========================================
   // 2. TAKİP EDİLENLER AKIŞI METOTLARI
   // ==========================================
@@ -184,42 +195,72 @@ class FeedController extends ChangeNotifier {
       ]);
 
       final feedQs = await FirebaseFirestore.instance
-          .collection('feeds').doc(me).collection('user_feed')
-          .orderBy('createdAt', descending: true).limit(20).get();
+          .collection('feeds')
+          .doc(me)
+          .collection('user_feed')
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
 
       List<DocumentSnapshot<Map<String, dynamic>>> finalItems = [];
 
       if (feedQs.docs.isNotEmpty) {
-        final postIds = feedQs.docs.map((d) => d.data()['postId'] as String).toList();
-        
+        final postIds = feedQs.docs
+            .map((d) => d.data()['postId'] as String)
+            .toList();
+
         if (postIds.isNotEmpty) {
-           List<Future<QuerySnapshot<Map<String, dynamic>>>> postFutures = [];
-           for (var i = 0; i < postIds.length; i += 10) {
-              final chunk = postIds.sublist(i, (i + 10 > postIds.length) ? postIds.length : i + 10);
-              postFutures.add(FirebaseFirestore.instance.collection('posts').where(FieldPath.documentId, whereIn: chunk).get());
-           }
-           
-           final postResults = await Future.wait(postFutures);
-           for (var qs in postResults) {
-             finalItems.addAll(qs.docs);
-           }
-           
-           finalItems.sort((a, b) {
-              final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
-              final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
-              if (ta == null) return 1; if (tb == null) return -1;
-              return tb.compareTo(ta); 
-           });
+          List<Future<QuerySnapshot<Map<String, dynamic>>>> postFutures = [];
+          for (var i = 0; i < postIds.length; i += 10) {
+            final chunk = postIds.sublist(
+              i,
+              (i + 10 > postIds.length) ? postIds.length : i + 10,
+            );
+            postFutures.add(
+              FirebaseFirestore.instance
+                  .collection('posts')
+                  .where(FieldPath.documentId, whereIn: chunk)
+                  .get(),
+            );
+          }
+
+          final postResults = await Future.wait(postFutures);
+          for (var qs in postResults) {
+            finalItems.addAll(qs.docs);
+          }
+
+          finalItems.sort((a, b) {
+            final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
+            final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
+          });
         }
       } else {
-        final followingQs = await FirebaseFirestore.instance.collection('users').doc(me).collection('following').limit(200).get();
+        final followingQs = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(me)
+            .collection('following')
+            .limit(50)
+            .get();
         final uids = followingQs.docs.map((d) => d.id).toList();
 
         if (uids.isNotEmpty) {
           List<Future<QuerySnapshot<Map<String, dynamic>>>> futures = [];
           for (var i = 0; i < uids.length; i += 10) {
-            final chunk = uids.sublist(i, (i + 10 > uids.length) ? uids.length : i + 10);
-            futures.add(FirebaseFirestore.instance.collection('posts').where('authorId', whereIn: chunk).orderBy('createdAt', descending: true).limit(5).get());
+            final chunk = uids.sublist(
+              i,
+              (i + 10 > uids.length) ? uids.length : i + 10,
+            );
+            futures.add(
+              FirebaseFirestore.instance
+                  .collection('posts')
+                  .where('authorId', whereIn: chunk)
+                  .orderBy('createdAt', descending: true)
+                  .limit(3)
+                  .get(),
+            );
           }
           final results = await Future.wait(futures);
           for (var qs in results) {
@@ -228,20 +269,21 @@ class FeedController extends ChangeNotifier {
           finalItems.sort((a, b) {
             final ta = (a.data()?['createdAt'] as Timestamp?)?.toDate();
             final tb = (b.data()?['createdAt'] as Timestamp?)?.toDate();
-            if (ta == null) return 1; if (tb == null) return -1;
-            return tb.compareTo(ta); 
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
           });
           finalItems = finalItems.take(20).toList();
         }
       }
 
       final uids = <String>{};
-      for(var d in finalItems) {
+      for (var d in finalItems) {
         final u = d.data();
         final id = u?['authorId'] as String?;
-        if(id != null) uids.add(id);
+        if (id != null) uids.add(id);
       }
-      if(uids.isNotEmpty) {
+      if (uids.isNotEmpty) {
         await UserCacheService.instance.fetchUsers(uids.toList());
       }
 

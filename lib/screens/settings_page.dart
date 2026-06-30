@@ -379,6 +379,43 @@ class _SettingsPageState extends State<SettingsPage> {
     await FirebaseAuth.instance.signOut();
   }
 
+  Future<void> _cleanupFollowLinksForDeletedAccount(String uid) async {
+    final db = FirebaseFirestore.instance;
+    final followers = await db
+        .collection('users')
+        .doc(uid)
+        .collection('followers')
+        .get();
+    final following = await db
+        .collection('users')
+        .doc(uid)
+        .collection('following')
+        .get();
+
+    final refs = <DocumentReference>{
+      for (final doc in followers.docs) ...[
+        doc.reference,
+        db.collection('users').doc(doc.id).collection('following').doc(uid),
+      ],
+      for (final doc in following.docs) ...[
+        doc.reference,
+        db.collection('users').doc(doc.id).collection('followers').doc(uid),
+      ],
+    }.toList();
+
+    for (var i = 0; i < refs.length; i += 400) {
+      final batch = db.batch();
+      final chunk = refs.sublist(
+        i,
+        i + 400 > refs.length ? refs.length : i + 400,
+      );
+      for (final ref in chunk) {
+        batch.delete(ref);
+      }
+      await batch.commit();
+    }
+  }
+
   Future<void> _deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -442,6 +479,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
         await user.reauthenticateWithCredential(credential);
       }
+
+      await _cleanupFollowLinksForDeletedAccount(user.uid);
 
       await FirebaseFirestore.instance
           .collection('users')

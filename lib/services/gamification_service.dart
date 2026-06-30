@@ -8,16 +8,27 @@ class GamificationService {
 
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
+  final Map<String, DateTime> _lastCheckByUid = {};
 
   // --- ROZET KONTROL SİSTEMİ ---
-  Future<void> checkAndAwardBadges() async {
+  Future<void> checkAndAwardBadges({bool force = false}) async {
     final user = _auth.currentUser;
     if (user == null) return;
+
+    final now = DateTime.now();
+    final lastCheck = _lastCheckByUid[user.uid];
+    if (!force &&
+        lastCheck != null &&
+        lastCheck.year == now.year &&
+        lastCheck.month == now.month &&
+        lastCheck.day == now.day) {
+      return;
+    }
 
     final userDocRef = _db.collection('users').doc(user.uid);
     final userDoc = await userDocRef.get();
     if (!userDoc.exists) return;
-    
+
     final data = userDoc.data()!;
     final currentBadges = List<String>.from(data['badges'] ?? []);
     final List<String> newBadges = [];
@@ -26,58 +37,89 @@ class GamificationService {
     final favs = List<String>.from(data['favoritesKeys'] ?? []);
     final fives = List<String>.from(data['fiveStarKeys'] ?? []);
     final watch = List<String>.from(data['watchlistKeys'] ?? []);
-    final disliked = List<String>.from(data['dislikedKeys'] ?? []); 
+    final disliked = List<String>.from(data['dislikedKeys'] ?? []);
 
     final watched = List<String>.from(data['watchedKeys'] ?? []);
     // Benzersiz film sayısını hesapla
-    final uniqueMovies = {...favs, ...fives, ...watch, ...disliked, ...watched}.length;
+    final uniqueMovies = {
+      ...favs,
+      ...fives,
+      ...watch,
+      ...disliked,
+      ...watched,
+    }.length;
 
     // ÖNEMLİ: Bu sayıyı veritabanına yaz ki liderlik tablosunda kullanabilelim
-    await userDocRef.update({'totalMovies': uniqueMovies});
+    if ((data['totalMovies'] as num?)?.toInt() != uniqueMovies) {
+      await userDocRef.update({'totalMovies': uniqueMovies});
+    }
 
-    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.filmBuff), uniqueMovies, currentBadges, newBadges);
-    
+    final filmBuffBadge = AppBadge.allBadges.firstWhere(
+      (b) => b.type == BadgeType.filmBuff,
+    );
+    _checkRule(filmBuffBadge, uniqueMovies, currentBadges, newBadges);
+
     // 2. Eleştirmen Kontrolü
-    final postsQuery = await _db.collection('posts')
-        .where('authorId', isEqualTo: user.uid)
-        .where('isReview', isEqualTo: true)
-        .count()
-        .get();
-    final reviewCount = postsQuery.count ?? 0;
-    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.critic), reviewCount, currentBadges, newBadges);
+    final criticBadge = AppBadge.allBadges.firstWhere(
+      (b) => b.type == BadgeType.critic,
+    );
+    if (!currentBadges.contains(criticBadge.id)) {
+      final postsQuery = await _db
+          .collection('posts')
+          .where('authorId', isEqualTo: user.uid)
+          .where('isReview', isEqualTo: true)
+          .count()
+          .get();
+      final reviewCount = postsQuery.count ?? 0;
+      _checkRule(criticBadge, reviewCount, currentBadges, newBadges);
+    }
 
     // 3. Arşivci Kontrolü
-    final listQuery = await _db.collection('custom_lists')
-        .where('ownerId', isEqualTo: user.uid)
-        .count()
-        .get();
-    final listCount = listQuery.count ?? 0;
-    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.archivist), listCount, currentBadges, newBadges);
+    final archivistBadge = AppBadge.allBadges.firstWhere(
+      (b) => b.type == BadgeType.archivist,
+    );
+    if (!currentBadges.contains(archivistBadge.id)) {
+      final listQuery = await _db
+          .collection('custom_lists')
+          .where('ownerId', isEqualTo: user.uid)
+          .count()
+          .get();
+      final listCount = listQuery.count ?? 0;
+      _checkRule(archivistBadge, listCount, currentBadges, newBadges);
+    }
 
     // 4. Popülerlik (Takipçi) Kontrolü
     final followers = (data['followersCount'] ?? 0) as int;
-    _checkRule(AppBadge.allBadges.firstWhere((b) => b.type == BadgeType.socialite), followers, currentBadges, newBadges);
+    final socialiteBadge = AppBadge.allBadges.firstWhere(
+      (b) => b.type == BadgeType.socialite,
+    );
+    _checkRule(socialiteBadge, followers, currentBadges, newBadges);
 
     // Yeni rozet varsa kaydet
     if (newBadges.isNotEmpty) {
-      await userDocRef.update({
-        'badges': FieldValue.arrayUnion(newBadges)
-      });
+      await userDocRef.update({'badges': FieldValue.arrayUnion(newBadges)});
     }
+    _lastCheckByUid[user.uid] = now;
   }
 
-  void _checkRule(AppBadge badge, int currentValue, List<String> owned, List<String> toAdd) {
+  void _checkRule(
+    AppBadge badge,
+    int currentValue,
+    List<String> owned,
+    List<String> toAdd,
+  ) {
     if (currentValue >= badge.threshold && !owned.contains(badge.id)) {
       toAdd.add(badge.id);
     }
   }
 
   // --- LİDERLİK TABLOLARI ---
-  
+
   // 1. En Popüler (Takipçi Sayısına Göre)
   Future<List<LeaderboardUser>> getWeeklyTopUsers() async {
     try {
-      final qs = await _db.collection('users')
+      final qs = await _db
+          .collection('users')
           .orderBy('followersCount', descending: true)
           .limit(20) // Listeyi biraz genişletelim
           .get();
@@ -93,7 +135,8 @@ class GamificationService {
     try {
       // Not: 'totalMovies' alanı için Firestore'da index oluşturmanız gerekebilir.
       // Hata alırsanız logdaki linke tıklayın.
-      final qs = await _db.collection('users')
+      final qs = await _db
+          .collection('users')
           .orderBy('totalMovies', descending: true)
           .limit(20)
           .get();
@@ -104,7 +147,10 @@ class GamificationService {
     }
   }
 
-  List<LeaderboardUser> _mapToLeaderboard(QuerySnapshot<Map<String, dynamic>> qs, String scoreField) {
+  List<LeaderboardUser> _mapToLeaderboard(
+    QuerySnapshot<Map<String, dynamic>> qs,
+    String scoreField,
+  ) {
     return qs.docs.asMap().entries.map((entry) {
       final idx = entry.key;
       final d = entry.value.data();

@@ -119,7 +119,11 @@ class TasteProfile {
       for (final e in tp.posters.entries)
         if (allowed.contains(_norm(e.key))) _norm(e.key): e.value,
     };
-    return tp.copyWith(loved: lovedClean, disliked: dislikedClean, posters: postersClean);
+    return tp.copyWith(
+      loved: lovedClean,
+      disliked: dislikedClean,
+      posters: postersClean,
+    );
   }
 
   factory TasteProfile.fromLists({
@@ -199,37 +203,51 @@ class UserProfileService {
   Future<void> ensureSearchableUserFields({required String uid}) async {
     final ref = _usersRef(uid);
     var snap = await ref.get(const GetOptions(source: Source.cache));
-    if (!snap.exists) snap = await ref.get(const GetOptions(source: Source.server));
+    if (!snap.exists)
+      snap = await ref.get(const GetOptions(source: Source.server));
     final data = snap.data() ?? <String, dynamic>{};
 
     final update = <String, dynamic>{
-      if (data['username'] != null && (data['username_lc'] as String? ?? '').isEmpty)
+      if (data['username'] != null &&
+          (data['username_lc'] as String? ?? '').isEmpty)
         'username_lc': _lc(data['username']),
-      if (data['displayName'] != null && (data['displayName_lc'] as String? ?? '').isEmpty)
+      if (data['displayName'] != null &&
+          (data['displayName_lc'] as String? ?? '').isEmpty)
         'displayName_lc': _lc(data['displayName']),
-      if (data['letterboxdUsername'] != null && (data['letterboxdUsername_lc'] as String? ?? '').isEmpty)
+      if (data['letterboxdUsername'] != null &&
+          (data['letterboxdUsername_lc'] as String? ?? '').isEmpty)
         'letterboxdUsername_lc': _lc(data['letterboxdUsername']),
     };
-    if (data['createdAt'] == null) update['createdAt'] = FieldValue.serverTimestamp();
+    if (data['createdAt'] == null)
+      update['createdAt'] = FieldValue.serverTimestamp();
     update['updatedAt'] = FieldValue.serverTimestamp();
     if (update.isNotEmpty) await ref.set(update, SetOptions(merge: true));
   }
 
-  Future<void> _mirrorFiveStarKeysToUsers({required String uid, required List<String> fiveStarKeys}) async {
+  Future<void> _mirrorFiveStarKeysToUsers({
+    required String uid,
+    required List<String> fiveStarKeys,
+  }) async {
     await _usersRef(uid).set({
       'fiveStarKeys': _normKeys(fiveStarKeys),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
-  Future<void> _mirrorDislikedKeysToUsers({required String uid, required List<String> dislikedKeys}) async {
+  Future<void> _mirrorDislikedKeysToUsers({
+    required String uid,
+    required List<String> dislikedKeys,
+  }) async {
     await _usersRef(uid).set({
       'dislikedKeys': _normKeys(dislikedKeys),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
-  Future<void> mirrorWatchlistKeysToUsers({required String uid, required List<String> watchlistKeys}) async {
+  Future<void> mirrorWatchlistKeysToUsers({
+    required String uid,
+    required List<String> watchlistKeys,
+  }) async {
     await _usersRef(uid).set({
       'watchlistKeys': _normKeys(watchlistKeys),
       'watchlistUpdatedAt': FieldValue.serverTimestamp(),
@@ -237,7 +255,10 @@ class UserProfileService {
     }, SetOptions(merge: true));
   }
 
-  Future<void> saveWatchlistKeys({required String uid, required List<String> keys}) async {
+  Future<void> saveWatchlistKeys({
+    required String uid,
+    required List<String> keys,
+  }) async {
     await mirrorWatchlistKeysToUsers(uid: uid, watchlistKeys: keys);
     await ensureSearchableUserFields(uid: uid);
   }
@@ -259,12 +280,14 @@ class UserProfileService {
     batch.set(_tasteRef(uid), map, SetOptions(merge: true));
 
     final mirrorPayload = <String, dynamic>{
-      if (profile.letterboxdUsername != null) 'letterboxdUsername': profile.letterboxdUsername,
+      if (profile.letterboxdUsername != null)
+        'letterboxdUsername': profile.letterboxdUsername,
       'fiveStarKeys': loved,
       'dislikedKeys': disliked,
       'updatedAt': FieldValue.serverTimestamp(),
     };
-    if (setLastSyncedAt) mirrorPayload['lastSyncedAt'] = FieldValue.serverTimestamp();
+    if (setLastSyncedAt)
+      mirrorPayload['lastSyncedAt'] = FieldValue.serverTimestamp();
     if (syncReason != null) mirrorPayload['syncReason'] = syncReason;
     batch.set(_usersRef(uid), mirrorPayload, SetOptions(merge: true));
 
@@ -286,12 +309,14 @@ class UserProfileService {
     if (posters != null) update['posters'] = posters;
     if (vector != null) update['vector'] = vector;
     if (computedAtMs != null) update['computedAtMs'] = computedAtMs;
-    if (letterboxdUsername != null) update['letterboxdUsername'] = letterboxdUsername;
+    if (letterboxdUsername != null)
+      update['letterboxdUsername'] = letterboxdUsername;
     update['updatedAt'] = FieldValue.serverTimestamp();
     if (update.isEmpty) return;
     await _tasteRef(uid).set(update, SetOptions(merge: true));
 
-    if (loved != null) await _mirrorFiveStarKeysToUsers(uid: uid, fiveStarKeys: loved);
+    if (loved != null)
+      await _mirrorFiveStarKeysToUsers(uid: uid, fiveStarKeys: loved);
     if (letterboxdUsername != null) {
       await _usersRef(uid).set({
         'letterboxdUsername': letterboxdUsername,
@@ -299,26 +324,39 @@ class UserProfileService {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     }
-    if (disliked != null) await _mirrorDislikedKeysToUsers(uid: uid, dislikedKeys: disliked);
+    if (disliked != null)
+      await _mirrorDislikedKeysToUsers(uid: uid, dislikedKeys: disliked);
   }
 
   Future<TasteProfile> loadTasteProfile(String uid) async {
     var snap = await _tasteRef(uid).get(const GetOptions(source: Source.cache));
-    if (!snap.exists) snap = await _tasteRef(uid).get(const GetOptions(source: Source.server));
+    if (!snap.exists)
+      snap = await _tasteRef(uid).get(const GetOptions(source: Source.server));
     final data = snap.data();
     if (data == null) return TasteProfile.empty;
-    try { return TasteProfile.fromMap(data); } catch (_) { return TasteProfile.empty; }
+    try {
+      return TasteProfile.fromMap(data);
+    } catch (_) {
+      return TasteProfile.empty;
+    }
   }
 
   Stream<TasteProfile> watchTasteProfile(String uid) {
     return _tasteRef(uid).snapshots().map((snap) {
       final data = snap.data();
       if (data == null) return TasteProfile.empty;
-      try { return TasteProfile.fromMap(data); } catch (_) { return TasteProfile.empty; }
+      try {
+        return TasteProfile.fromMap(data);
+      } catch (_) {
+        return TasteProfile.empty;
+      }
     });
   }
 
-  Future<void> setLetterboxdUsername({required String uid, required String username}) async {
+  Future<void> setLetterboxdUsername({
+    required String uid,
+    required String username,
+  }) async {
     final clean = username.trim();
     final lower = clean.toLowerCase();
     final batch = _fs.batch();
@@ -417,7 +455,11 @@ class UserProfileService {
     );
     final merged = merge ? current.merge(incoming) : incoming;
     final mergedAllowed = {...merged.loved, ...merged.disliked}.toSet();
-    final cleanedPosters = _mergePosters(base: merged.posters, incoming: posters, allowedKeys: mergedAllowed);
+    final cleanedPosters = _mergePosters(
+      base: merged.posters,
+      incoming: posters,
+      allowedKeys: mergedAllowed,
+    );
     final finalProfile = merged.copyWith(
       posters: cleanedPosters,
       letterboxdUsername: uname ?? merged.letterboxdUsername,
@@ -426,23 +468,47 @@ class UserProfileService {
     await saveTasteProfile(uid: uid, profile: finalProfile);
   }
 
-  Future<void> addLovedKeys({required String uid, required List<String> filmKeys, Map<String, String> posters = const {}}) async {
+  Future<void> addLovedKeys({
+    required String uid,
+    required List<String> filmKeys,
+    Map<String, String> posters = const {},
+  }) async {
     final current = await loadTasteProfile(uid);
     final incoming = _normKeys(filmKeys);
     final next = current.copyWith(
       loved: TasteProfile._dedupe([...current.loved, ...incoming]),
-      posters: _mergePosters(base: current.posters, incoming: posters, allowedKeys: {...current.loved, ...current.disliked, ...incoming}.toSet()),
+      posters: _mergePosters(
+        base: current.posters,
+        incoming: posters,
+        allowedKeys: {
+          ...current.loved,
+          ...current.disliked,
+          ...incoming,
+        }.toSet(),
+      ),
       computedAtMs: DateTime.now().millisecondsSinceEpoch,
     );
     await saveTasteProfile(uid: uid, profile: next);
   }
 
-  Future<void> addDislikedKeys({required String uid, required List<String> filmKeys, Map<String, String> posters = const {}}) async {
+  Future<void> addDislikedKeys({
+    required String uid,
+    required List<String> filmKeys,
+    Map<String, String> posters = const {},
+  }) async {
     final current = await loadTasteProfile(uid);
     final incoming = _normKeys(filmKeys);
     final next = current.copyWith(
       disliked: TasteProfile._dedupe([...current.disliked, ...incoming]),
-      posters: _mergePosters(base: current.posters, incoming: posters, allowedKeys: {...current.loved, ...current.disliked, ...incoming}.toSet()),
+      posters: _mergePosters(
+        base: current.posters,
+        incoming: posters,
+        allowedKeys: {
+          ...current.loved,
+          ...current.disliked,
+          ...incoming,
+        }.toSet(),
+      ),
       computedAtMs: DateTime.now().millisecondsSinceEpoch,
     );
     await saveTasteProfile(uid: uid, profile: next);
@@ -476,7 +542,7 @@ class UserProfileService {
   // =======================================================================
   // OPTİMİZE EDİLMİŞ TOGGLE FONKSİYONLARI
   // Temel prensip: Tek bir Firestore yazma işlemi, sıfır okuma.
-  // moveMovieToTarget() ARTIK ÇAĞRILMIYOR.
+  // moveMovieToTarget() eski ekranlar icin okumasiz tasima fonksiyonu olarak duruyor.
   // =======================================================================
 
   Future<void> fastToggleWatched({
@@ -492,15 +558,23 @@ class UserProfileService {
 
     if (isCurrentlyAdded) {
       // Tek yazma: arrayRemove
-      unawaited(userRef.set({
-        'watchedKeys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbStr]),
-      }, SetOptions(merge: true)));
+      unawaited(
+        userRef.set({
+          'watchedKeys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbStr]),
+        }, SetOptions(merge: true)),
+      );
     } else {
       // Tek yazma: İzlenenler'e ekle + İzlenecekler'den çıkar
-      unawaited(userRef.set({
-        'watchedKeys': FieldValue.arrayUnion([primaryKey, tmdbStr]),
-        'watchlistKeys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbStr]),
-      }, SetOptions(merge: true)));
+      unawaited(
+        userRef.set({
+          'watchedKeys': FieldValue.arrayUnion([primaryKey, tmdbStr]),
+          'watchlistKeys': FieldValue.arrayRemove([
+            primaryKey,
+            tmdbId,
+            tmdbStr,
+          ]),
+        }, SetOptions(merge: true)),
+      );
 
       // Arka planda (UI'ı bloklamadan) watchlist subcollection'ını temizle
       Future.microtask(() async {
@@ -518,9 +592,8 @@ class UserProfileService {
   }
 
   /// OPTİMİZE EDİLMİŞ VERSİYON
-  /// ESKİ SORUN: CatalogService().upsertFromTmdb() bittikten sonra moveMovieToTarget()
-  /// çağırılıyordu. moveMovieToTarget() içinde Source.serverAndCache ile Firestore
-  /// OKUYOR, sonra tekrar YAZIYORDU. Bu 2 ekstra round-trip + UI kasması demekti.
+  /// ESKI SORUN: Eski akis moveMovieToTarget() icinde kullanici dokumanini
+  /// okuyup sonra yaziyordu. Bu ekstra round-trip + UI kasmasi demekti.
   ///
   /// YENİ ÇÖZÜM: Tüm gerekli veriyi elimizde tutuyoruz (primaryKey). Tek bir
   /// batch yazmasıyla her şeyi hallettik. Okuma YOK, zincirleme çağrı YOK.
@@ -539,8 +612,8 @@ class UserProfileService {
 
     // ShelfTarget → Firestore alan adı eşleşmesi
     final String shelfKey = switch (target) {
-      ShelfTarget.fiveStar  => 'fiveStar',
-      ShelfTarget.disliked  => 'disliked',
+      ShelfTarget.fiveStar => 'fiveStar',
+      ShelfTarget.disliked => 'disliked',
       ShelfTarget.favorites => 'favorites',
       ShelfTarget.watchlist => 'watchlist',
     };
@@ -568,9 +641,20 @@ class UserProfileService {
       unawaited(batch.commit());
 
       // Subcollection silme arka planda
-      userRef.collection('shelves').doc(shelfKey).collection('items').doc(primaryKey).delete().catchError((_) {});
-      userRef.collection('shelves').doc(shelfKey).collection('items').doc(tmdbStr).delete().catchError((_) {});
-
+      userRef
+          .collection('shelves')
+          .doc(shelfKey)
+          .collection('items')
+          .doc(primaryKey)
+          .delete()
+          .catchError((_) {});
+      userRef
+          .collection('shelves')
+          .doc(shelfKey)
+          .collection('items')
+          .doc(tmdbStr)
+          .delete()
+          .catchError((_) {});
     } else {
       // --- EKLEME: Listeye ekle, izlendiyse izleneceklerden çıkar ---
       final batch = _fs.batch();
@@ -582,16 +666,21 @@ class UserProfileService {
       // Watchlist dışındaki tüm listeler "izlenmiş" sayılır
       if (target != ShelfTarget.watchlist) {
         userUpdates['watchedKeys'] = FieldValue.arrayUnion([primaryKey]);
-        userUpdates['watchlistKeys'] = FieldValue.arrayRemove([primaryKey, tmdbId, tmdbStr]);
+        userUpdates['watchlistKeys'] = FieldValue.arrayRemove([
+          primaryKey,
+          tmdbId,
+          tmdbStr,
+        ]);
       }
 
       batch.set(userRef, userUpdates, SetOptions(merge: true));
 
       // Taste profile güncelle (fiveStar veya disliked ise)
       if (shelfKey == 'fiveStar') {
-        final poster = posterUrl ?? 
-            (movieData['poster_path'] != null 
-                ? 'https://image.tmdb.org/t/p/w500${movieData['poster_path']}' 
+        final poster =
+            posterUrl ??
+            (movieData['poster_path'] != null
+                ? 'https://image.tmdb.org/t/p/w500${movieData['poster_path']}'
                 : null);
         final tasteUpdate = <String, dynamic>{
           'loved': FieldValue.arrayUnion([primaryKey]),
@@ -642,77 +731,52 @@ class UserProfileService {
     if (key.isEmpty) return null;
 
     final userRef = _fs.collection('users').doc(uid);
-
-    // Cache-first okuma: sunucuya gitmeden önce cache'e bak
-    DocumentSnapshot<Map<String, dynamic>> snap;
-    try {
-      snap = await userRef.get(const GetOptions(source: Source.cache));
-      if (!snap.exists) throw Exception('not in cache');
-    } catch (_) {
-      snap = await userRef.get(const GetOptions(source: Source.server));
-    }
-
-    if (!snap.exists) return null;
-    final data = snap.data() ?? {};
-
-    final fiveStar = List<String>.from(data['fiveStarKeys'] ?? []);
-    final disliked = List<String>.from(data['dislikedKeys'] ?? []);
-    final favorites = List<String>.from(data['favoritesKeys'] ?? []);
-    final watchlist = List<String>.from(data['watchlistKeys'] ?? []);
-
-    String? previousListName;
     final batch = _fs.batch();
 
-    if (target != ShelfTarget.fiveStar && fiveStar.contains(key)) {
-      previousListName = 'Sevdiklerim';
-      batch.update(userRef, {'fiveStarKeys': FieldValue.arrayRemove([key])});
-    }
-    if (target != ShelfTarget.disliked && disliked.contains(key)) {
-      previousListName = 'Beğenmediklerim';
-      batch.update(userRef, {'dislikedKeys': FieldValue.arrayRemove([key])});
-    }
-    if (target != ShelfTarget.favorites && favorites.contains(key)) {
-      previousListName = 'Favorilerim';
-      batch.update(userRef, {'favoritesKeys': FieldValue.arrayRemove([key])});
-    }
-    if (target != ShelfTarget.watchlist && watchlist.contains(key)) {
-      previousListName = 'İzleme Listesi';
-      batch.update(userRef, {'watchlistKeys': FieldValue.arrayRemove([key])});
-    }
-
     final String targetField = switch (target) {
-      ShelfTarget.fiveStar  => 'fiveStarKeys',
-      ShelfTarget.disliked  => 'dislikedKeys',
+      ShelfTarget.fiveStar => 'fiveStarKeys',
+      ShelfTarget.disliked => 'dislikedKeys',
       ShelfTarget.favorites => 'favoritesKeys',
       ShelfTarget.watchlist => 'watchlistKeys',
     };
 
-    batch.update(userRef, {
+    final userUpdates = <String, dynamic>{
+      if (target != ShelfTarget.fiveStar)
+        'fiveStarKeys': FieldValue.arrayRemove([key]),
+      if (target != ShelfTarget.disliked)
+        'dislikedKeys': FieldValue.arrayRemove([key]),
+      if (target != ShelfTarget.favorites)
+        'favoritesKeys': FieldValue.arrayRemove([key]),
+      if (target != ShelfTarget.watchlist)
+        'watchlistKeys': FieldValue.arrayRemove([key]),
       targetField: FieldValue.arrayUnion([key]),
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    };
+    batch.set(userRef, userUpdates, SetOptions(merge: true));
 
     final tasteRef = _fs.collection('userTasteProfiles').doc(uid);
-    if (previousListName == 'Sevdiklerim') {
-      batch.update(tasteRef, {'loved': FieldValue.arrayRemove([key])});
-    } else if (previousListName == 'Beğenmediklerim') {
-      batch.update(tasteRef, {'disliked': FieldValue.arrayRemove([key])});
-    }
-
+    final tasteUpdates = <String, dynamic>{
+      if (target != ShelfTarget.fiveStar)
+        'loved': FieldValue.arrayRemove([key]),
+      if (target != ShelfTarget.disliked)
+        'disliked': FieldValue.arrayRemove([key]),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
     if (target == ShelfTarget.fiveStar) {
-      batch.update(tasteRef, {'loved': FieldValue.arrayUnion([key])});
-      if (posterUrl != null) batch.update(tasteRef, {'posters.$key': posterUrl});
+      tasteUpdates['loved'] = FieldValue.arrayUnion([key]);
+      if (posterUrl != null) tasteUpdates['posters.$key'] = posterUrl;
     } else if (target == ShelfTarget.disliked) {
-      batch.update(tasteRef, {'disliked': FieldValue.arrayUnion([key])});
-      if (posterUrl != null) batch.update(tasteRef, {'posters.$key': posterUrl});
+      tasteUpdates['disliked'] = FieldValue.arrayUnion([key]);
+      if (posterUrl != null) tasteUpdates['posters.$key'] = posterUrl;
     }
+    batch.set(tasteRef, tasteUpdates, SetOptions(merge: true));
 
     await batch.commit();
 
     if (target != ShelfTarget.watchlist) {
       WatchedMoviesService.instance.logMovieAsWatched(key);
     }
-    return previousListName;
+    return null;
   }
 }
 

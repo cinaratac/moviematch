@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
@@ -20,6 +19,8 @@ import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/services/blocking_service.dart';
 import 'package:fluttergirdi/widgets/report_user_sheet.dart';
+import 'package:fluttergirdi/widgets/follow_user_list_dialog.dart';
+import 'package:fluttergirdi/widgets/recent_watched_movies.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
@@ -170,13 +171,19 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   }
 
   void _showUserList(String title, String collection) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (_) =>
-          _UserListSheet(title: title, uid: widget.uid, collection: collection),
+      builder: (_) => FollowUserListDialog(
+        title: title,
+        uid: widget.uid,
+        collection: collection,
+        onOpenProfile: (uid) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid)),
+          );
+        },
+      ),
     );
   }
 
@@ -511,10 +518,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     try {
       // YENİ FONSİYONU ÇAĞIRIYORUZ
       final status = await BlockingService.instance.checkBlockStatus(
-        currentUserId: myUid, 
-        targetUserId: other
+        currentUserId: myUid,
+        targetUserId: other,
       );
-      
+
       if (!mounted) return;
       setState(() {
         // Artık kimin kimi engellediğini kesin olarak biliyoruz
@@ -532,8 +539,6 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     _followSub?.cancel();
     super.dispose();
   }
-
- 
 
   @override
   Widget build(BuildContext context) {
@@ -620,12 +625,17 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                             ),
                           ),
                           onSelected: (value) async {
-                            final myUid = FirebaseAuth.instance.currentUser?.uid;
+                            final myUid =
+                                FirebaseAuth.instance.currentUser?.uid;
                             if (myUid == null) return;
 
                             if (value == 'report') {
                               // YENİ KODUMUZ BURASI: Artık alttan modern menü açılacak
-                              ReportUserSheet.show(context, widget.uid, titleText);
+                              ReportUserSheet.show(
+                                context,
+                                widget.uid,
+                                titleText,
+                              );
                             } else if (value == 'block') {
                               await BlockingService.instance.blockUser(
                                 currentUserId: myUid,
@@ -636,7 +646,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                   _isBlocked = true;
                                 });
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Kullanıcı engellendi. İçerikleri gizlendi.')),
+                                  const SnackBar(
+                                    content: Text(
+                                      'Kullanıcı engellendi. İçerikleri gizlendi.',
+                                    ),
+                                  ),
                                 );
                               }
                             } else if (value == 'unblock') {
@@ -649,7 +663,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                   _isBlocked = false;
                                 });
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Kullanıcının engeli kaldırıldı.')),
+                                  const SnackBar(
+                                    content: Text(
+                                      'Kullanıcının engeli kaldırıldı.',
+                                    ),
+                                  ),
                                 );
                               }
                             }
@@ -663,14 +681,17 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                 contentPadding: EdgeInsets.zero,
                               ),
                             ),
-                            // SADECE BEN ENGELLEMEDİYSEM "ENGELLE" ÇIKAR 
+                            // SADECE BEN ENGELLEMEDİYSEM "ENGELLE" ÇIKAR
                             // (O beni engellese bile ben de onu engelleyebilirim)
                             if (!_isBlocked)
                               const PopupMenuItem(
                                 value: 'block',
                                 child: ListTile(
                                   leading: Icon(Icons.block, color: Colors.red),
-                                  title: Text('Kişiyi Engelle', style: TextStyle(color: Colors.red)),
+                                  title: Text(
+                                    'Kişiyi Engelle',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
                                   contentPadding: EdgeInsets.zero,
                                 ),
                               )
@@ -679,8 +700,14 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               const PopupMenuItem(
                                 value: 'unblock',
                                 child: ListTile(
-                                  leading: Icon(Icons.check_circle_outline, color: Colors.green),
-                                  title: Text('Engeli Kaldır', style: TextStyle(color: Colors.green)),
+                                  leading: Icon(
+                                    Icons.check_circle_outline,
+                                    color: Colors.green,
+                                  ),
+                                  title: Text(
+                                    'Engeli Kaldır',
+                                    style: TextStyle(color: Colors.green),
+                                  ),
                                   contentPadding: EdgeInsets.zero,
                                 ),
                               ),
@@ -822,66 +849,131 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                           Builder(
                                             builder: (context) {
                                               // Veriyi en dıştaki ana Stream'den (data değişkeninden) bedavaya alıyoruz!
-                                              final badges = List<String>.from(data['badges'] ?? []);
-                                              final int streakCount = (data['streakCount'] ?? 0) as int;
+                                              final badges = List<String>.from(
+                                                data['badges'] ?? [],
+                                              );
+                                              final int streakCount =
+                                                  (data['streakCount'] ?? 0)
+                                                      as int;
 
-                                              if (badges.isEmpty && streakCount <= 0) return const SizedBox.shrink();
+                                              if (badges.isEmpty &&
+                                                  streakCount <= 0)
+                                                return const SizedBox.shrink();
 
                                               return Padding(
-                                                padding: const EdgeInsets.only(bottom: 6.0),
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 6.0,
+                                                ),
                                                 child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
                                                   children: [
                                                     // STREAK (SERİ) ATEŞİ
                                                     if (streakCount > 0)
                                                       Container(
-                                                        margin: const EdgeInsets.only(bottom: 6),
-                                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                        margin:
+                                                            const EdgeInsets.only(
+                                                              bottom: 6,
+                                                            ),
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 10,
+                                                              vertical: 4,
+                                                            ),
                                                         decoration: BoxDecoration(
-                                                          color: Colors.orange.withOpacity(0.15),
-                                                          borderRadius: BorderRadius.circular(20),
-                                                          border: Border.all(color: Colors.orangeAccent, width: 1.2),
+                                                          color: Colors.orange
+                                                              .withOpacity(
+                                                                0.15,
+                                                              ),
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                20,
+                                                              ),
+                                                          border: Border.all(
+                                                            color: Colors
+                                                                .orangeAccent,
+                                                            width: 1.2,
+                                                          ),
                                                           boxShadow: [
                                                             BoxShadow(
-                                                              color: Colors.orange.withOpacity(0.1),
+                                                              color: Colors
+                                                                  .orange
+                                                                  .withOpacity(
+                                                                    0.1,
+                                                                  ),
                                                               blurRadius: 8,
                                                               spreadRadius: 1,
                                                             ),
                                                           ],
                                                         ),
                                                         child: Row(
-                                                          mainAxisSize: MainAxisSize.min,
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
                                                           children: [
-                                                            const Icon(Icons.local_fire_department_rounded, color: Colors.orangeAccent, size: 16),
-                                                            const SizedBox(width: 4),
+                                                            const Icon(
+                                                              Icons
+                                                                  .local_fire_department_rounded,
+                                                              color: Colors
+                                                                  .orangeAccent,
+                                                              size: 16,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 4,
+                                                            ),
                                                             Text(
                                                               '$streakCount Gün Serisi',
-                                                              style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                                              style: const TextStyle(
+                                                                color: Colors
+                                                                    .orangeAccent,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                                fontSize: 12,
+                                                              ),
                                                             ),
                                                           ],
                                                         ),
                                                       ),
-                                                    
+
                                                     // MEVCUT ROZETLER
                                                     if (badges.isNotEmpty)
                                                       Wrap(
                                                         spacing: 6,
                                                         runSpacing: 4,
-                                                        children: badges.map((badgeId) {
-                                                          final badge = AppBadge.allBadges.firstWhere(
-                                                            (b) => b.id == badgeId,
-                                                            orElse: () => AppBadge.allBadges.first,
-                                                          );
+                                                        children: badges.map((
+                                                          badgeId,
+                                                        ) {
+                                                          final badge = AppBadge
+                                                              .allBadges
+                                                              .firstWhere(
+                                                                (b) =>
+                                                                    b.id ==
+                                                                    badgeId,
+                                                                orElse: () =>
+                                                                    AppBadge
+                                                                        .allBadges
+                                                                        .first,
+                                                              );
                                                           return Container(
-                                                            padding: const EdgeInsets.all(4),
-                                                            decoration: BoxDecoration(
-                                                              color: badge.color.withOpacity(0.15),
-                                                              shape: BoxShape.circle,
-                                                            ),
+                                                            padding:
+                                                                const EdgeInsets.all(
+                                                                  4,
+                                                                ),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                                  color: badge
+                                                                      .color
+                                                                      .withOpacity(
+                                                                        0.15,
+                                                                      ),
+                                                                  shape: BoxShape
+                                                                      .circle,
+                                                                ),
                                                             child: Icon(
                                                               badge.icon,
                                                               size: 12,
-                                                              color: badge.color,
+                                                              color:
+                                                                  badge.color,
                                                             ),
                                                           );
                                                         }).toList(),
@@ -1038,9 +1130,12 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                             widget.uid)
                                       Expanded(
                                         child: FilledButton.icon(
-                                          onPressed: (_followBusy || _isBlocked || _hasBlockedMe)
-    ? null
-    : _toggleFollow,
+                                          onPressed:
+                                              (_followBusy ||
+                                                  _isBlocked ||
+                                                  _hasBlockedMe)
+                                              ? null
+                                              : _toggleFollow,
                                           style: FilledButton.styleFrom(
                                             backgroundColor:
                                                 _isFollowing == true
@@ -1083,58 +1178,60 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                               ),
 
                               // Tab Bar
-                             if (!_isBlocked && !_hasBlockedMe)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                child: Container(
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.black45
-                                        : Colors.white.withOpacity(0.5),
-                                    borderRadius: BorderRadius.circular(20),
+                              if (!_isBlocked && !_hasBlockedMe)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
                                   ),
-                                  child: TabBar(
-                                    isScrollable: false,
-                                    indicator: BoxDecoration(
-                                      color: primaryGreen,
+                                  child: Container(
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? Colors.black45
+                                          : Colors.white.withOpacity(0.5),
                                       borderRadius: BorderRadius.circular(20),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: primaryGreen.withOpacity(0.4),
-                                          blurRadius: 6,
-                                          offset: const Offset(0, 2),
-                                        ),
+                                    ),
+                                    child: TabBar(
+                                      isScrollable: false,
+                                      indicator: BoxDecoration(
+                                        color: primaryGreen,
+                                        borderRadius: BorderRadius.circular(20),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: primaryGreen.withOpacity(
+                                              0.4,
+                                            ),
+                                            blurRadius: 6,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      indicatorSize: TabBarIndicatorSize.tab,
+                                      dividerColor: Colors.transparent,
+                                      labelPadding: EdgeInsets.zero,
+                                      labelStyle: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                      unselectedLabelStyle: const TextStyle(
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 13,
+                                      ),
+                                      labelColor: Colors.white,
+                                      unselectedLabelColor: isDark
+                                          ? Colors.white60
+                                          : Colors.black54,
+                                      overlayColor: WidgetStateProperty.all(
+                                        Colors.transparent,
+                                      ),
+                                      tabs: const [
+                                        Tab(text: 'Filmler', height: 40),
+                                        Tab(text: 'Aktiviteler', height: 40),
+                                        Tab(text: 'Listeler', height: 40),
                                       ],
                                     ),
-                                    indicatorSize: TabBarIndicatorSize.tab,
-                                    dividerColor: Colors.transparent,
-                                    labelPadding: EdgeInsets.zero,
-                                    labelStyle: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                    ),
-                                    unselectedLabelStyle: const TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 13,
-                                    ),
-                                    labelColor: Colors.white,
-                                    unselectedLabelColor: isDark
-                                        ? Colors.white60
-                                        : Colors.black54,
-                                    overlayColor: WidgetStateProperty.all(
-                                      Colors.transparent,
-                                    ),
-                                    tabs: const [
-                                      Tab(text: 'Filmler', height: 40),
-                                      Tab(text: 'Aktiviteler', height: 40),
-                                      Tab(text: 'Listeler', height: 40),
-                                    ],
                                   ),
                                 ),
-                              ),
                               const SizedBox(height: 8),
                             ],
                           ),
@@ -1194,28 +1291,35 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     ),
                   ];
                 },
-                
+
                 body: (_isBlocked || _hasBlockedMe)
-    ? const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline, size: 48, color: Colors.grey),
-            SizedBox(height: 16),
-            Text(
-              'Bu profil gizlidir.',
-              style: TextStyle(color: Colors.grey, fontSize: 16),
-            ),
-          ],
-        ),
-      )
-    : TabBarView(
-        children: [
-          _buildProfileTabBody(data),
-          _ActivitiesTab(uid: widget.uid),
-          _PublicListsTab(uid: widget.uid),
-        ],
-      ),
+                    ? const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.lock_outline,
+                              size: 48,
+                              color: Colors.grey,
+                            ),
+                            SizedBox(height: 16),
+                            Text(
+                              'Bu profil gizlidir.',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : TabBarView(
+                        children: [
+                          _buildProfileTabBody(data),
+                          _ActivitiesTab(uid: widget.uid),
+                          _PublicListsTab(uid: widget.uid),
+                        ],
+                      ),
               );
             },
           ),
@@ -1289,6 +1393,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               const SizedBox(height: 12),
             ],
           ),
+        RecentWatchedMovies(
+          uid: widget.uid,
+          fallbackMovieKeys: [...fiveKeys, ...favKeys, ...disKeys],
+        ),
 
         // --- LİSTELER ---
         if (favKeys.isNotEmpty) ...[
@@ -1980,7 +2088,7 @@ class _CustomListCard extends StatelessWidget {
   }
 }
 
-class _UserListSheet extends StatelessWidget {
+class _UserListSheet extends StatefulWidget {
   final String title;
   final String uid;
   final String collection;
@@ -1992,7 +2100,29 @@ class _UserListSheet extends StatelessWidget {
   });
 
   @override
+  State<_UserListSheet> createState() => _UserListSheetState();
+}
+
+class _UserListSheetState extends State<_UserListSheet> {
+  final Map<String, Future<DocumentSnapshot>> _userFutureCache = {};
+  final Map<String, DocumentSnapshot> _userSnapshotCache = {};
+
+  Future<DocumentSnapshot> _loadUser(String uid) {
+    return _userFutureCache.putIfAbsent(uid, () async {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      _userSnapshotCache[uid] = snap;
+      return snap;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final title = widget.title;
+    final uid = widget.uid;
+    final collection = widget.collection;
     return SafeArea(
       child: Column(
         children: [
@@ -2027,13 +2157,14 @@ class _UserListSheet extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final docId = docs[index].id;
                     return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(docId)
-                          .get(),
+                      future: _loadUser(docId),
+                      initialData: _userSnapshotCache[docId],
                       builder: (context, userSnap) {
                         if (!userSnap.hasData)
                           return const ListTile(title: Text('Yükleniyor...'));
+                        if (!userSnap.data!.exists) {
+                          return const SizedBox.shrink();
+                        }
                         final data =
                             userSnap.data!.data() as Map<String, dynamic>?;
                         final name =

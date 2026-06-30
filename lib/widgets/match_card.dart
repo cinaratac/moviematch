@@ -34,6 +34,8 @@ class FilmItem {
 
 final Map<String, FilmItem> _filmItemCache = {};
 final Set<String> _missingFilmKeys = {};
+final Map<String, Future<Map<String, dynamic>?>> _matchUserCache = {};
+final Map<String, Future<bool>> _matchFollowCache = {};
 
 FilmItem _filmItemFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
   final data = doc.data();
@@ -85,6 +87,37 @@ Future<List<FilmItem>> fetchFilmsByKeys(List<String> keys) async {
   ];
 }
 
+Future<Map<String, dynamic>?> _loadMatchUserData(String uid) {
+  return _matchUserCache.putIfAbsent(uid, () async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get(const GetOptions(source: Source.serverAndCache));
+      return doc.data();
+    } catch (_) {
+      return null;
+    }
+  });
+}
+
+Future<bool> _loadMatchFollowStatus(String myUid, String otherUid) {
+  final cacheKey = '${myUid}_$otherUid';
+  return _matchFollowCache.putIfAbsent(cacheKey, () async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(myUid)
+          .collection('following')
+          .doc(otherUid)
+          .get(const GetOptions(source: Source.serverAndCache));
+      return doc.exists;
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
 // ==========================================
 // 2. GELİŞMİŞ EŞLEŞME KARTI WIDGET'I
 // ==========================================
@@ -126,35 +159,11 @@ class _MatchCardState extends State<MatchCard>
       ...m.commonWatchlist,
     }.take(5).toList();
 
-    Future<DocumentSnapshot<Map<String, dynamic>>?> loadFollow() async {
-      try {
-        return await FirebaseFirestore.instance
-            .collection('users')
-            .doc(me)
-            .collection('following')
-            .doc(widget.result.uid)
-            .get();
-      } catch (_) {
-        return null;
-      }
-    }
-
-    Future<DocumentSnapshot<Map<String, dynamic>>?> loadUser() async {
-      try {
-        return await FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.result.uid)
-            .get();
-      } catch (_) {
-        return null;
-      }
-    }
-
     final commonFuture = commonKeys.isEmpty
         ? Future.value(<FilmItem>[])
         : fetchFilmsByKeys(commonKeys);
-    final userFuture = loadUser();
-    final followFuture = loadFollow();
+    final userFuture = _loadMatchUserData(widget.result.uid);
+    final followFuture = _loadMatchFollowStatus(me, widget.result.uid);
 
     try {
       final films = await commonFuture;
@@ -164,10 +173,9 @@ class _MatchCardState extends State<MatchCard>
     }
 
     try {
-      final doc = await userFuture;
-      if (mounted && doc != null && doc.exists) {
-        setState(() => _userData = doc.data());
-        final data = doc.data()!;
+      final data = await userFuture;
+      if (mounted && data != null) {
+        setState(() => _userData = data);
         var favKeys = List<String>.from(data['favoritesKeys'] ?? []);
         if (favKeys.isEmpty) {
           favKeys = List<String>.from(data['fiveStarKeys'] ?? []);
@@ -185,10 +193,8 @@ class _MatchCardState extends State<MatchCard>
     }
 
     try {
-      final followDoc = await followFuture;
-      if (mounted && followDoc != null) {
-        setState(() => _isAdded = followDoc.exists);
-      }
+      final isFollowing = await followFuture;
+      if (mounted) setState(() => _isAdded = isFollowing);
     } catch (_) {}
   }
 
@@ -198,6 +204,7 @@ class _MatchCardState extends State<MatchCard>
     if (me != null) {
       try {
         await FollowSystemService.I.followUser(widget.result.uid);
+        _matchFollowCache['${me}_${widget.result.uid}'] = Future.value(true);
         if (mounted) setState(() => _isAdded = true);
       } catch (e) {
         if (mounted) {
@@ -456,8 +463,10 @@ class _MatchCardState extends State<MatchCard>
 
     final m = widget.result;
     final pct = m.score.clamp(0, 100).toStringAsFixed(0);
-    String? photoUrl = _userData?['photoURL'];
-    final displayName = m.displayName ?? 'İsimsiz Sinefil';
+    final String? photoUrl = (_userData?['photoURL'] ?? m.photoURL)?.toString();
+    final displayName = (m.displayName?.trim().isNotEmpty ?? false)
+        ? m.displayName!
+        : 'İsimsiz Sinefil';
 
     final int? age = _userData?['age'];
     final String bio = (_userData?['bio'] ?? '').toString().trim();

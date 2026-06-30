@@ -17,6 +17,8 @@ import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:fluttergirdi/models/shelf_target.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
+import 'package:fluttergirdi/widgets/follow_user_list_dialog.dart';
+import 'package:fluttergirdi/widgets/recent_watched_movies.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
@@ -189,13 +191,19 @@ Widget _profileHeaderSection({
 
   final isDark = Theme.of(context).brightness == Brightness.dark;
   void showUserList(String title, String collection) {
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      builder: (_) =>
-          _UserListSheet(title: title, uid: user.uid, collection: collection),
+      builder: (_) => FollowUserListDialog(
+        title: title,
+        uid: user.uid,
+        collection: collection,
+        onOpenProfile: (uid) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid)),
+          );
+        },
+      ),
     );
   }
 
@@ -251,7 +259,7 @@ Widget _profileHeaderSection({
                 overflow: TextOverflow.ellipsis,
               ),
 
-             // --- ROZET VE STREAK ALANI ---
+              // --- ROZET VE STREAK ALANI ---
               StreamBuilder<DocumentSnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('users')
@@ -263,9 +271,11 @@ Widget _profileHeaderSection({
                   final userData = snap.data!.data() as Map<String, dynamic>?;
                   final badges = List<String>.from(userData?['badges'] ?? []);
                   // DÜZELTME BURADA: 'currentStreak' yerine 'streakCount' yazıldı
-                  final int streakCount = (userData?['streakCount'] ?? 0) as int;
+                  final int streakCount =
+                      (userData?['streakCount'] ?? 0) as int;
 
-                  if (badges.isEmpty && streakCount <= 0) return const SizedBox.shrink();
+                  if (badges.isEmpty && streakCount <= 0)
+                    return const SizedBox.shrink();
 
                   return Padding(
                     padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
@@ -276,11 +286,17 @@ Widget _profileHeaderSection({
                         if (streakCount > 0)
                           Container(
                             margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.orange.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.orangeAccent, width: 1.2),
+                              border: Border.all(
+                                color: Colors.orangeAccent,
+                                width: 1.2,
+                              ),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.orange.withOpacity(0.1),
@@ -292,16 +308,24 @@ Widget _profileHeaderSection({
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.local_fire_department_rounded, color: Colors.orangeAccent, size: 16),
+                                const Icon(
+                                  Icons.local_fire_department_rounded,
+                                  color: Colors.orangeAccent,
+                                  size: 16,
+                                ),
                                 const SizedBox(width: 4),
                                 Text(
                                   '$streakCount Gün Serisi',
-                                  style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                  style: const TextStyle(
+                                    color: Colors.orangeAccent,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                        
+
                         // MEVCUT ROZETLER
                         if (badges.isNotEmpty)
                           Wrap(
@@ -452,8 +476,6 @@ class _ProfilePageState extends State<ProfilePage> {
           'updatedAt': FieldValue.serverTimestamp(),
         });
       }
-
-      await GamificationService.instance.checkAndAwardBadges();
     } catch (_) {}
 
     _followSub?.cancel();
@@ -475,7 +497,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final prefs = await SharedPreferences.getInstance();
     final lastCheck = prefs.getString('last_badge_check') ?? '';
     final today = DateTime.now().toIso8601String().substring(0, 10);
-    
+
     if (lastCheck != today) {
       await GamificationService.instance.checkAndAwardBadges();
       await prefs.setString('last_badge_check', today);
@@ -546,7 +568,7 @@ class _ProfilePageState extends State<ProfilePage> {
     _forceWriteLbUsernameIfMissing();
   }
 
- void _bindLbFromFirestore() {
+  void _bindLbFromFirestore() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -555,7 +577,14 @@ class _ProfilePageState extends State<ProfilePage> {
         setState(() {
           _lastUserData = Map<String, dynamic>.from(data);
           final lb = (data['letterboxdUsername'] ?? '').toString().trim();
-          final appU = (data['displayName'] ?? data['username'] ?? data['handle'] ?? data['appUsername'] ?? '').toString().trim();
+          final appU =
+              (data['displayName'] ??
+                      data['username'] ??
+                      data['handle'] ??
+                      data['appUsername'] ??
+                      '')
+                  .toString()
+                  .trim();
           if (appU.isNotEmpty && appU != (_appUsername ?? '')) {
             _appUsername = appU;
           }
@@ -582,14 +611,6 @@ class _ProfilePageState extends State<ProfilePage> {
           updateProfileState(snap.data() ?? const {});
         });
   }
-
-bool _listEquals(List a, List b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i].toString() != b[i].toString()) return false;
-  }
-  return true;
-}
 
   String _noYear(String t) => t.replaceAll(RegExp(r'\s*\(\d{4}\)$'), '');
 
@@ -1120,6 +1141,10 @@ bool _listEquals(List a, List b) {
               ],
             );
           },
+        ),
+        RecentWatchedMovies(
+          uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+          fallbackMovieKeys: [...fiveStarKeys, ...favKeys, ...dislikedKeys],
         ),
 
         const SizedBox(height: 16),
@@ -1738,7 +1763,8 @@ class _ListsTab extends StatefulWidget {
   State<_ListsTab> createState() => _ListsTabState();
 }
 
-class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin {
+class _ListsTabState extends State<_ListsTab>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -1777,28 +1803,39 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
                 children: [
                   // En üstte "Yeni Liste Oluştur" butonu (Sadece kendi profilinde)
                   if (isMe)
-                    _CreateListTile(onTap: () => _showCreateListDialog(context)),
-                  
+                    _CreateListTile(
+                      onTap: () => _showCreateListDialog(context),
+                    ),
+
                   // Eğer hiç listesi yoksa
                   if (lists.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 20),
                       child: Center(
                         child: Text(
-                          isMe ? "Henüz liste oluşturmadın." : "Kullanıcı henüz liste oluşturmamış.",
-                          style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                          isMe
+                              ? "Henüz liste oluşturmadın."
+                              : "Kullanıcı henüz liste oluşturmamış.",
+                          style: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
                         ),
                       ),
                     )
                   // Listeler varsa göster
                   else
                     ListView.builder(
-                      shrinkWrap: true, // Listenin sayfa içinde taşmaması için kritik
-                      physics: const NeverScrollableScrollPhysics(), // Kaydırmayı ana sayfaya devreder
+                      shrinkWrap:
+                          true, // Listenin sayfa içinde taşmaması için kritik
+                      physics:
+                          const NeverScrollableScrollPhysics(), // Kaydırmayı ana sayfaya devreder
                       padding: EdgeInsets.zero,
                       itemCount: lists.length,
                       itemBuilder: (context, index) {
-                        return _CustomListCard(list: lists[index], isMine: isMe);
+                        return _CustomListCard(
+                          list: lists[index],
+                          isMine: isMe,
+                        );
                       },
                     ),
                 ],
@@ -1824,7 +1861,7 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
                 ),
               ),
             ),
-            
+
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('users')
@@ -1848,20 +1885,24 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
                     child: Center(
                       child: Text(
                         "Henüz kaydedilmiş listen yok.",
-                        style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
                       ),
                     ),
                   );
                 }
 
                 return ListView.builder(
-                  shrinkWrap: true, // Listenin sayfa içinde taşmaması için kritik
-                  physics: const NeverScrollableScrollPhysics(), // Kaydırmayı ana sayfaya devreder
+                  shrinkWrap:
+                      true, // Listenin sayfa içinde taşmaması için kritik
+                  physics:
+                      const NeverScrollableScrollPhysics(), // Kaydırmayı ana sayfaya devreder
                   padding: EdgeInsets.zero,
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final data = docs[index].data() as Map<String, dynamic>;
-                    
+
                     final customList = CustomList(
                       id: data['listId'],
                       ownerId: data['ownerId'] ?? '',
@@ -1871,9 +1912,9 @@ class _ListsTabState extends State<_ListsTab> with AutomaticKeepAliveClientMixin
                       coverImageUrl: data['coverImageUrl'],
                       isPublic: data['isPublic'] ?? true,
                       movieCount: data['movieCount'] ?? 0,
-                      createdAt: DateTime.now(), 
+                      createdAt: DateTime.now(),
                     );
-                    
+
                     return _CustomListCard(list: customList, isMine: false);
                   },
                 );
@@ -2171,14 +2212,13 @@ class _AddPosterTile extends StatelessWidget {
         );
         // Arama ekranından başarıyla film eklendiyse result döner
         if (result == true) {
-          
           // --- ÇÖKME KORUMASI BURADA ---
           if (!context.mounted) return;
-          
+
           onRefresh?.call();
-          
+
           if (target != ShelfTarget.watchlist) {
-             StreakService.instance.triggerAction(context);
+            StreakService.instance.triggerAction(context);
           }
         }
       },
@@ -2248,7 +2288,7 @@ class _AddFilmDialogState extends State<_AddFilmDialog> {
   }
 }
 
-class _UserListSheet extends StatelessWidget {
+class _UserListSheet extends StatefulWidget {
   final String title;
   final String uid;
   final String collection;
@@ -2260,7 +2300,29 @@ class _UserListSheet extends StatelessWidget {
   });
 
   @override
+  State<_UserListSheet> createState() => _UserListSheetState();
+}
+
+class _UserListSheetState extends State<_UserListSheet> {
+  final Map<String, Future<DocumentSnapshot>> _userFutureCache = {};
+  final Map<String, DocumentSnapshot> _userSnapshotCache = {};
+
+  Future<DocumentSnapshot> _loadUser(String uid) {
+    return _userFutureCache.putIfAbsent(uid, () async {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      _userSnapshotCache[uid] = snap;
+      return snap;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final title = widget.title;
+    final uid = widget.uid;
+    final collection = widget.collection;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
 
@@ -2299,13 +2361,14 @@ class _UserListSheet extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final docId = docs[index].id;
                     return FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(docId)
-                          .get(),
+                      future: _loadUser(docId),
+                      initialData: _userSnapshotCache[docId],
                       builder: (context, userSnap) {
                         if (!userSnap.hasData)
                           return const ListTile(title: Text('Yükleniyor...'));
+                        if (!userSnap.data!.exists) {
+                          return const SizedBox.shrink();
+                        }
                         final data =
                             userSnap.data!.data() as Map<String, dynamic>?;
                         final name =
@@ -2345,6 +2408,7 @@ class _UserListSheet extends StatelessWidget {
     );
   }
 }
+
 class ProfileListsView extends StatefulWidget {
   final String profileUid; // Profiline bakılan kişinin UID'si
   final bool isMe; // Kendi profilimiz mi?
@@ -2369,7 +2433,10 @@ class _ProfileListsViewState extends State<ProfileListsView> {
         // SADECE KENDİ PROFİLİMİZSE TOGGLE (GEÇİŞ) BUTONLARINI GÖSTER
         if (widget.isMe)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 12.0,
+            ),
             child: Container(
               height: 40,
               decoration: BoxDecoration(
@@ -2383,7 +2450,9 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                       onTap: () => setState(() => _showSaved = false),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: !_showSaved ? Colors.green : Colors.transparent,
+                          color: !_showSaved
+                              ? Colors.green
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         alignment: Alignment.center,
@@ -2429,26 +2498,28 @@ class _ProfileListsViewState extends State<ProfileListsView> {
             stream: _showSaved
                 // KAYDEDİLENLER SORGUSU
                 ? FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(widget.profileUid)
-                    .collection('saved_lists')
-                    .orderBy('savedAt', descending: true)
-                    .snapshots()
+                      .collection('users')
+                      .doc(widget.profileUid)
+                      .collection('saved_lists')
+                      .orderBy('savedAt', descending: true)
+                      .snapshots()
                 // OLUŞTURDUKLARIM SORGUSU
                 : FirebaseFirestore.instance
-                    .collection('custom_lists')
-                    .where('ownerId', isEqualTo: widget.profileUid)
-                    .snapshots(),
+                      .collection('custom_lists')
+                      .where('ownerId', isEqualTo: widget.profileUid)
+                      .snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator(color: Colors.green));
+                return const Center(
+                  child: CircularProgressIndicator(color: Colors.green),
+                );
               }
 
               if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return Center(
                   child: Text(
-                    _showSaved 
-                        ? "Henüz hiç liste kaydetmedin." 
+                    _showSaved
+                        ? "Henüz hiç liste kaydetmedin."
                         : "Henüz bir liste oluşturulmadı.",
                     style: const TextStyle(color: Colors.white54),
                   ),
@@ -2462,7 +2533,7 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                 itemCount: docs.length,
                 itemBuilder: (context, index) {
                   final data = docs[index].data() as Map<String, dynamic>;
-                  
+
                   // Firebase'den gelen veriyi CustomList modeline çeviriyoruz
                   // (Senin CustomList.fromMap() fonksiyonun varsa onu da kullanabilirsin)
                   final customList = CustomList(
@@ -2478,12 +2549,19 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                   );
 
                   return Card(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     color: Colors.white10,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     child: ListTile(
                       contentPadding: const EdgeInsets.all(12),
-                      leading: (customList.coverImageUrl != null && customList.coverImageUrl!.startsWith('http'))
+                      leading:
+                          (customList.coverImageUrl != null &&
+                              customList.coverImageUrl!.startsWith('http'))
                           ? ClipRRect(
                               borderRadius: BorderRadius.circular(8),
                               child: Image.network(
@@ -2491,10 +2569,16 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                                 width: 50,
                                 height: 50,
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => Container(
-                                  width: 50, height: 50, color: Colors.black26,
-                                  child: const Icon(Icons.error, color: Colors.white54),
-                                ),
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                      width: 50,
+                                      height: 50,
+                                      color: Colors.black26,
+                                      child: const Icon(
+                                        Icons.error,
+                                        color: Colors.white54,
+                                      ),
+                                    ),
                               ),
                             )
                           : Container(
@@ -2504,20 +2588,32 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                                 color: Colors.black26,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: const Icon(Icons.list, color: Colors.white54),
+                              child: const Icon(
+                                Icons.list,
+                                color: Colors.white54,
+                              ),
                             ),
                       title: Text(
                         customList.title,
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
                       subtitle: Padding(
                         padding: const EdgeInsets.only(top: 4.0),
                         child: Text(
                           "${customList.movieCount} Film • Hazırlayan: ${customList.ownerName}",
-                          style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
-                      trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: Colors.white54,
+                      ),
                       onTap: () {
                         // Tıklandığında yazdığımız detay ekranına yönlendir!
                         Navigator.push(
@@ -2525,7 +2621,9 @@ class _ProfileListsViewState extends State<ProfileListsView> {
                           MaterialPageRoute(
                             builder: (_) => CustomListDetailScreen(
                               list: customList,
-                              isMyList: customList.ownerId == FirebaseAuth.instance.currentUser?.uid,
+                              isMyList:
+                                  customList.ownerId ==
+                                  FirebaseAuth.instance.currentUser?.uid,
                             ),
                           ),
                         );

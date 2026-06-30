@@ -27,12 +27,14 @@ class WatchedMoviesService {
         final fiveStar = List<dynamic>.from(data['fiveStarKeys'] ?? []);
         final disliked = List<dynamic>.from(data['dislikedKeys'] ?? []);
         final favorites = List<dynamic>.from(data['favoritesKeys'] ?? []);
-        
+
         for (var id in [...fiveStar, ...disliked, ...favorites]) {
           if (id != null) {
             final strId = id.toString().trim().toLowerCase();
             _watchedMovieIds.add(strId);
-            docIdsToResolve.add(strId); // TMDB karşılığını bulmak için listeye al
+            docIdsToResolve.add(
+              strId,
+            ); // TMDB karşılığını bulmak için listeye al
           }
         }
       }
@@ -44,7 +46,7 @@ class WatchedMoviesService {
           .collection('watched')
           .doc('history')
           .get();
-          
+
       if (historyDoc.exists) {
         final data = historyDoc.data()?['ids'] as Map<String, dynamic>? ?? {};
         for (var key in data.keys) {
@@ -59,13 +61,17 @@ class WatchedMoviesService {
       if (docIdsToResolve.isNotEmpty) {
         final chunkedList = docIdsToResolve.toList();
         for (var i = 0; i < chunkedList.length; i += 10) {
-          final chunk = chunkedList.sublist(i, i + 10 > chunkedList.length ? chunkedList.length : i + 10);
-          
+          final chunk = chunkedList.sublist(
+            i,
+            i + 10 > chunkedList.length ? chunkedList.length : i + 10,
+          );
+
           try {
-            final qs = await _fs.collection('catalog_films')
-                                .where(FieldPath.documentId, whereIn: chunk)
-                                .get();
-            
+            final qs = await _fs
+                .collection('catalog_films')
+                .where(FieldPath.documentId, whereIn: chunk)
+                .get();
+
             for (var doc in qs.docs) {
               final tmdbId = doc.data()['tmdbId'];
               if (tmdbId != null) {
@@ -76,7 +82,6 @@ class WatchedMoviesService {
           } catch (_) {}
         }
       }
-
     } catch (e) {
       // Sessizce geç
     }
@@ -87,13 +92,34 @@ class WatchedMoviesService {
     if (uid == null || movieId.isEmpty) return;
 
     final key = movieId.trim().toLowerCase();
-    if (_watchedMovieIds.contains(key)) return; 
+    if (_watchedMovieIds.contains(key)) return;
 
     _watchedMovieIds.add(key);
 
-    final docRef = _fs.collection('users').doc(uid).collection('watched').doc('history');
+    final docRef = _fs
+        .collection('users')
+        .doc(uid)
+        .collection('watched')
+        .doc('history');
+
+    List<String> recentIds = [];
+    try {
+      final doc = await docRef.get(const GetOptions(source: Source.cache));
+      final raw = doc.data()?['recentIds'];
+      if (raw is List) {
+        recentIds = raw.map((id) => id.toString()).toList();
+      }
+    } catch (_) {}
+
+    recentIds.removeWhere((id) => id.trim().toLowerCase() == key);
+    recentIds.insert(0, key);
+    if (recentIds.length > 20) {
+      recentIds = recentIds.take(20).toList();
+    }
+
     await docRef.set({
       'ids': {key: true},
+      'recentIds': recentIds,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
@@ -105,9 +131,16 @@ class WatchedMoviesService {
     final key = movieId.trim().toLowerCase();
     _watchedMovieIds.remove(key);
 
-    final docRef = _fs.collection('users').doc(uid).collection('watched').doc('history');
-    await docRef.update({
-      'ids.$key': FieldValue.delete(),
-    }).catchError((_) {}); 
+    final docRef = _fs
+        .collection('users')
+        .doc(uid)
+        .collection('watched')
+        .doc('history');
+    await docRef
+        .update({
+          'ids.$key': FieldValue.delete(),
+          'recentIds': FieldValue.arrayRemove([key]),
+        })
+        .catchError((_) {});
   }
 }

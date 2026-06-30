@@ -3,6 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/services/text_filter_service.dart';
 import 'package:fluttergirdi/services/feed_service.dart';
+import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/services/follow_system_service.dart';
 // Film arama ve detay sayfaları
 import '../screens/search_movie.dart';
 import '../screens/movie_detail_screen.dart';
@@ -26,7 +30,7 @@ class CommentsSheet extends StatefulWidget {
 class _CommentsSheetState extends State<CommentsSheet> {
   final TextEditingController _commentCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-Set<String> _blockedUsers = {};
+  Set<String> _blockedUsers = {};
   bool _isLoadingBlocks = true;
   late final Stream<QuerySnapshot> _mainRepliesStream;
 
@@ -50,18 +54,24 @@ Set<String> _blockedUsers = {};
         .orderBy('createdAt', descending: true)
         .snapshots();
   }
-Future<void> _loadBlocks() async {
+
+  Future<void> _loadBlocks() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
-      final blocks = await BlockingService.instance.getBlockedAndBlockerIds(uid);
-      if (mounted) setState(() {
-        _blockedUsers = blocks;
-        _isLoadingBlocks = false;
-      });
+      final blocks = await BlockingService.instance.getBlockedAndBlockerIds(
+        uid,
+      );
+      if (mounted) {
+        setState(() {
+          _blockedUsers = blocks;
+          _isLoadingBlocks = false;
+        });
+      }
     } else {
       if (mounted) setState(() => _isLoadingBlocks = false);
     }
   }
+
   @override
   void dispose() {
     _commentCtrl.dispose();
@@ -178,6 +188,7 @@ Future<void> _loadBlocks() async {
       _commentCtrl.clear();
       _removeSelectedMovie();
       _cancelReply();
+      if (!mounted) return;
       FocusScope.of(context).unfocus();
     } finally {
       if (mounted) setState(() => _isSending = false);
@@ -244,12 +255,13 @@ Future<void> _loadBlocks() async {
               stream: _mainRepliesStream,
               builder: (context, snapshot) {
                 // EKLENDİ: Engeller yüklenene kadar bekle
-                if (_isLoadingBlocks || snapshot.connectionState == ConnectionState.waiting) {
+                if (_isLoadingBlocks ||
+                    snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                
+
                 var docs = snapshot.data?.docs ?? [];
-                
+
                 // YENİ: Engellenen kişilerin yorumlarını ÇIKAR
                 if (_blockedUsers.isNotEmpty) {
                   docs = docs.where((doc) {
@@ -275,7 +287,8 @@ Future<void> _loadBlocks() async {
                       postId: widget.postId,
                       doc: docs[index],
                       onReply: _initiateReply,
-                      blockedUsers: _blockedUsers, // YENİ: Listeyi aşağıya iletiyoruz
+                      blockedUsers:
+                          _blockedUsers, // YENİ: Listeyi aşağıya iletiyoruz
                     );
                   },
                 );
@@ -547,6 +560,208 @@ class _AttachedMovieWidget extends StatelessWidget {
 }
 
 // --- TEKİL YORUM SATIRI ---
+void _openCommentAuthorProfile(BuildContext context, String uid) {
+  if (uid.isEmpty) return;
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: uid)),
+  );
+}
+
+class _CommentActionsButton extends StatefulWidget {
+  final String postId;
+  final String commentId;
+  final String? subReplyId;
+  final String authorId;
+  final String authorName;
+
+  const _CommentActionsButton({
+    required this.postId,
+    required this.commentId,
+    this.subReplyId,
+    required this.authorId,
+    required this.authorName,
+  });
+
+  @override
+  State<_CommentActionsButton> createState() => _CommentActionsButtonState();
+}
+
+class _CommentActionsButtonState extends State<_CommentActionsButton> {
+  bool? _isFollowing;
+  bool _busy = false;
+
+  String? get _myUid => FirebaseAuth.instance.currentUser?.uid;
+  bool get _isMe => _myUid == widget.authorId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFollowState();
+  }
+
+  Future<void> _loadFollowState() async {
+    final myUid = _myUid;
+    if (myUid == null || _isMe || widget.authorId.isEmpty) return;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(myUid)
+          .collection('following')
+          .doc(widget.authorId)
+          .get(const GetOptions(source: Source.serverAndCache));
+      if (mounted) setState(() => _isFollowing = snap.exists);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleFollow() async {
+    if (_busy || _isMe || widget.authorId.isEmpty) return;
+    final wasFollowing = _isFollowing == true;
+
+    setState(() {
+      _busy = true;
+      _isFollowing = !wasFollowing;
+    });
+
+    try {
+      if (wasFollowing) {
+        await FollowSystemService.I.unfollowUser(widget.authorId);
+      } else {
+        await FollowSystemService.I.followUser(widget.authorId);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isFollowing = wasFollowing);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('İşlem tamamlanamadı.')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openChat() async {
+    final myUid = _myUid;
+    if (myUid == null || _isMe || widget.authorId.isEmpty) return;
+
+    final chatId = ChatService.instance.chatIdFor(myUid, widget.authorId);
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            ChatRoomScreen(chatId: chatId, otherUid: widget.authorId),
+      ),
+    );
+  }
+
+  Future<void> _reportComment() async {
+    final myUid = _myUid;
+    if (myUid == null || widget.authorId.isEmpty) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('reports').add({
+        'type': 'comment',
+        'reporterId': myUid,
+        'reportedUserId': widget.authorId,
+        'reportedUserName': widget.authorName,
+        'postId': widget.postId,
+        'commentId': widget.commentId,
+        if (widget.subReplyId != null) 'subReplyId': widget.subReplyId,
+        'reason': 'comment_report',
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Yorum raporlandı.')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Rapor gönderilemedi.')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final followLabel = _isFollowing == true ? 'Takipten Çık' : 'Takip Et';
+    return PopupMenuButton<String>(
+      tooltip: 'Yorum seçenekleri',
+      icon: const Icon(Icons.more_horiz_rounded, size: 20),
+      onSelected: (value) async {
+        switch (value) {
+          case 'profile':
+            _openCommentAuthorProfile(context, widget.authorId);
+            break;
+          case 'follow':
+            await _toggleFollow();
+            break;
+          case 'message':
+            await _openChat();
+            break;
+          case 'report':
+            await _reportComment();
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'profile',
+          child: Row(
+            children: [
+              Icon(Icons.person_outline_rounded, size: 20),
+              SizedBox(width: 10),
+              Text('Profili Gör'),
+            ],
+          ),
+        ),
+        if (!_isMe) ...[
+          PopupMenuItem(
+            value: 'follow',
+            enabled: !_busy,
+            child: Row(
+              children: [
+                Icon(
+                  _isFollowing == true
+                      ? Icons.person_remove_outlined
+                      : Icons.person_add_outlined,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Text(followLabel),
+              ],
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'message',
+            child: Row(
+              children: [
+                Icon(Icons.chat_bubble_outline_rounded, size: 20),
+                SizedBox(width: 10),
+                Text('Mesaj Gönder'),
+              ],
+            ),
+          ),
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: 'report',
+            child: Row(
+              children: [
+                Icon(Icons.flag_outlined, size: 20, color: Colors.red),
+                SizedBox(width: 10),
+                Text('Bu yorumu raporla', style: TextStyle(color: Colors.red)),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _CommentTile extends StatelessWidget {
   final String postId;
   final QueryDocumentSnapshot doc;
@@ -589,12 +804,15 @@ class _CommentTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundImage: photo != null ? NetworkImage(photo) : null,
-                child: photo == null
-                    ? const Icon(Icons.person, size: 20)
-                    : null,
+              GestureDetector(
+                onTap: () => _openCommentAuthorProfile(context, authorId),
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundImage: photo != null ? NetworkImage(photo) : null,
+                  child: photo == null
+                      ? const Icon(Icons.person, size: 20)
+                      : null,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -603,11 +821,19 @@ class _CommentTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                        Flexible(
+                          child: GestureDetector(
+                            onTap: () =>
+                                _openCommentAuthorProfile(context, authorId),
+                            child: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -662,6 +888,12 @@ class _CommentTile extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+              _CommentActionsButton(
+                postId: postId,
+                commentId: doc.id,
+                authorId: authorId,
+                authorName: name,
               ),
             ],
           ),
@@ -722,15 +954,15 @@ class _SubRepliesListState extends State<_SubRepliesList> {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const SizedBox.shrink();
         }
-        
+
         // --- İŞTE SENİN SORDUĞUN FİLTRELEME KISMI BURADA ---
         var subs = snapshot.data!.docs;
 
         if (widget.blockedUsers.isNotEmpty) {
           subs = subs.where((doc) {
-             final data = doc.data() as Map<String, dynamic>;
-             final authorId = data['authorId'] as String?;
-             return !widget.blockedUsers.contains(authorId);
+            final data = doc.data() as Map<String, dynamic>;
+            final authorId = data['authorId'] as String?;
+            return !widget.blockedUsers.contains(authorId);
           }).toList();
         }
 
@@ -771,8 +1003,8 @@ class _SubReplyTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final authorId = data['authorId'] ?? '';
-    final text = data['text'] ?? '';
+    final authorId = (data['authorId'] ?? '').toString();
+    final text = (data['text'] ?? '').toString();
     final likeCount = (data['likeCount'] ?? 0) as int;
     final movieData = data['movie'] as Map<String, dynamic>?;
 
@@ -795,23 +1027,31 @@ class _SubReplyTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 12,
-                backgroundImage: photo != null ? NetworkImage(photo) : null,
-                child: photo == null
-                    ? const Icon(Icons.person, size: 14)
-                    : null,
+              GestureDetector(
+                onTap: () => _openCommentAuthorProfile(context, authorId),
+                child: CircleAvatar(
+                  radius: 12,
+                  backgroundImage: photo != null ? NetworkImage(photo) : null,
+                  child: photo == null
+                      ? const Icon(Icons.person, size: 14)
+                      : null,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                    GestureDetector(
+                      onTap: () => _openCommentAuthorProfile(context, authorId),
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -832,6 +1072,13 @@ class _SubReplyTile extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+              _CommentActionsButton(
+                postId: postId,
+                commentId: parentId,
+                subReplyId: subDoc.id,
+                authorId: authorId,
+                authorName: name,
               ),
             ],
           ),

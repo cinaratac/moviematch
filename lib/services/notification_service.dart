@@ -1,31 +1,35 @@
-// ignore_for_file: unnecessary_this
-
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:io'; 
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:fluttergirdi/screens/chat_room_screen.dart';
+import 'package:fluttergirdi/screens/post_detail_screen.dart';
+import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class NotificationService {
   NotificationService._();
   static final NotificationService I = NotificationService._();
 
+  final navigatorKey = GlobalKey<NavigatorState>();
   final _fln = FlutterLocalNotificationsPlugin();
-  bool _inited = false;
+  final Map<String, DateTime> _recentPushes = {};
 
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _followersSub;
-  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>> _chatSubs = {};
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _likeLogsSub;
+  bool _inited = false;
+  Map<String, dynamic>? _pendingNavigation;
+  StreamSubscription<RemoteMessage>? _foregroundSub;
+  StreamSubscription<RemoteMessage>? _openedSub;
 
   static const _chChat = 'cinematch_chat';
   static const _chSocial = 'cinematch_social';
 
-  /// 1. Başlatma
   Future<void> init() async {
-    if (_inited) return;
+    if (_inited || kIsWeb) return;
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings(
@@ -36,27 +40,60 @@ class NotificationService {
 
     await _fln.initialize(
       const InitializationSettings(android: androidInit, iOS: iosInit),
+      onDidReceiveNotificationResponse: (response) {
+        _handlePayload(response.payload);
+      },
     );
 
     if (Platform.isAndroid) {
-      await _fln.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(const AndroidNotificationChannel(
-            _chChat, 'Sohbet', importance: Importance.high));
-      await _fln.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(const AndroidNotificationChannel(
-            _chSocial, 'Sosyal', importance: Importance.defaultImportance));
+      final androidPlugin = _fln
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
+
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _chChat,
+          'Sohbet',
+          description: 'Mesaj bildirimleri',
+          importance: Importance.high,
+        ),
+      );
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _chSocial,
+          'Sosyal',
+          description: 'Begeni, yorum ve takip bildirimleri',
+          importance: Importance.defaultImportance,
+        ),
+      );
+    }
+
+    _foregroundSub = FirebaseMessaging.onMessage.listen(_showForegroundPush);
+    _openedSub = FirebaseMessaging.onMessageOpenedApp.listen(_handleRemoteTap);
+
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _pendingNavigation = Map<String, dynamic>.from(initialMessage.data);
     }
 
     _inited = true;
   }
 
-  /// 2. İzinler (Hata veren kısım düzeltildi)
   Future<void> requestPermissions() async {
+    if (kIsWeb) return;
     if (Platform.isAndroid) {
       final status = await Permission.notification.request();
-      debugPrint("Android Bildirim İzni: $status");
-    } else if (Platform.isIOS) {
-      // Analyzer hatasını engellemek için 'dynamic' üzerinden iOS izinlerini tetikliyoruz
+      debugPrint('Android bildirim izni: $status');
+      return;
+    }
+
+    if (Platform.isIOS) {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
       final dynamic iosPlugin = _fln.resolvePlatformSpecificImplementation();
       await iosPlugin?.requestPermissions(
         alert: true,
@@ -66,126 +103,247 @@ class NotificationService {
     }
   }
 
-  /// 3. Akışları Başlat (Senin Orijinal Mantığın)
   Future<void> start() async {
     await init();
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    _listenNotifications(user.uid);
-    _bindChatsAndMessages(user.uid);
+  }
+
+  void flushPendingNavigation() {
+    final data = _pendingNavigation;
+    if (data == null) return;
+    _pendingNavigation = null;
+    unawaited(_delayedNavigate(data));
   }
 
   Future<void> dispose() async {
-    await _followersSub?.cancel();
-    await _likeLogsSub?.cancel();
-    for (final s in _chatSubs.values) { await s.cancel(); }
-    _chatSubs.clear();
+    await _foregroundSub?.cancel();
+    await _openedSub?.cancel();
+    _foregroundSub = null;
+    _openedSub = null;
+    _inited = false;
   }
 
-  /* --- Senin Sosyal Akış Dinleyicin --- */
-  Future<void> _listenNotifications(String myUid) async {
-    final prefs = await SharedPreferences.getInstance();
-    final lastKey = 'notif_last_social_$myUid';
-    final lastTs = prefs.getInt(lastKey) ?? 0;
-    final since = Timestamp.fromMillisecondsSinceEpoch(lastTs);
+  Future<void> _showForegroundPush(RemoteMessage message) async {
+    final data = message.data;
+    final type = data['type']?.toString() ?? 'social';
+    final dedupeKey = _dedupeKey(message);
 
-    final q = FirebaseFirestore.instance
-        .collection('users').doc(myUid).collection('notifications')
-        .where('createdAt', isGreaterThan: since)
-        .orderBy('createdAt', descending: true).limit(50);
+    if (!_shouldShow(dedupeKey)) return;
 
-    q.snapshots().listen((qs) async {
-      await prefs.setInt(lastKey, DateTime.now().millisecondsSinceEpoch);
+    final notification = message.notification;
+    final title = notification?.title ?? _fallbackTitle(data);
+    final body = notification?.body ?? _fallbackBody(data);
+    final payload = jsonEncode(
+      Map<String, String>.fromEntries(
+        data.entries.map(
+          (entry) => MapEntry(entry.key, entry.value.toString()),
+        ),
+      ),
+    );
 
-      for (final ch in qs.docChanges) {
-        if (ch.type != DocumentChangeType.added) continue;
-        final m = ch.doc.data();
-        if (m == null || m['actorId'] == myUid) continue;
+    final details = type == 'chat' ? _chatDetails() : _socialDetails();
+    await _fln.show(
+      _stableId(dedupeKey),
+      title,
+      body,
+      details,
+      payload: payload,
+    );
+  }
 
-        final type = m['type']?.toString() ?? '';
-        final actorName = m['actorName']?.toString() ?? '';
-        final preview = m['preview']?.toString() ?? '';
+  void _handleRemoteTap(RemoteMessage message) {
+    _queueNavigation(message.data);
+  }
 
-        switch (type) {
-          case 'like':
-            await _showSocial(title: 'Yeni beğeni', body: actorName.isNotEmpty ? '$actorName gönderini beğendi' : 'Gönderin beğenildi');
-            break;
-          case 'comment':
-            await _showSocial(title: 'Yeni yorum', body: preview.isNotEmpty ? '$actorName: $preview' : 'Gönderine yorum yapıldı');
-            break;
-          case 'follow':
-            await _showSocial(title: 'Yeni takipçi', body: '$actorName seni takip etmeye başladı');
-            break;
-          case 'club_request':
-            await _showSocial(title: 'Kulüp İsteği', body: '$actorName kulübüne katılmak istiyor');
-            break;
-        }
+  void _handlePayload(String? payload) {
+    if (payload == null || payload.isEmpty) return;
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is Map) {
+        final data = decoded.map(
+          (key, value) => MapEntry(key.toString(), value?.toString() ?? ''),
+        );
+        _queueNavigation(data);
       }
-    });
+    } catch (e) {
+      debugPrint('Bildirim payload okunamadi: $e');
+    }
   }
 
-  /* --- Senin Chat Dinleyicilerin --- */
-  Future<void> _bindChatsAndMessages(String myUid) async {
-    // KESİN ÇÖZÜM: Tüm chat'leri değil, sadece son 10 güncel chat'i dinle.
-    final recentChats = await FirebaseFirestore.instance
-        .collection('chats')
-        .where('participants', arrayContains: myUid)
-        .orderBy('updatedAt', descending: true)
-        .limit(10) // Sınır getirildi
-        .get();
+  void _queueNavigation(Map<String, dynamic> data) {
+    _pendingNavigation = Map<String, dynamic>.from(data);
+    unawaited(_delayedNavigate(data));
+  }
 
-    for (final c in recentChats.docs) {
-      _listenMessagesForChat(myUid, c.id);
+  Future<void> _delayedNavigate(Map<String, dynamic> data) async {
+    for (var i = 0; i < 24; i++) {
+      final nav = navigatorKey.currentState;
+      if (nav != null) {
+        _pendingNavigation = null;
+        _navigate(nav, data);
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
+  void _navigate(NavigatorState nav, Map<String, dynamic> data) {
+    final type = data['type']?.toString() ?? data['route']?.toString() ?? '';
+
+    if (type == 'chat') {
+      final chatId = data['chatId']?.toString() ?? '';
+      final otherUid =
+          data['otherUid']?.toString() ?? data['actorId']?.toString() ?? '';
+      final isGroup = data['isGroup']?.toString() == 'true';
+      final groupName = data['groupName']?.toString();
+      if (chatId.isEmpty) return;
+      nav.push(
+        MaterialPageRoute(
+          builder: (_) => ChatRoomScreen(
+            chatId: chatId,
+            otherUid: isGroup ? '' : otherUid,
+            otherTitle: isGroup ? groupName : null,
+            isGroup: isGroup,
+            groupName: isGroup ? groupName : null,
+          ),
+        ),
+      );
+      return;
     }
 
-    // Yeni eklenen sohbetleri dinlemeye devam et
-    FirebaseFirestore.instance
-        .collection('chats')
-        .where('participants', arrayContains: myUid)
-        .snapshots()
-        .listen((qs) {
-      for (final ch in qs.docChanges) {
-        if (ch.type == DocumentChangeType.added) {
-          _listenMessagesForChat(myUid, ch.doc.id);
-        }
-      }
-    });
+    if (type == 'like' || type == 'comment') {
+      final postId = data['postId']?.toString() ?? '';
+      if (postId.isEmpty) return;
+      nav.push(
+        MaterialPageRoute(builder: (_) => PostDetailScreen(postId: postId)),
+      );
+      return;
+    }
+
+    if (type == 'follow') {
+      final actorId = data['actorId']?.toString() ?? '';
+      if (actorId.isEmpty) return;
+      nav.push(
+        MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: actorId)),
+      );
+      return;
+    }
+
+    if (type == 'club_request') {
+      final clubId = data['clubId']?.toString() ?? '';
+      if (clubId.isEmpty) return;
+      final clubName = data['clubName']?.toString();
+      nav.push(
+        MaterialPageRoute(
+          builder: (_) => ChatRoomScreen(
+            chatId: clubId,
+            otherUid: '',
+            otherTitle: clubName,
+            isGroup: true,
+            groupName: clubName,
+          ),
+        ),
+      );
+    }
   }
 
-  Future<void> _listenMessagesForChat(String myUid, String chatId) async {
-    await _chatSubs[chatId]?.cancel();
-    final prefs = await SharedPreferences.getInstance();
-    final lastKey = 'notif_last_msg_${myUid}_$chatId';
-    final lastTs = prefs.getInt(lastKey) ?? 0;
-
-    _chatSubs[chatId] = FirebaseFirestore.instance
-        .collection('chats').doc(chatId).collection('messages')
-        .where('createdAt', isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(lastTs))
-        .orderBy('createdAt', descending: true).limit(20)
-        .snapshots().listen((qs) async {
-      
-      await prefs.setInt(lastKey, DateTime.now().millisecondsSinceEpoch);
-      for (final d in qs.docChanges) {
-        if (d.type != DocumentChangeType.added) continue;
-        final m = d.doc.data();
-        if (m == null || m['authorId'] == myUid) continue;
-        await _showChat(title: 'Yeni mesaj', body: m['text']?.toString() ?? 'Yeni mesaj');
-      }
-    });
+  NotificationDetails _chatDetails() {
+    const android = AndroidNotificationDetails(
+      _chChat,
+      'Sohbet',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const ios = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    return const NotificationDetails(android: android, iOS: ios);
   }
 
-  /* --- Senin Bildirim Göstericilerin --- */
-  Future<void> _showChat({required String title, required String body}) async {
-    const android = AndroidNotificationDetails(_chChat, 'Sohbet', importance: Importance.high, priority: Priority.high);
-    const ios = DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true);
-    await _fln.show(DateTime.now().hashCode % 1000000, title, body, const NotificationDetails(android: android, iOS: ios), payload: 'chat');
+  NotificationDetails _socialDetails() {
+    const android = AndroidNotificationDetails(
+      _chSocial,
+      'Sosyal',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+    );
+    const ios = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+    return const NotificationDetails(android: android, iOS: ios);
   }
 
-  Future<void> _showSocial({required String title, required String body}) async {
-    const android = AndroidNotificationDetails(_chSocial, 'Sosyal', importance: Importance.defaultImportance);
-    const ios = DarwinNotificationDetails(presentAlert: true, presentBadge: true, presentSound: true);
-    await _fln.show(DateTime.now().hashCode % 1000000, title, body, const NotificationDetails(android: android, iOS: ios), payload: 'social');
+  bool _shouldShow(String key) {
+    final now = DateTime.now();
+    _recentPushes.removeWhere(
+      (_, shownAt) => now.difference(shownAt) > const Duration(seconds: 20),
+    );
+    if (_recentPushes.containsKey(key)) return false;
+    _recentPushes[key] = now;
+    return true;
   }
+
+  String _dedupeKey(RemoteMessage message) {
+    final data = message.data;
+    return message.messageId ??
+        data['messageId']?.toString() ??
+        data['notificationId']?.toString() ??
+        '${data['type']}_${data['chatId']}_${data['postId']}_${data['actorId']}';
+  }
+
+  int _stableId(String value) {
+    var hash = 0;
+    for (final codeUnit in value.codeUnits) {
+      hash = (hash * 31 + codeUnit) & 0x7fffffff;
+    }
+    return hash % 1000000;
+  }
+
+  String _fallbackTitle(Map<String, dynamic> data) {
+    switch (data['type']?.toString()) {
+      case 'chat':
+        return data['actorName']?.toString() ?? 'Yeni mesaj';
+      case 'like':
+        return 'Yeni begeni';
+      case 'comment':
+        return 'Yeni yorum';
+      case 'follow':
+        return 'Yeni takipci';
+      case 'club_request':
+        return 'Kulup istegi';
+      default:
+        return 'CineMatch';
+    }
+  }
+
+  String _fallbackBody(Map<String, dynamic> data) {
+    final actorName = data['actorName']?.toString() ?? '';
+    final preview = data['preview']?.toString() ?? '';
+    switch (data['type']?.toString()) {
+      case 'chat':
+        return preview.isNotEmpty ? preview : 'Yeni mesaj';
+      case 'like':
+        return actorName.isNotEmpty
+            ? '$actorName gonderini begendi'
+            : 'Gonderin begenildi';
+      case 'comment':
+        return preview.isNotEmpty ? '$actorName: $preview' : 'Yeni yorum';
+      case 'follow':
+        return actorName.isNotEmpty
+            ? '$actorName seni takip etmeye basladi'
+            : 'Yeni takipcin var';
+      case 'club_request':
+        return actorName.isNotEmpty
+            ? '$actorName kulubune katilmak istiyor'
+            : 'Yeni kulup istegi';
+      default:
+        return 'Yeni bildirimin var';
+    }
+  }
+
   Future<void> markAllAsRead(String userId) async {
     try {
       final query = await FirebaseFirestore.instance
@@ -195,41 +353,41 @@ class NotificationService {
           .where('read', isEqualTo: false)
           .get();
 
-      if (query.docs.isEmpty) return; // Zaten hepsi okunmuşsa sunucuyu yorma
+      if (query.docs.isEmpty) return;
 
       final batch = FirebaseFirestore.instance.batch();
-      for (var doc in query.docs) {
+      for (final doc in query.docs) {
         batch.update(doc.reference, {'read': true});
       }
       await batch.commit();
     } catch (e) {
-      debugPrint("Toplu okundu işaretleme hatası: $e");
+      debugPrint('Toplu okundu isaretleme hatasi: $e');
     }
   }
-  /// 3 aydan (90 gün) eski bildirimleri veritabanından tamamen siler
+
   Future<void> deleteOldNotifications(String userId) async {
     try {
-      // 90 gün öncesinin Timestamp değerini al
-      final threeMonthsAgo = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 90)));
+      final threeMonthsAgo = Timestamp.fromDate(
+        DateTime.now().subtract(const Duration(days: 90)),
+      );
 
       final query = await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .collection('notifications')
-          .where('createdAt', isLessThan: threeMonthsAgo) // 3 aydan DAHA ESKİ olanlar
+          .where('createdAt', isLessThan: threeMonthsAgo)
           .get();
 
-      if (query.docs.isEmpty) return; // Silinecek eski bildirim yoksa işlemi bitir
+      if (query.docs.isEmpty) return;
 
       final batch = FirebaseFirestore.instance.batch();
-      for (var doc in query.docs) {
-        batch.delete(doc.reference); // Toplu silme kuyruğuna ekle
+      for (final doc in query.docs) {
+        batch.delete(doc.reference);
       }
-      await batch.commit(); // Hepsini tek seferde sil
-      
-      debugPrint("${query.docs.length} adet eski bildirim sistemden silindi.");
+      await batch.commit();
+      debugPrint('${query.docs.length} eski bildirim silindi.');
     } catch (e) {
-      debugPrint("Eski bildirimleri silme hatası: $e");
+      debugPrint('Eski bildirimleri silme hatasi: $e');
     }
   }
 }

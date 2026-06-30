@@ -1,4 +1,6 @@
 import 'dart:io'; // Platform kontrolü için eklendi
+// ignore_for_file: deprecated_member_use
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:fluttergirdi/services/VersionCheckService.dart';
 import 'package:fluttergirdi/services/push_token_service.dart';
@@ -7,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:fluttergirdi/services/watched_movies_service.dart';
 import 'package:fluttergirdi/theme.dart';
-import 'package:fluttergirdi/shell.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
 // import 'package:fluttergirdi/services/push_token_service.dart'; // Eğer dosya adı buysa aktif et
@@ -44,31 +45,29 @@ Future<void> main() async {
   if (!kIsWeb && Platform.isIOS) {
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
-          alert: true,
-          badge: true,
-          sound: true,
+          alert: false,
+          badge: false,
+          sound: false,
         );
   }
 
   // --- APP CHECK AKTİVASYONU (GEÇİCİ OLARAK KAPATILDI) ---
-  
+
   await FirebaseAppCheck.instance.activate(
     // Release modunda Play Integrity, test modunda Debug kullanılır
     androidProvider: kReleaseMode
         ? AndroidProvider.playIntegrity
         : AndroidProvider.debug,
-    appleProvider: kReleaseMode 
-        ? AppleProvider.appAttest 
-        : AppleProvider.debug,
+    appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
   );
-    if (!kReleaseMode) {
+  if (!kReleaseMode) {
     try {
       await FirebaseAppCheck.instance.getToken(true);
     } catch (e) {
       debugPrint("App Check Debug Token alınamadı: $e");
     }
-    }
- 
+  }
+
   // Firestore Ayarları
   FirebaseFirestore.instance.settings = const Settings(
     persistenceEnabled: true,
@@ -121,6 +120,7 @@ class _MyAppState extends State<MyApp> {
       valueListenable: ThemeBridge.themeMode,
       builder: (context, mode, _) {
         return MaterialApp(
+          navigatorKey: NotificationService.I.navigatorKey,
           debugShowCheckedModeBanner: false,
           title: 'Cinematch',
           theme: AppTheme.lightTheme,
@@ -146,7 +146,7 @@ class _MyAppState extends State<MyApp> {
                 // Kullanıcı çıkış yaptıysa veya oturum yoksa bayrağı sıfırla
                 _servicesStarted = false;
                 // Önbelleği temizle (Başka hesaba girilirse eski veriler görünmesin)
-                GlobalDataService.instance.stopPreloading(); 
+                GlobalDataService.instance.stopPreloading();
                 return const LoginPage();
               }
             },

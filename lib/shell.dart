@@ -13,6 +13,7 @@ import 'package:fluttergirdi/screens/news_list_page.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/services/tab_service.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -46,6 +47,7 @@ class _HomeShellState extends State<HomeShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       AnnouncementService.instance.checkAndShowAnnouncement(context);
       GlobalDataService.instance.startPreloading();
+      NotificationService.I.flushPendingNavigation();
       _startSmartLoading();
     });
 
@@ -78,10 +80,10 @@ class _HomeShellState extends State<HomeShell> {
 
   // --- İŞTE SİHİRLİ KISIM (AKILLI YÜKLEME) ---
   void _startSmartLoading() {
-    // Feed (0) zaten yüklü. Diğer sekmeleri aralarına yarım saniye 
-    // koyarak arka planda yüklüyoruz. Hepsini aynı anda yüklemek 
+    // Feed (0) zaten yüklü. Diğer sekmeleri aralarına yarım saniye
+    // koyarak arka planda yüklüyoruz. Hepsini aynı anda yüklemek
     // uygulamanın ilk açılışta kasmasına sebep olur.
-    
+
     _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
       if (mounted && !_loadedPages[3]) {
         setState(() => _loadedPages[3] = true); // 1. Öncelik: Profil Sayfası
@@ -100,6 +102,7 @@ class _HomeShellState extends State<HomeShell> {
       });
     });
   }
+
   @override
   void dispose() {
     _smartLoadingTimer?.cancel();
@@ -147,9 +150,9 @@ class _HomeShellState extends State<HomeShell> {
     if (path.contains('/news')) {
       if (mounted) {
         debugPrint("Haber listesi linki yakalandı!");
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const NewsListPage()),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const NewsListPage()));
       }
       return;
     }

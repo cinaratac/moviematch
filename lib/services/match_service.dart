@@ -334,120 +334,13 @@ class MatchService {
 
     final seenMatches = await _loadSeenMatches(myUid);
 
-    List<MatchResult> out = [];
+    final out = await _fetchMatchesFromSources(
+      myUid: myUid,
+      myData: myData,
+      hiddenUids: hiddenUids,
+      seenMatches: seenMatches,
+    );
 
-    // --- OPTİMİZASYON: PARALEL İŞLEM BAŞLANGICI ---
-    // Cloud Function ve Firestore sorgularını aynı anda başlatıyoruz.
-    // Böylece biri diğerini bekleyip (30 saniye vs.) sistemi kilitlemeyecek.
-
-    // 1. İŞLEM: Cloud Function'ı arka planda başlat
-    Future<List<MatchResult>> fetchFromCloudFunction() async {
-      List<MatchResult> cloudResults = [];
-      try {
-        final callable = FirebaseFunctions.instance.httpsCallable(
-          'findMatchesCallable',
-        );
-        final resp = await callable.call();
-        final rawList = resp.data['results'] as List<dynamic>;
-
-        for (final item in rawList) {
-          final map = Map<String, dynamic>.from(item as Map);
-          final uid = map['uid'] as String;
-
-          if (hiddenUids.contains(uid)) continue;
-
-          final result = _computeMatch(
-            myUid,
-            uid,
-            myData,
-            map,
-            seenMatches[uid],
-          );
-          cloudResults.add(result);
-        }
-      } catch (e) {
-        // Sessizce yut, normal akış devam etsin.
-      }
-      return cloudResults;
-    }
-
-    // 2. İŞLEM: Firestore'dan normal kullanıcıları çekme
-    Future<List<MatchResult>> fetchFromFirestore() async {
-      List<MatchResult> firestoreResults = [];
-      DocumentSnapshot? lastDoc;
-      bool keepFetching = true;
-      int fetchCycles = 0;
-      const int maxCycles = 10; // Daha hızlı dönmesi için limiti 10'a çektim
-
-      while (keepFetching &&
-          firestoreResults.length < candidateLimit &&
-          fetchCycles < maxCycles) {
-        fetchCycles++;
-        Query query = _users.orderBy(FieldPath.documentId).limit(50);
-
-        if (lastDoc != null) {
-          query = query.startAfterDocument(lastDoc);
-        }
-
-        final snapshot = await query.get();
-        if (snapshot.docs.isEmpty) {
-          keepFetching = false;
-          break;
-        }
-        lastDoc = snapshot.docs.last;
-
-        for (final d in snapshot.docs) {
-          final uid = d.id;
-          final data = d.data() as Map<String, dynamic>;
-
-          final username = data['username'] as String?;
-          if (username == null || username.trim().isEmpty) continue;
-          if (hiddenUids.contains(uid)) continue;
-
-          final result = _computeMatch(
-            myUid,
-            uid,
-            myData,
-            data,
-            seenMatches[uid],
-          );
-          firestoreResults.add(result);
-        }
-      }
-      return firestoreResults;
-    }
-
-    // İki işlemi aynı anda (paralel) çalıştır ve hangisi önce biterse bitmesini bekle
-    // Not: Cloud Function uzun sürse bile (Cold Start), Firestore hızlıca biteceği için
-    // uygulama Firestore verileriyle anında devam edebilir (Eğer timeout eklersek).
-    // Ancak burada iki işlemin de sonucunu sağlıklı birleştirmek için Future.wait kullanıyoruz.
-    final results = await Future.wait([
-      fetchFromCloudFunction(),
-      fetchFromFirestore(),
-    ]);
-
-    // Sonuçları birleştir (Cloud Function'dan gelenler ve Firestore'dan gelenler)
-    final cloudMatches = results[0];
-    final dbMatches = results[1];
-
-    // Tekilleştirme: Aynı kullanıcı her iki listede de varsa sadece birini al
-    final Set<String> processedUids = {};
-
-    for (var match in cloudMatches) {
-      if (!processedUids.contains(match.uid)) {
-        out.add(match);
-        processedUids.add(match.uid);
-      }
-    }
-
-    for (var match in dbMatches) {
-      if (!processedUids.contains(match.uid)) {
-        out.add(match);
-        processedUids.add(match.uid);
-      }
-    }
-
-    // --- AŞAMA 3: LİSTEYİ PUANA GÖRE SIRALA VE CACHE'E YAZ ---
     out.sort((a, b) {
       final s = b.sortScore.compareTo(a.sortScore);
       if (s != 0) return s;
@@ -455,7 +348,7 @@ class MatchService {
     });
 
     _findCache[myUid] = _FindCache(out, DateTime.now());
-    return out;
+    return out.take(candidateLimit).toList();
   }
 
   // YENİ: AŞAMALI YÜKLEME AKIŞI (STREAM)
@@ -498,104 +391,199 @@ class MatchService {
 
     final seenMatches = await _loadSeenMatches(myUid);
 
-    List<MatchResult> out = [];
-    final Set<String> processedUids = {};
-
-    // Ekranda kaymayı engellemek için yeni gelenleri kendi içinde sıralayıp SONA ekliyoruz
-    void appendResults(List<MatchResult> newItems) {
-      for (var item in newItems) {
-        if (!processedUids.contains(item.uid)) {
-          out.add(item);
-          processedUids.add(item.uid);
-          hiddenUids.add(item.uid);
-        }
-      }
-      out.sort((a, b) {
-        final s = b.sortScore.compareTo(a.sortScore);
-        if (s != 0) return s;
-        return b.commonFiveCount.compareTo(a.commonFiveCount);
-      });
-    }
-
-    // 1. CLOUD FUNCTION'I BEKLEMEDEN ARKA PLANDA BAŞLAT
-    final cloudFuture = FirebaseFunctions.instance
-        .httpsCallable('findMatchesCallable')
-        .call()
-        .then((resp) {
-          final rawList = resp.data['results'] as List<dynamic>;
-          List<MatchResult> cloudRes = [];
-          for (final item in rawList) {
-            final map = Map<String, dynamic>.from(item as Map);
-            final uid = map['uid'] as String;
-            if (hiddenUids.contains(uid)) continue;
-            cloudRes.add(
-              _computeMatch(myUid, uid, myData, map, seenMatches[uid]),
-            );
-          }
-          return cloudRes;
-        })
-        .catchError((_) => <MatchResult>[]);
-
-    // 2. VERİTABANINDAN 10'ARLI GRUPLAR HALİNDE KARTLARI ÇEK VE ANINDA GÖSTER
-    DocumentSnapshot? lastDoc;
-    bool keepFetching = true;
-    int fetchCycles = 0;
-    const int pageSize = 20;
-    const int initialFetchCycles = 2;
-    bool yieldedInitialBatch = false;
-    const int maxCycles = 8; // Maksimum 160 kişi
-
-    while (keepFetching &&
-        out.length < candidateLimit &&
-        fetchCycles < maxCycles) {
-      fetchCycles++;
-      // İLK 10 KİŞİ ÇEKİLDİĞİ AN EKRANA GİDER!
-      Query query = _users.orderBy(FieldPath.documentId).limit(pageSize);
-
-      if (lastDoc != null) {
-        query = query.startAfterDocument(lastDoc);
-      }
-
-      final snapshot = await query.get();
-      if (snapshot.docs.isEmpty) {
-        keepFetching = false;
-        break;
-      }
-      lastDoc = snapshot.docs.last;
-
-      List<MatchResult> chunkResults = [];
-      for (final d in snapshot.docs) {
-        final uid = d.id;
-        final data = d.data() as Map<String, dynamic>;
-
-        final username = data['username'] as String?;
-        if (username == null || username.trim().isEmpty) continue;
-        if (hiddenUids.contains(uid)) continue;
-
-        chunkResults.add(
-          _computeMatch(myUid, uid, myData, data, seenMatches[uid]),
-        );
-      }
-
-      appendResults(chunkResults);
-
-      // İlk 10 veri geldiği an (ve her yeni pakette) arayüzü güncelle
-      final initialBatchReady =
-          fetchCycles >= initialFetchCycles || !keepFetching;
-      if (out.isNotEmpty && (yieldedInitialBatch || initialBatchReady)) {
-        yieldedInitialBatch = true;
-        yield List.from(out);
-      }
-    }
-
-    // 3. EN SON CLOUD FUNCTION BİTİNCE ONLARI DA DESTENİN ALTINA GİZLİCE EKLE
-    final cloudMatches = await cloudFuture;
-    if (cloudMatches.isNotEmpty) {
-      appendResults(cloudMatches);
-      yield List.from(out);
-    }
-
+    final out = await _fetchMatchesFromSources(
+      myUid: myUid,
+      myData: myData,
+      hiddenUids: hiddenUids,
+      seenMatches: seenMatches,
+    );
+    out.sort((a, b) {
+      final s = b.sortScore.compareTo(a.sortScore);
+      if (s != 0) return s;
+      return b.commonFiveCount.compareTo(a.commonFiveCount);
+    });
     _findCache[myUid] = _FindCache(out, DateTime.now());
+    yield out.take(candidateLimit).toList();
+  }
+
+  Future<List<MatchResult>> _fetchMatchesFromCloudFunction({
+    required String myUid,
+    required Map<String, dynamic> myData,
+    required Set<String> hiddenUids,
+    required Map<String, _SeenMatch> seenMatches,
+  }) async {
+    try {
+      final callable = FirebaseFunctions.instance.httpsCallable(
+        'findMatchesCallable',
+      );
+      final resp = await callable.call();
+      final rawList = resp.data['results'] as List<dynamic>? ?? [];
+      final out = <MatchResult>[];
+      final processedUids = <String>{};
+
+      for (final item in rawList) {
+        final map = Map<String, dynamic>.from(item as Map);
+        final uid = (map['uid'] ?? '').toString();
+        if (uid.isEmpty) continue;
+        if (hiddenUids.contains(uid) || processedUids.contains(uid)) continue;
+
+        out.add(_computeMatch(myUid, uid, myData, map, seenMatches[uid]));
+        processedUids.add(uid);
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<MatchResult>> _fetchMatchesFromSources({
+    required String myUid,
+    required Map<String, dynamic> myData,
+    required Set<String> hiddenUids,
+    required Map<String, _SeenMatch> seenMatches,
+  }) async {
+    final out = <MatchResult>[];
+    final processedUids = <String>{};
+
+    void addResults(List<MatchResult> items) {
+      for (final item in items) {
+        if (hiddenUids.contains(item.uid) || processedUids.contains(item.uid)) {
+          continue;
+        }
+        out.add(item);
+        processedUids.add(item.uid);
+      }
+    }
+
+    final targeted = await _fetchTargetedFirestoreMatches(
+      myUid: myUid,
+      myData: myData,
+      hiddenUids: hiddenUids,
+      seenMatches: seenMatches,
+    );
+    addResults(targeted);
+
+    final cloud = await _fetchMatchesFromCloudFunction(
+      myUid: myUid,
+      myData: myData,
+      hiddenUids: hiddenUids,
+      seenMatches: seenMatches,
+    );
+    addResults(cloud);
+
+    if (out.length < 8) {
+      final discovery = await _fetchDiscoveryMatches(
+        myUid: myUid,
+        myData: myData,
+        hiddenUids: hiddenUids,
+        seenMatches: seenMatches,
+      );
+      addResults(discovery);
+    }
+
+    return out;
+  }
+
+  Future<List<MatchResult>> _fetchTargetedFirestoreMatches({
+    required String myUid,
+    required Map<String, dynamic> myData,
+    required Set<String> hiddenUids,
+    required Map<String, _SeenMatch> seenMatches,
+  }) async {
+    final out = <MatchResult>[];
+    final processedUids = <String>{};
+
+    Future<void> runArrayQuery(String field, Iterable<String> rawKeys) async {
+      final keys = _sampleQueryKeys(rawKeys, 10);
+      if (keys.isEmpty) return;
+
+      try {
+        final snapshot = await _users
+            .where(field, arrayContainsAny: keys)
+            .limit(45)
+            .get();
+
+        for (final doc in snapshot.docs) {
+          final uid = doc.id;
+          if (hiddenUids.contains(uid) || processedUids.contains(uid)) {
+            continue;
+          }
+          final data = doc.data();
+          final username = (data['username'] ?? '').toString().trim();
+          if (username.isEmpty) continue;
+
+          out.add(_computeMatch(myUid, uid, myData, data, seenMatches[uid]));
+          processedUids.add(uid);
+        }
+      } catch (_) {}
+    }
+
+    final myFive = _extractSet(myData, [
+      'fiveStarKeys',
+      'fiveIds',
+      'fiveStars',
+    ]);
+    final myFavs = _extractSet(myData, [
+      'favoritesKeys',
+      'favIds',
+      'favoriteFilmIds',
+    ]);
+    final myWatch = _extractSet(myData, [
+      'watchlistKeys',
+      'watchIds',
+      'watchlistIds',
+    ]);
+    final myGenres = _lcSet(myData, 'favGenres');
+    final myDirectors = _lcSet(myData, 'favDirectors');
+    final myActors = _lcSet(myData, 'favActors');
+
+    await Future.wait([
+      runArrayQuery('fiveStarKeys', {...myFive, ...myFavs}),
+      runArrayQuery('favoritesKeys', {...myFavs, ...myFive}),
+      runArrayQuery('watchlistKeys', myWatch),
+      runArrayQuery('favGenres', myGenres),
+      runArrayQuery('favDirectors', myDirectors),
+      runArrayQuery('favActors', myActors),
+    ]);
+
+    return out;
+  }
+
+  Future<List<MatchResult>> _fetchDiscoveryMatches({
+    required String myUid,
+    required Map<String, dynamic> myData,
+    required Set<String> hiddenUids,
+    required Map<String, _SeenMatch> seenMatches,
+  }) async {
+    try {
+      final snapshot = await _users
+          .orderBy('totalMovies', descending: true)
+          .limit(35)
+          .get();
+      final out = <MatchResult>[];
+      for (final doc in snapshot.docs) {
+        final uid = doc.id;
+        if (hiddenUids.contains(uid)) continue;
+        final data = doc.data();
+        final username = (data['username'] ?? '').toString().trim();
+        if (username.isEmpty) continue;
+        out.add(_computeMatch(myUid, uid, myData, data, seenMatches[uid]));
+      }
+      return out;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  List<String> _sampleQueryKeys(Iterable<String> values, int max) {
+    final list = values
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    if (list.length <= max) return list;
+    list.shuffle(math.Random(DateTime.now().millisecondsSinceEpoch));
+    return list.take(max).toList();
   }
 
   // PUBLIC PROFILE EKRANININ HATA VERDİĞİ YER (GERİ EKLENDİ)

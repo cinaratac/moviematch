@@ -51,8 +51,73 @@ async function assertNewsEditor(uid) {
   throw new HttpsError("permission-denied", "Bu panel için yetkiniz yok.");
 }
 
+async function assertTriviaEditor(uid) {
+  if (!uid) throw new HttpsError("unauthenticated", "Giris yapmaniz gerekiyor.");
+  if (NEWS_ADMIN_UIDS.has(uid)) return true;
+
+  const db = admin.firestore();
+  const editorDoc = await db.collection("trivia_editors").doc(uid).get();
+  if (editorDoc.exists && editorDoc.data().active !== false) return true;
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  const role = userDoc.exists ? userDoc.data().role : null;
+  if (["admin", "editor", "triviaEditor", "newsEditor"].includes(role)) return true;
+
+  throw new HttpsError("permission-denied", "Bu panel icin yetkiniz yok.");
+}
+
+function normalizeTriviaQuestion(data) {
+  const question = cleanText(data.question, 500);
+  if (!question) throw new HttpsError("invalid-argument", "Soru metni gerekli.");
+
+  const options = Array.isArray(data.options)
+    ? data.options.map((item) => cleanText(item, 180)).filter(Boolean).slice(0, 4)
+    : [];
+  if (options.length !== 4) {
+    throw new HttpsError("invalid-argument", "Tam 4 sik gerekli.");
+  }
+
+  const correctIndex = Number(data.correctIndex);
+  if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) {
+    throw new HttpsError("invalid-argument", "Dogru sik 0-3 arasinda olmali.");
+  }
+
+  const weekId = cleanText(data.weekId, 16);
+  if (!/^\d{4}_W\d{1,2}$/.test(weekId)) {
+    throw new HttpsError("invalid-argument", "Hafta ID formati gecersiz. Ornek: 2026_W27");
+  }
+
+  const difficulty = ["kolay", "orta", "zor"].includes(data.difficulty)
+    ? data.difficulty
+    : "orta";
+
+  return {
+    question,
+    options,
+    correctIndex,
+    weekId,
+    difficulty,
+    imageUrl: cleanText(data.imageUrl, 1200) || null,
+    explanation: cleanText(data.explanation, 800),
+    isActive: data.isActive !== false,
+  };
+}
+
+async function countTriviaQuestionsForWeek(db, weekId, excludeId) {
+  const snap = await db
+    .collection("trivia_questions")
+    .where("weekId", "==", weekId)
+    .get();
+  return snap.docs.filter((doc) => doc.id !== excludeId).length;
+}
+
 exports.isNewsAdmin = onCall(async (request) => {
   await assertNewsEditor(request.auth && request.auth.uid);
+  return { ok: true };
+});
+
+exports.isTriviaAdmin = onCall(async (request) => {
+  await assertTriviaEditor(request.auth && request.auth.uid);
   return { ok: true };
 });
 
@@ -141,6 +206,94 @@ exports.deleteNewsArticle = onCall(async (request) => {
   return { ok: true };
 });
 
+exports.saveTriviaQuestion = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertTriviaEditor(uid);
+
+  const db = admin.firestore();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const data = normalizeTriviaQuestion(request.data || {});
+  const questionId = cleanText(request.data && request.data.id, 120) ||
+    db.collection("trivia_questions").doc().id;
+
+  const count = await countTriviaQuestionsForWeek(db, data.weekId, questionId);
+  if (count >= 10) {
+    throw new HttpsError("failed-precondition", `${data.weekId} haftasi icin 10 soru siniri dolu.`);
+  }
+
+  const ref = db.collection("trivia_questions").doc(questionId);
+  const snap = await ref.get();
+  const payload = {
+    ...data,
+    updatedAt: now,
+    updatedBy: uid,
+  };
+  if (!snap.exists) {
+    payload.createdAt = now;
+    payload.createdBy = uid;
+  }
+
+  await ref.set(payload, { merge: true });
+  return { ok: true, id: questionId };
+});
+
+exports.deleteTriviaQuestion = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertTriviaEditor(uid);
+
+  const id = cleanText(request.data && request.data.id, 120);
+  if (!id) throw new HttpsError("invalid-argument", "Soru ID gerekli.");
+
+  await admin.firestore().collection("trivia_questions").doc(id).delete();
+  return { ok: true };
+});
+
+exports.bulkSaveTriviaQuestions = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertTriviaEditor(uid);
+
+  const db = admin.firestore();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const items = Array.isArray(request.data && request.data.questions)
+    ? request.data.questions
+    : [];
+  if (!items.length) {
+    throw new HttpsError("invalid-argument", "Yuklenecek soru bulunamadi.");
+  }
+  if (items.length > 10) {
+    throw new HttpsError("invalid-argument", "Tek seferde en fazla 10 soru yuklenebilir.");
+  }
+
+  const normalized = items.map((item) => normalizeTriviaQuestion(item));
+  const weekIds = [...new Set(normalized.map((item) => item.weekId))];
+  if (weekIds.length !== 1) {
+    throw new HttpsError("invalid-argument", "Toplu yuklemede tum sorular ayni weekId icin olmali.");
+  }
+
+  const weekId = weekIds[0];
+  const count = await countTriviaQuestionsForWeek(db, weekId);
+  if (count + normalized.length > 10) {
+    throw new HttpsError("failed-precondition", `${weekId} haftasi 10 soru sinirini asiyor.`);
+  }
+
+  const batch = db.batch();
+  const ids = [];
+  normalized.forEach((item) => {
+    const ref = db.collection("trivia_questions").doc();
+    ids.push(ref.id);
+    batch.set(ref, {
+      ...item,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: uid,
+      updatedBy: uid,
+    });
+  });
+
+  await batch.commit();
+  return { ok: true, ids };
+});
+
 // ==================================================================
 // 1. GENEL TMDB PROXY (V2)
 // ==================================================================
@@ -186,6 +339,139 @@ exports.searchMovies = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request
 // ==================================================================
 // 3. SOSYAL BİLDİRİMLER (V1 Trigger)
 // ==================================================================
+function pushString(value, fallback = "") {
+  if (value === undefined || value === null) return fallback;
+  return String(value).slice(0, 900);
+}
+
+function pushTime(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (value._seconds) return value._seconds * 1000;
+  return 0;
+}
+
+function isInvalidFcmToken(error) {
+  const code = error && error.code;
+  return [
+    "messaging/invalid-registration-token",
+    "messaging/registration-token-not-registered",
+    "messaging/invalid-argument",
+  ].includes(code);
+}
+
+async function sendPushToUser(uid, message) {
+  if (!uid) return null;
+
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const userDoc = await userRef.get();
+  const userData = userDoc.data() || {};
+  if (userData.notificationsEnabled === false) return null;
+
+  const tokensSnap = await userRef.collection("fcmTokens").get();
+  if (tokensSnap.empty) return null;
+
+  const tokens = tokensSnap.docs.map((doc) => doc.id).filter(Boolean);
+  if (!tokens.length) return null;
+
+  const data = {};
+  Object.entries(message.data || {}).forEach(([key, value]) => {
+    data[key] = pushString(value);
+  });
+
+  const result = await admin.messaging().sendEachForMulticast({
+    tokens,
+    notification: message.notification,
+    data,
+    android: {
+      priority: "high",
+      notification: {
+        channelId: data.type === "chat" ? "cinematch_chat" : "cinematch_social",
+        clickAction: "FLUTTER_NOTIFICATION_CLICK",
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: "default",
+          badge: 1,
+        },
+      },
+    },
+  });
+
+  const cleanup = [];
+  result.responses.forEach((response, index) => {
+    if (!response.success && isInvalidFcmToken(response.error)) {
+      cleanup.push(tokensSnap.docs[index].ref.delete().catch(() => null));
+    }
+  });
+  await Promise.all(cleanup);
+  return result;
+}
+
+function buildSocialPush(uid, notificationId, data) {
+  const type = pushString(data.type, "social");
+  const actorName = pushString(data.actorName, "Bir kullanici") || "Bir kullanici";
+  const preview = pushString(data.preview);
+  let title = "CineMatch";
+  let body = "Yeni bildirimin var.";
+
+  if (type === "like") {
+    title = "Yeni begeni";
+    body = `${actorName} gonderini begendi`;
+  } else if (type === "comment") {
+    title = "Yeni yorum";
+    body = preview ? `${actorName}: ${preview}` : `${actorName} gonderine yorum yapti`;
+  } else if (type === "follow") {
+    title = "Yeni takipci";
+    body = `${actorName} seni takip etmeye basladi`;
+  } else if (type === "club_request") {
+    title = "Kulup istegi";
+    body = `${actorName} kulubune katilmak istiyor`;
+  }
+
+  return {
+    notification: { title, body },
+    data: {
+      type,
+      route: type,
+      notificationId,
+      actorId: pushString(data.actorId),
+      actorName,
+      postId: pushString(data.postId),
+      clubId: pushString(data.clubId),
+      clubName: pushString(data.clubName),
+      preview,
+      recipientId: uid,
+      click_action: "FLUTTER_NOTIFICATION_CLICK",
+    },
+  };
+}
+
+exports.sendPushOnUserNotification = functions.firestore
+  .document("users/{uid}/notifications/{notificationId}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return null;
+
+    const uid = context.params.uid;
+    const notificationId = context.params.notificationId;
+    const before = change.before.exists ? (change.before.data() || {}) : {};
+    const after = change.after.data() || {};
+
+    if (after.actorId === uid) return null;
+    if (after.read === true || after.isRead === true) return null;
+
+    if (change.before.exists) {
+      const beforeTime = pushTime(before.updatedAt || before.createdAt);
+      const afterTime = pushTime(after.updatedAt || after.createdAt);
+      if (beforeTime === afterTime) return null;
+    }
+
+    return sendPushToUser(uid, buildSocialPush(uid, notificationId, after));
+  });
+
 exports.createNotificationOnLike = functions.firestore
   .document("posts/{postId}/likes/{userId}")
   .onCreate(async (snapshot, context) => {
@@ -315,6 +601,69 @@ exports.sendChatNotification = functions.firestore
 // ==================================================================
 // 5. DİĞER KRİTİK SİSTEM FONKSİYONLARI
 // ==================================================================
+exports.sendChatNotification = functions.firestore
+  .document("chats/{chatId}/messages/{messageId}")
+  .onCreate(async (snapshot, context) => {
+    const messageData = snapshot.data() || {};
+    const authorId = messageData.authorId;
+    const chatId = context.params.chatId;
+    const messageId = context.params.messageId;
+    if (!authorId) return null;
+
+    const chatDoc = await admin.firestore().collection("chats").doc(chatId).get();
+    if (!chatDoc.exists) return null;
+
+    const chatData = chatDoc.data() || {};
+    const participants = Array.isArray(chatData.participants) ? chatData.participants : [];
+    const recipients = participants.filter((uid) => uid && uid !== authorId);
+    if (!recipients.length) return null;
+
+    const authorSnap = await admin.firestore().collection("users").doc(authorId).get();
+    const authorData = authorSnap.data() || {};
+    const actorName =
+      authorData.displayName ||
+      authorData.username ||
+      authorData.name ||
+      "Bir kullanici";
+    const preview = pushString(messageData.text, "Bir mesaj gonderdi.");
+    const isGroup = chatData.isGroup === true;
+    const groupName = pushString(chatData.name || chatData.groupName || "");
+    const body = isGroup && groupName
+      ? `${groupName}: ${preview || "Bir mesaj gonderdi."}`
+      : (preview || "Bir mesaj gonderdi.");
+
+    await Promise.all(recipients.map(async (receiverId) => {
+      const userDoc = await admin.firestore().collection("users").doc(receiverId).get();
+      const userData = userDoc.data() || {};
+      const mutedChats = Array.isArray(userData.mutedChats) ? userData.mutedChats : [];
+
+      if (mutedChats.includes(chatId)) return null;
+
+      return sendPushToUser(receiverId, {
+        notification: {
+          title: pushString(actorName, "Yeni mesaj"),
+          body,
+        },
+        data: {
+          type: "chat",
+          route: "chat",
+          chatId,
+          messageId,
+          actorId: authorId,
+          otherUid: authorId,
+          actorName,
+          preview,
+          isGroup: isGroup ? "true" : "false",
+          groupName,
+          recipientId: receiverId,
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        },
+      });
+    }));
+
+    return null;
+  });
+
 exports.aggregateUnreadCounts = functions.firestore
   .document("chats/{chatId}")
   .onUpdate(async (change) => {
@@ -340,11 +689,73 @@ exports.findMatchesCallable = functions.https.onCall(async (data, context) => {
   const meSnap = await db.collection('users').doc(context.auth.uid).get();
   if (!meSnap.exists) return { results: [] };
   const myData = meSnap.data();
-  const searchKeys = [...(myData.fiveStarKeys || []).slice(0, 30), ...(myData.favoritesKeys || []).slice(0, 10)];
-  
-  if (searchKeys.length === 0) return { results: [] };
-  const query = await db.collection('users').where('fiveStarKeys', 'array-contains-any', searchKeys.slice(0, 10)).limit(20).get();
-  return { results: query.docs.map(doc => ({ uid: doc.id, ...doc.data() })).filter(c => c.uid !== context.auth.uid) };
+  function listOf(field) {
+    return Array.isArray(myData[field])
+      ? myData[field].map((item) => String(item).trim()).filter(Boolean)
+      : [];
+  }
+
+  function sampleKeys(values, max = 10) {
+    const unique = [...new Set(values)].filter(Boolean);
+    return unique.sort(() => Math.random() - 0.5).slice(0, max);
+  }
+
+  const candidates = new Map();
+  async function runArrayQuery(field, keys) {
+    const queryKeys = sampleKeys(keys, 10);
+    if (!queryKeys.length) return;
+    try {
+      const snap = await db
+        .collection('users')
+        .where(field, 'array-contains-any', queryKeys)
+        .limit(45)
+        .get();
+      snap.docs.forEach((doc) => {
+        if (doc.id === context.auth.uid) return;
+        const userData = doc.data() || {};
+        if (!String(userData.username || '').trim()) return;
+        candidates.set(doc.id, { uid: doc.id, ...userData });
+      });
+    } catch (e) {
+      console.log('findMatchesCallable query skipped', field, e.message);
+    }
+  }
+
+  const five = listOf('fiveStarKeys');
+  const favs = listOf('favoritesKeys');
+  const watch = listOf('watchlistKeys');
+  const genres = listOf('favGenres').map((item) => item.toLowerCase());
+  const directors = listOf('favDirectors').map((item) => item.toLowerCase());
+  const actors = listOf('favActors').map((item) => item.toLowerCase());
+
+  await Promise.all([
+    runArrayQuery('fiveStarKeys', [...five, ...favs]),
+    runArrayQuery('favoritesKeys', [...favs, ...five]),
+    runArrayQuery('watchlistKeys', watch),
+    runArrayQuery('favGenres', genres),
+    runArrayQuery('favDirectors', directors),
+    runArrayQuery('favActors', actors),
+  ]);
+
+  if (candidates.size < 8) {
+    try {
+      const discovery = await db
+        .collection('users')
+        .orderBy('totalMovies', 'desc')
+        .limit(35)
+        .get();
+      discovery.docs.forEach((doc) => {
+        if (doc.id === context.auth.uid) return;
+        const userData = doc.data() || {};
+        if (!String(userData.username || '').trim()) return;
+        candidates.set(doc.id, { uid: doc.id, ...userData });
+      });
+    } catch (e) {
+      console.log('findMatchesCallable discovery skipped', e.message);
+    }
+  }
+
+  return { results: [...candidates.values()].slice(0, 120) };
 }); 
 // ==================================================================
 // 7. FANOUT FEED (Takip Edilenler Akışı Optimizasyonu)
