@@ -1038,12 +1038,6 @@ class _ProfilePageState extends State<ProfilePage> {
             // Burayı List<dynamic> yapıyoruz çünkü hem String hem Map gelebilir
             final acts = List<dynamic>.from(_lastUserData?['favActors'] ?? []);
 
-            if ((age == null || age <= 0) &&
-                genres.isEmpty &&
-                dirs.isEmpty &&
-                acts.isEmpty)
-              return const SizedBox.shrink();
-
             // EKLENDİ: isDirector parametresi
             Widget cw(
               String t,
@@ -1135,6 +1129,14 @@ class _ProfilePageState extends State<ProfilePage> {
                       ],
                     ),
                   ),
+                RecentWatchedMovies(
+                  uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+                  fallbackMovieKeys: [
+                    ...fiveStarKeys,
+                    ...favKeys,
+                    ...dislikedKeys,
+                  ],
+                ),
                 cw('Sevdiğin türler', genres),
                 cw('Sevdiğin yönetmenler', dirs, isDirector: true),
                 cw('Sevdiğin oyuncular', acts, isActor: true),
@@ -1142,11 +1144,6 @@ class _ProfilePageState extends State<ProfilePage> {
             );
           },
         ),
-        RecentWatchedMovies(
-          uid: FirebaseAuth.instance.currentUser?.uid ?? '',
-          fallbackMovieKeys: [...fiveStarKeys, ...favKeys, ...dislikedKeys],
-        ),
-
         const SizedBox(height: 16),
 
         // --- BÖLÜMLER ---

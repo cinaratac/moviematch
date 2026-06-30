@@ -92,9 +92,17 @@ class WatchedMoviesService {
     if (uid == null || movieId.isEmpty) return;
 
     final key = movieId.trim().toLowerCase();
-    if (_watchedMovieIds.contains(key)) return;
-
     _watchedMovieIds.add(key);
+
+    await logMoviesAsWatchedForUser(uid: uid, movieIds: [key]);
+  }
+
+  Future<void> logMoviesAsWatchedForUser({
+    required String uid,
+    required Iterable<String> movieIds,
+  }) async {
+    final keys = _cleanKeys(movieIds);
+    if (uid.isEmpty || keys.isEmpty) return;
 
     final docRef = _fs
         .collection('users')
@@ -104,21 +112,29 @@ class WatchedMoviesService {
 
     List<String> recentIds = [];
     try {
-      final doc = await docRef.get(const GetOptions(source: Source.cache));
+      final doc = await docRef.get(
+        const GetOptions(source: Source.serverAndCache),
+      );
       final raw = doc.data()?['recentIds'];
       if (raw is List) {
         recentIds = raw.map((id) => id.toString()).toList();
       }
     } catch (_) {}
 
-    recentIds.removeWhere((id) => id.trim().toLowerCase() == key);
-    recentIds.insert(0, key);
+    for (final key in keys.reversed) {
+      recentIds.removeWhere((id) => id.trim().toLowerCase() == key);
+      recentIds.insert(0, key);
+      _watchedMovieIds.add(key);
+    }
+
     if (recentIds.length > 20) {
       recentIds = recentIds.take(20).toList();
     }
 
+    final idsMap = {for (final key in keys) key: true};
+
     await docRef.set({
-      'ids': {key: true},
+      'ids': idsMap,
       'recentIds': recentIds,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -142,5 +158,16 @@ class WatchedMoviesService {
           'recentIds': FieldValue.arrayRemove([key]),
         })
         .catchError((_) {});
+  }
+
+  List<String> _cleanKeys(Iterable<String> movieIds) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final raw in movieIds) {
+      final key = raw.trim().toLowerCase();
+      if (key.isEmpty) continue;
+      if (seen.add(key)) out.add(key);
+    }
+    return out;
   }
 }

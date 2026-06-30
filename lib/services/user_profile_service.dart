@@ -563,6 +563,10 @@ class UserProfileService {
           'watchedKeys': FieldValue.arrayRemove([primaryKey, tmdbId, tmdbStr]),
         }, SetOptions(merge: true)),
       );
+      unawaited(
+        WatchedMoviesService.instance.removeMovieFromWatched(primaryKey),
+      );
+      unawaited(WatchedMoviesService.instance.removeMovieFromWatched(tmdbStr));
     } else {
       // Tek yazma: İzlenenler'e ekle + İzlenecekler'den çıkar
       unawaited(
@@ -575,6 +579,7 @@ class UserProfileService {
           ]),
         }, SetOptions(merge: true)),
       );
+      unawaited(WatchedMoviesService.instance.logMovieAsWatched(primaryKey));
 
       // Arka planda (UI'ı bloklamadan) watchlist subcollection'ını temizle
       Future.microtask(() async {

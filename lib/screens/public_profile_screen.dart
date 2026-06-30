@@ -1357,45 +1357,40 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               ).textTheme.bodyMedium?.copyWith(height: 1.4, color: textColor),
             ),
           ),
-        if (age != null ||
-            genres.isNotEmpty ||
-            directors.isNotEmpty ||
-            actors.isNotEmpty)
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (age is int && age > 0)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Row(
-                    children: [
-                      Icon(Icons.cake, size: 18, color: textColor),
-                      const SizedBox(width: 6),
-                      Text('Yaş: $age', style: TextStyle(color: textColor)),
-                    ],
-                  ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (age is int && age > 0)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  children: [
+                    Icon(Icons.cake, size: 18, color: textColor),
+                    const SizedBox(width: 6),
+                    Text('Yaş: $age', style: TextStyle(color: textColor)),
+                  ],
                 ),
-              if (genres.isNotEmpty)
-                _ChipsSection(title: 'Sevdiği türler', items: genres),
-              if (directors.isNotEmpty)
-                _ChipsSection(
-                  title: 'Sevdiği yönetmenler',
-                  items: directors,
-                  isDirector: true,
-                ),
-
-              if (actors.isNotEmpty)
-                _ChipsSection(
-                  title: 'Sevdiği oyuncular',
-                  items: actors,
-                  isActor: true,
-                ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        RecentWatchedMovies(
-          uid: widget.uid,
-          fallbackMovieKeys: [...fiveKeys, ...favKeys, ...disKeys],
+              ),
+            RecentWatchedMovies(
+              uid: widget.uid,
+              fallbackMovieKeys: [...fiveKeys, ...favKeys, ...disKeys],
+            ),
+            if (genres.isNotEmpty)
+              _ChipsSection(title: 'Sevdiği türler', items: genres),
+            if (directors.isNotEmpty)
+              _ChipsSection(
+                title: 'Sevdiği yönetmenler',
+                items: directors,
+                isDirector: true,
+              ),
+            if (actors.isNotEmpty)
+              _ChipsSection(
+                title: 'Sevdiği oyuncular',
+                items: actors,
+                isActor: true,
+              ),
+            const SizedBox(height: 12),
+          ],
         ),
 
         // --- LİSTELER ---

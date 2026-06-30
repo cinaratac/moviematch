@@ -6,7 +6,7 @@ import 'package:html/dom.dart' as dom;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import 'package:fluttergirdi/services/match_service.dart';
+import 'package:fluttergirdi/services/watched_movies_service.dart';
 
 // --- HTTP client & helpers ---------------------------------------------------
 const _kDefaultUa =
@@ -411,18 +411,6 @@ class LetterboxdService {
     return all;
   }
 
-  static String? _firstImageUrl(dynamic node) {
-    if (node is String && (node.endsWith('.jpg') || node.endsWith('.png')))
-      return node;
-    if (node is Map) {
-      for (final v in node.values) {
-        final r = _firstImageUrl(v);
-        if (r != null) return r;
-      }
-    }
-    return null;
-  }
-
   static bool _looksLikeImageUrl(String? u) {
     if (u == null) return false;
     if (u.contains('empty-poster')) return false;
@@ -562,6 +550,16 @@ class LetterboxdService {
     final newWlKeys = LetterboxdFilm.keysOf(watchlist);
     final newFiveKeys = LetterboxdFilm.keysOf(fiveStar);
     final newDisKeys = LetterboxdFilm.keysOf(disliked);
+    final existingWatchedLikeKeys = {
+      ...existingFavKeys,
+      ...existingFiveKeys,
+      ...existingDisKeys,
+    };
+    final newWatchedKeys = {
+      ...newFavKeys,
+      ...newFiveKeys,
+      ...newDisKeys,
+    }.where((key) => !existingWatchedLikeKeys.contains(key)).toList();
 
     List<String> mergeKeyList({
       required List<String> existingKeys,
@@ -710,5 +708,12 @@ class LetterboxdService {
 
       await batch.commit();
     });
+
+    if (newWatchedKeys.isNotEmpty) {
+      await WatchedMoviesService.instance.logMoviesAsWatchedForUser(
+        uid: uid,
+        movieIds: newWatchedKeys,
+      );
+    }
   }
 }
