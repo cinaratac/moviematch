@@ -12,6 +12,9 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 const functions = firebase.functions();
+const authPersistenceReady = auth.setPersistence(
+  firebase.auth.Auth.Persistence.LOCAL
+);
 
 const els = {
   loginPanel: document.getElementById("loginPanel"),
@@ -86,6 +89,11 @@ function showAdmin(user) {
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;
+}
+
+function isPermissionError(error) {
+  const code = error && error.code ? String(error.code) : "";
+  return code.includes("permission-denied") || code.includes("unauthenticated");
 }
 
 function resetForm() {
@@ -219,6 +227,7 @@ els.loginForm.addEventListener("submit", async (event) => {
   setMessage(els.loginMessage, "Giriş yapılıyor...");
 
   try {
+    await authPersistenceReady;
     await auth.signInWithEmailAndPassword(
       els.loginEmail.value.trim(),
       els.loginPassword.value
@@ -288,14 +297,25 @@ auth.onAuthStateChanged(async (user) => {
   }
 
   try {
+    await authPersistenceReady;
     const isNewsAdmin = functions.httpsCallable("isNewsAdmin");
     await isNewsAdmin();
     showAdmin(user);
     resetForm();
     subscribeArticles();
   } catch (error) {
-    await auth.signOut();
-    showLogin();
-    setMessage(els.loginMessage, "Bu panel için yetkiniz yok.", "error");
+    if (isPermissionError(error)) {
+      await auth.signOut();
+      showLogin();
+      setMessage(els.loginMessage, "Bu panel için yetkiniz yok.", "error");
+      return;
+    }
+
+    showAdmin(user);
+    setMessage(
+      els.saveMessage,
+      "Yetki kontrolu gecici olarak tamamlanamadi. Sayfayi yenileyebilirsiniz.",
+      "error"
+    );
   }
 });

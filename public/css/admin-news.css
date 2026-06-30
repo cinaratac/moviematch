@@ -121,7 +121,7 @@ button {
 
 .panel-nav {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 20px 0 0;
 }
@@ -145,6 +145,7 @@ button {
 
 .primary-action,
 #saveButton,
+#saveAnnouncementButton,
 #loginButton {
   min-height: 44px;
   border-radius: 8px;
@@ -160,6 +161,7 @@ button {
 
 .primary-action:hover,
 #saveButton:hover,
+#saveAnnouncementButton:hover,
 #loginButton:hover {
   background: var(--primary-dark);
 }
@@ -254,6 +256,48 @@ button {
   padding: 22px;
 }
 
+.announcement-form {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 22px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-heading p {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.section-heading h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.toggle-row {
+  display: flex;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
 .form-grid {
   display: grid;
   gap: 16px;
@@ -308,6 +352,10 @@ textarea:focus {
 }
 
 #saveButton {
+  padding: 0 22px;
+}
+
+#saveAnnouncementButton {
   padding: 0 22px;
 }
 

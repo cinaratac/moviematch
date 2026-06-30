@@ -28,7 +28,7 @@ class ChatRoomScreen extends StatefulWidget {
     required this.chatId,
     required this.otherUid,
     this.otherTitle,
-    this.isGroup = false, 
+    this.isGroup = false,
     this.groupName,
   });
 
@@ -37,26 +37,29 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
-  
   static final Map<String, bool> _blockedCache = {};
   bool _initialMuteStatus = false; // Ekran açıldığındaki orjinal durum
   late final ValueNotifier<bool> _isMutedNotifier;
-  
+
   static final Map<String, bool> _blockedMeCache = {};
-  static final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _messageCache = {};
-  
+  static final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>
+  _messageCache = {};
+
   Timer? _muteDebounceTimer;
   final ValueNotifier<bool> _showGuideNotifier = ValueNotifier<bool>(false);
   final _svc = ChatService.instance;
   final _ctrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  
+
   late Stream<QuerySnapshot<Map<String, dynamic>>> _messagesStream;
   StreamSubscription? _latestSub;
+  Timer? _typingStopTimer;
+  bool _isTyping = false;
+  DateTime? _lastTypingWriteAt;
   bool _isBlocked = false;
   bool _hasBlockedMe = false;
   bool _isLoadingBlock = true;
- 
+
   late Stream<List<String>> _mutedChatsStream;
 
   Future<void> _loadBlockStatus() async {
@@ -64,7 +67,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (mounted) setState(() => _isLoadingBlock = false);
       return;
     }
-    
+
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid == null) return;
 
@@ -73,9 +76,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         currentUserId: myUid,
         targetUserId: widget.otherUid,
       );
-      
+
       // KİLİT BURADA: Eğer veritabanından cevap gelene kadar kullanıcı sayfadan çıktıysa işlemi iptal et!
-      if (!mounted) return; 
+      if (!mounted) return;
 
       _blockedCache[widget.otherUid] = status['iBlockedThem'] ?? false;
       _blockedMeCache[widget.otherUid] = status['theyBlockedMe'] ?? false;
@@ -85,18 +88,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         _hasBlockedMe = status['theyBlockedMe'] ?? false;
         _isLoadingBlock = false;
       });
-      
     } catch (_) {
       if (mounted) setState(() => _isLoadingBlock = false);
     }
   }
+
   @override
   void initState() {
     super.initState();
-    
+
     // 1. EKRAN AÇILDIĞI AN İKONU "AÇIK" OLARAK GÖSTER
     _isMutedNotifier = ValueNotifier<bool>(false);
-    
+    _ctrl.addListener(_handleTypingChanged);
+
     final myUid = FirebaseAuth.instance.currentUser!.uid;
 
     // 2. IŞIK HIZINDA SORGUMUZ (Eski cache'i tetikler, anında açılır)
@@ -112,7 +116,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (_blockedCache.containsKey(widget.otherUid)) {
       _isBlocked = _blockedCache[widget.otherUid]!;
       _hasBlockedMe = _blockedMeCache[widget.otherUid] ?? false;
-      _isLoadingBlock = false; 
+      _isLoadingBlock = false;
     }
 
     _svc.markAsRead(widget.chatId, myUid);
@@ -142,30 +146,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _loadInitialMuteStatus();
     });
   }
-  
 
- 
   Future<void> _loadInitialMuteStatus() async {
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
       // Çok daha hızlı olması için önce yerel önbellekten (cache) okumayı dener:
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid)
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
           .get(const GetOptions(source: Source.cache))
-          .catchError((_) => FirebaseFirestore.instance.collection('users').doc(uid).get());
-          
+          .catchError(
+            (_) =>
+                FirebaseFirestore.instance.collection('users').doc(uid).get(),
+          );
+
       // KİLİT BURADA: Eğer sayfadan çıkıldıysa notifer'a dokunma, çöker!
       if (!mounted) return;
 
       final mutedChats = List<String>.from(doc.data()?['mutedChats'] ?? []);
-      
+
       _initialMuteStatus = mutedChats.contains(widget.chatId);
       // Arka planda gerçek durumu sessizce güncelle (Ekranda loading vs dönmez)
-      _isMutedNotifier.value = _initialMuteStatus; 
-      
+      _isMutedNotifier.value = _initialMuteStatus;
     } catch (e) {
       debugPrint('Bildirim ayarı yüklenemedi: $e');
     }
   }
+
   Future<void> _checkAndShowGuide() async {
     await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
@@ -181,38 +188,87 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
- @override
+  void _handleTypingChanged() {
+    if (widget.isGroup || _isBlocked || _hasBlockedMe) return;
+
+    final hasText = _ctrl.text.trim().isNotEmpty;
+    if (!hasText) {
+      _typingStopTimer?.cancel();
+      _setTyping(false, force: true);
+      return;
+    }
+
+    final now = DateTime.now();
+    final shouldRefresh =
+        _lastTypingWriteAt == null ||
+        now.difference(_lastTypingWriteAt!) > const Duration(seconds: 4);
+
+    if (!_isTyping || shouldRefresh) {
+      _setTyping(true, force: shouldRefresh);
+    }
+
+    _typingStopTimer?.cancel();
+    _typingStopTimer = Timer(const Duration(milliseconds: 2800), () {
+      _setTyping(false, force: true);
+    });
+  }
+
+  void _setTyping(bool value, {bool force = false}) {
+    if (widget.isGroup) return;
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (myUid == null) return;
+    if (!force && _isTyping == value) return;
+
+    _isTyping = value;
+    _lastTypingWriteAt = DateTime.now();
+    unawaited(_svc.setTyping(widget.chatId, myUid, value));
+  }
+
+  @override
   void dispose() {
     // 1. Önce sunucuya kaydedilecek bir şey varsa onu hallet
     if (_isMutedNotifier.value != _initialMuteStatus) {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
         final isMutedNow = _isMutedNotifier.value;
-        
+
         if (isMutedNow) {
-          FirebaseFirestore.instance.collection('users').doc(uid).update({
-            'mutedChats': FieldValue.arrayUnion([widget.chatId])
-          }).catchError((_) {});
+          FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .update({
+                'mutedChats': FieldValue.arrayUnion([widget.chatId]),
+              })
+              .catchError((_) {});
         } else {
-          FirebaseFirestore.instance.collection('users').doc(uid).update({
-            'mutedChats': FieldValue.arrayRemove([widget.chatId])
-          }).catchError((_) {});
+          FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .update({
+                'mutedChats': FieldValue.arrayRemove([widget.chatId]),
+              })
+              .catchError((_) {});
         }
       }
     }
-    
+
     // 2. Kapatma, iptal etme ve temizleme işlemleri (Sadece BİR KERE)
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     if (myUid != null) _svc.markAsRead(widget.chatId, myUid);
-    
+    if (myUid != null && _isTyping) {
+      unawaited(_svc.setTyping(widget.chatId, myUid, false));
+    }
+
     _latestSub?.cancel();
     _muteDebounceTimer?.cancel();
-    
+    _typingStopTimer?.cancel();
+    _ctrl.removeListener(_handleTypingChanged);
+
     _ctrl.dispose();
     _scrollController.dispose();
     _showGuideNotifier.dispose();
-    _isMutedNotifier.dispose(); 
-    
+    _isMutedNotifier.dispose();
+
     // 3. super.dispose() HER ZAMAN EN SONDA OLMALIDIR!
     super.dispose();
   }
@@ -220,7 +276,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _sendMessage() async {
     final txt = _ctrl.text.trim();
     if (txt.isEmpty) return;
-    
+
     if (TextFilterService.hasProfanity(txt)) {
       _showError('Mesajınız uygunsuz ifadeler içeriyor.');
       return;
@@ -228,8 +284,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     try {
       final myUid = FirebaseAuth.instance.currentUser!.uid;
+      _typingStopTimer?.cancel();
+      _setTyping(false, force: true);
       _ctrl.clear();
-      
+
       await _svc.send(widget.chatId, myUid, txt, otherUid: widget.otherUid);
 
       if (_scrollController.hasClients) {
@@ -246,9 +304,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
   Future<void> _openFilmPicker() async {
@@ -266,24 +324,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       await _svc.send(
         widget.chatId,
         myUid,
-        "", 
+        "",
         otherUid: widget.otherUid,
         movie: {
           'title': result['title'],
           'poster': result['poster'],
-          'id': result['id'].toString(), 
+          'id': result['id'].toString(),
         },
       );
-      
+
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          0.0, 
-          duration: const Duration(milliseconds: 300), 
-          curve: Curves.easeOut
+          0.0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
         );
       }
     } catch (e) {
-      if(mounted) _showError('Film gönderilemedi: $e');
+      if (mounted) _showError('Film gönderilemedi: $e');
     }
   }
 
@@ -306,7 +364,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (!widget.isGroup) return const SizedBox.shrink();
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('clubs').doc(widget.chatId).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('clubs')
+          .doc(widget.chatId)
+          .snapshots(),
       builder: (context, snap) {
         if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
         final data = snap.data!.data() as Map<String, dynamic>;
@@ -315,7 +376,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         if (movie == null) return const SizedBox.shrink();
 
         return FeaturedMovieBannerWidget(movie: movie);
-      }
+      },
     );
   }
 
@@ -334,8 +395,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.all(16),
-          color: Theme.of(context).brightness == Brightness.dark 
-              ? Colors.black26 
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.black26
               : Colors.grey.shade200,
           child: const Text(
             'Bu kullanıcıyla mesajlaşamazsınız.',
@@ -345,7 +406,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ),
       );
     }
-    
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inputBg = isDark ? const Color(0xFF1E1E1E) : Colors.grey.shade200;
     final hintColor = isDark ? Colors.white38 : Colors.black38;
@@ -359,11 +420,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           children: [
             Expanded(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
-                  color: inputBg, 
+                  color: inputBg,
                   borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+                  border: Border.all(
+                    color: isDark ? Colors.white10 : Colors.black12,
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -392,7 +458,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           constraints: const BoxConstraints(),
                           tooltip: 'Film paylaş',
                           onPressed: _openFilmPicker,
-                          icon: Icon(Icons.movie_filter_outlined, color: iconColor),
+                          icon: Icon(
+                            Icons.movie_filter_outlined,
+                            color: iconColor,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         if (!widget.isGroup)
@@ -415,7 +484,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               child: CircleAvatar(
                 radius: 22,
                 backgroundColor: Theme.of(context).colorScheme.primary,
-                child: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                child: const Icon(
+                  Icons.send_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
               ),
             ),
           ],
@@ -438,7 +511,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           groupName: widget.groupName,
         ),
         elevation: 0,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor, 
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         actions: [
           ValueListenableBuilder<bool>(
             valueListenable: _isMutedNotifier,
@@ -446,7 +519,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               return IconButton(
                 icon: Icon(
                   isMuted ? Icons.notifications_off : Icons.notifications,
-                  color: isMuted ? Colors.grey : Theme.of(context).iconTheme.color,
+                  color: isMuted
+                      ? Colors.grey
+                      : Theme.of(context).iconTheme.color,
                 ),
                 onPressed: () {
                   _isMutedNotifier.value = !isMuted;
@@ -457,45 +532,48 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ],
       ),
       body: _isLoadingBlock
-    ? const Center(
-        child: CircularProgressIndicator(color: Color(0xFF2E7D32)),
-      )
-    : (_isBlocked || _hasBlockedMe)
-        ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
-                Icon(Icons.block, size: 48, color: Colors.grey),
-                SizedBox(height: 16),
-                Text(
-                  'Bu kullanıcıyla mesajlaşamazsınız.',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF2E7D32)),
+            )
+          : (_isBlocked || _hasBlockedMe)
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.block, size: 48, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'Bu kullanıcıyla mesajlaşamazsınız.',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          )
-        : Stack(
-            children: [
-              Column(
-                children: [
-                  _buildFeaturedMovieBanner(),
-                  Expanded(
-                    child: Container(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                        stream: _messagesStream,
-                        builder: (context, snap) {
-                          if (snap.hasData && snap.data != null) {
-                            _messageCache[widget.chatId] = snap.data!.docs;
-                          }
+                ],
+              ),
+            )
+          : Stack(
+              children: [
+                Column(
+                  children: [
+                    _buildFeaturedMovieBanner(),
+                    Expanded(
+                      child: Container(
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: _messagesStream,
+                          builder: (context, snap) {
+                            if (snap.hasData && snap.data != null) {
+                              _messageCache[widget.chatId] = snap.data!.docs;
+                            }
 
-                          final docs = snap.data?.docs ?? _messageCache[widget.chatId] ?? [];
+                            final docs =
+                                snap.data?.docs ??
+                                _messageCache[widget.chatId] ??
+                                [];
 
-                          // --- MERKEZİ CACHE KULLANIMI: Sohbet edenleri anında RAM'e al ---
+                            // --- MERKEZİ CACHE KULLANIMI: Sohbet edenleri anında RAM'e al ---
                             final Set<String> authorIds = {};
                             // Eğer otherUid boş değilse listeye ekle (Grup sohbetlerinde boş gelebilir)
                             if (widget.otherUid.isNotEmpty) {
@@ -504,86 +582,105 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
                             for (var doc in docs) {
                               final m = doc.data();
-                              final aId = (m['authorId'] ?? m['from'])?.toString();
+                              final aId = (m['authorId'] ?? m['from'])
+                                  ?.toString();
                               if (aId != null && aId.trim().isNotEmpty) {
                                 authorIds.add(aId);
                               }
                             }
 
                             // Ekstra güvenlik: Sorguya gidecek ID'lerin kesinlikle boş olmadığından emin ol
-                            final missingIds = authorIds.where((id) => id.isNotEmpty && UserCacheService.instance.getFromCache(id) == null).toList();
-                          if (missingIds.isNotEmpty) {
-                            Future.microtask(() async {
-                              await UserCacheService.instance.fetchUsers(missingIds);
-                              if (mounted) setState(() {}); 
-                            });
-                          }
-                          // ---------------------------------------------------------------
+                            final missingIds = authorIds
+                                .where(
+                                  (id) =>
+                                      id.isNotEmpty &&
+                                      UserCacheService.instance.getFromCache(
+                                            id,
+                                          ) ==
+                                          null,
+                                )
+                                .toList();
+                            if (missingIds.isNotEmpty) {
+                              Future.microtask(() async {
+                                await UserCacheService.instance.fetchUsers(
+                                  missingIds,
+                                );
+                                if (mounted) setState(() {});
+                              });
+                            }
+                            // ---------------------------------------------------------------
 
-                          if (snap.connectionState == ConnectionState.waiting && docs.isEmpty) {
-                            return const Center(
-                              child: CircularProgressIndicator(), 
-                            );
-                          }
-
-                          if (docs.isEmpty) {
-                            return const EmptyChatView();
-                          }
-
-                          return ListView.builder(
-                            controller: _scrollController,
-                            reverse: true,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            itemCount: docs.length,
-                            itemBuilder: (context, i) {
-                              final doc = docs[i];
-                              final m = doc.data();
-                              final author = (m['authorId'] ?? m['from'] ?? '') as String;
-                              final mine = author == myUid;
-                              final text = (m['text'] ?? '') as String;
-                              final ts = (m['createdAt'] as Timestamp?);
-                              
-                              final type = m['type'] as String?;
-                              final eventData = m['event'] as Map<String, dynamic>?;
-                              final pollData = m['poll'] as Map<String, dynamic>?;
-
-                              return MessageRow(
-                                key: ValueKey(doc.id),
-                                text: text,
-                                movie: m['movie'],
-                                isMine: mine,
-                                timestamp: ts?.toDate(),
-                                authorId: author,
-                                type: type,
-                                eventData: eventData,
-                                pollData: pollData,
-                                chatId: widget.chatId,
+                            if (snap.connectionState ==
+                                    ConnectionState.waiting &&
+                                docs.isEmpty) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
                               );
-                            },
-                          );
-                        },
+                            }
+
+                            if (docs.isEmpty) {
+                              return const EmptyChatView();
+                            }
+
+                            return ListView.builder(
+                              controller: _scrollController,
+                              reverse: true,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              itemCount: docs.length,
+                              itemBuilder: (context, i) {
+                                final doc = docs[i];
+                                final m = doc.data();
+                                final author =
+                                    (m['authorId'] ?? m['from'] ?? '')
+                                        as String;
+                                final mine = author == myUid;
+                                final text = (m['text'] ?? '') as String;
+                                final ts = (m['createdAt'] as Timestamp?);
+
+                                final type = m['type'] as String?;
+                                final eventData =
+                                    m['event'] as Map<String, dynamic>?;
+                                final pollData =
+                                    m['poll'] as Map<String, dynamic>?;
+
+                                return MessageRow(
+                                  key: ValueKey(doc.id),
+                                  text: text,
+                                  movie: m['movie'],
+                                  isMine: mine,
+                                  timestamp: ts?.toDate(),
+                                  authorId: author,
+                                  type: type,
+                                  eventData: eventData,
+                                  pollData: pollData,
+                                  chatId: widget.chatId,
+                                );
+                              },
+                            );
+                          },
+                        ),
                       ),
                     ),
-                  ),
-                  _buildInputArea(),
-                ],
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: _showGuideNotifier,
-                builder: (context, isVisible, child) {
-                  if (!isVisible) return const SizedBox.shrink();
-                  return GuideCharacterOverlay(
-                    message: "Beraber film izlemek için watchlist çarkını deneyebilirsin",
-                    isVisible: isVisible,
-                    onClose: () => _showGuideNotifier.value = false,
-                  );
-                },
-              ),
-            ],
-          ),
+                    _buildInputArea(),
+                  ],
+                ),
+                ValueListenableBuilder<bool>(
+                  valueListenable: _showGuideNotifier,
+                  builder: (context, isVisible, child) {
+                    if (!isVisible) return const SizedBox.shrink();
+                    return GuideCharacterOverlay(
+                      message:
+                          "Beraber film izlemek için watchlist çarkını deneyebilirsin",
+                      isVisible: isVisible,
+                      onClose: () => _showGuideNotifier.value = false,
+                    );
+                  },
+                ),
+              ],
+            ),
     );
   }
 }

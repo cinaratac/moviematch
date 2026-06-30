@@ -19,6 +19,7 @@ import 'package:fluttergirdi/widgets/poster_image.dart';
 import 'package:fluttergirdi/widgets/movie_action_helper.dart';
 import 'package:fluttergirdi/widgets/follow_user_list_dialog.dart';
 import 'package:fluttergirdi/widgets/recent_watched_movies.dart';
+import 'package:fluttergirdi/widgets/streak_bottom_sheet.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 
@@ -272,7 +273,10 @@ Widget _profileHeaderSection({
                   final badges = List<String>.from(userData?['badges'] ?? []);
                   // DÜZELTME BURADA: 'currentStreak' yerine 'streakCount' yazıldı
                   final int streakCount =
-                      (userData?['streakCount'] ?? 0) as int;
+                      (userData?['streakCount'] as num?)?.toInt() ?? 0;
+                  final activeDays = List<int>.from(
+                    userData?['weeklyActiveDays'] ?? [],
+                  );
 
                   if (badges.isEmpty && streakCount <= 0)
                     return const SizedBox.shrink();
@@ -284,45 +288,60 @@ Widget _profileHeaderSection({
                       children: [
                         // STREAK (SERİ) ATEŞİ
                         if (streakCount > 0)
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.orangeAccent,
-                                width: 1.2,
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              showModalBottomSheet(
+                                context: context,
+                                backgroundColor: Colors.transparent,
+                                isScrollControlled: true,
+                                useSafeArea: true,
+                                builder: (_) => StreakBottomSheet(
+                                  streak: streakCount,
+                                  activeDays: activeDays,
+                                ),
+                              );
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.orange.withOpacity(0.1),
-                                  blurRadius: 8,
-                                  spreadRadius: 1,
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.local_fire_department_rounded,
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
                                   color: Colors.orangeAccent,
-                                  size: 16,
+                                  width: 1.2,
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '$streakCount Gün Serisi',
-                                  style: const TextStyle(
-                                    color: Colors.orangeAccent,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.orange.withOpacity(0.1),
+                                    blurRadius: 8,
+                                    spreadRadius: 1,
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.local_fire_department_rounded,
+                                    color: Colors.orangeAccent,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '$streakCount Gün Serisi',
+                                    style: const TextStyle(
+                                      color: Colors.orangeAccent,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
 

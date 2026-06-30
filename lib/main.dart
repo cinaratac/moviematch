@@ -2,7 +2,6 @@ import 'dart:io'; // Platform kontrolü için eklendi
 // ignore_for_file: deprecated_member_use
 
 import 'package:firebase_core/firebase_core.dart';
-import 'package:fluttergirdi/services/VersionCheckService.dart';
 import 'package:fluttergirdi/services/push_token_service.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
@@ -109,9 +108,6 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      VersionCheckService.instance.checkVersion(context);
-    });
   }
 
   @override
@@ -129,7 +125,14 @@ class _MyAppState extends State<MyApp> {
           home: StreamBuilder<User?>(
             stream: FirebaseAuth.instance.authStateChanges(),
             builder: (context, snapshot) {
-              if (snapshot.hasData && snapshot.data != null) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+
+              final user = snapshot.data ?? FirebaseAuth.instance.currentUser;
+              if (user != null) {
                 // YENİ KONTROL: Servisler daha önce başlatılmadıysa BAŞLAT
                 if (!_servicesStarted) {
                   _servicesStarted = true; // Bayrağı işaretle

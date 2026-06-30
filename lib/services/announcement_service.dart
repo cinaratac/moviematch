@@ -34,7 +34,7 @@ class AnnouncementService {
       if (serverId != lastSeenId) {
         if (context.mounted) {
           await _showDialog(context, data);
-          
+
           // 4. Gösterdikten sonra ID'yi kaydet ki bir daha çıkmasın
           await prefs.setString('last_seen_announcement_id', serverId);
         }
@@ -44,7 +44,10 @@ class AnnouncementService {
     }
   }
 
-  Future<void> _showDialog(BuildContext context, Map<String, dynamic> data) async {
+  Future<void> _showDialog(
+    BuildContext context,
+    Map<String, dynamic> data,
+  ) async {
     final title = data['title'] ?? 'Duyuru';
     final message = data['message'] ?? '';
     final imageUrl = data['imageUrl']; // Opsiyonel resim
@@ -54,7 +57,9 @@ class AnnouncementService {
       barrierDismissible: false, // Kullanıcı butona basmadan kapatamasın
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(25),
+          ),
           backgroundColor: const Color(0xFF1E1E1E), // Koyu tema arkaplan
           child: Padding(
             padding: const EdgeInsets.all(20.0),
@@ -70,14 +75,22 @@ class AnnouncementService {
                       height: 150,
                       width: double.infinity,
                       fit: BoxFit.cover,
-                      errorBuilder: (_,__,___) => const Icon(Icons.info, size: 60, color:Color.fromARGB(117, 41, 202, 44)),
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.info,
+                        size: 60,
+                        color: Color.fromARGB(117, 41, 202, 44),
+                      ),
                     ),
                   )
                 else
-                  const Icon(Icons.campaign, size: 60, color: Color.fromARGB(117, 41, 202, 44)),
-                
+                  const Icon(
+                    Icons.campaign,
+                    size: 60,
+                    color: Color.fromARGB(117, 41, 202, 44),
+                  ),
+
                 const SizedBox(height: 16),
-                
+
                 // Başlık
                 Text(
                   title,
@@ -88,21 +101,18 @@ class AnnouncementService {
                   ),
                   textAlign: TextAlign.center,
                 ),
-                
+
                 const SizedBox(height: 12),
-                
+
                 // Mesaj
                 Text(
                   message,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.white70,
-                  ),
+                  style: const TextStyle(fontSize: 16, color: Colors.white70),
                   textAlign: TextAlign.center,
                 ),
-                
+
                 const SizedBox(height: 24),
-                
+
                 // Tamam Butonu
                 SizedBox(
                   width: double.infinity,
@@ -118,7 +128,10 @@ class AnnouncementService {
                     ),
                     child: const Text(
                       'Harika!',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),

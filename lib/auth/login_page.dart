@@ -2,10 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/auth/register_page.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:fluttergirdi/auth/google_register_page.dart';
 import 'package:fluttergirdi/widgets/background_3d_posters.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:fluttergirdi/auth/auth_gate.dart'; // KESİN YÖNLENDİRME İÇİN EKLENDİ
@@ -25,7 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   // Durum değişkenleri
   bool _isLoading = false;
   bool _isGoogleLoading = false;
-  bool _isAppleLoading = false; 
+  bool _isAppleLoading = false;
   bool _isPasswordVisible = false;
 
   // Standart E-posta Giriş Fonksiyonu
@@ -45,7 +43,7 @@ class _LoginPageState extends State<LoginPage> {
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      
+
       // KESİN ÇÖZÜM: Tüm ekran yığınını temizle ve sistemi zorla AuthGate'e yönlendir
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
@@ -54,10 +52,10 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
       return; // Başarılıysa dur, setState çalıştırma ki ekran kilitlenmesin
-      
     } on FirebaseAuthException catch (e) {
-      if (mounted) setState(() => _isLoading = false); // Sadece hatada loading'i kapat
-      
+      if (mounted)
+        setState(() => _isLoading = false); // Sadece hatada loading'i kapat
+
       String message = 'Giriş başarısız.';
       if (e.code == 'user-not-found') {
         message = 'Bu e-posta ile kayıtlı kullanıcı bulunamadı.';
@@ -78,9 +76,11 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
-      
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     }
   }
@@ -90,7 +90,9 @@ class _LoginPageState extends State<LoginPage> {
     if (_emailController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Şifre sıfırlamak için lütfen e-posta adresinizi girin.'),
+          content: Text(
+            'Şifre sıfırlamak için lütfen e-posta adresinizi girin.',
+          ),
         ),
       );
       return;
@@ -102,13 +104,17 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Sıfırlama bağlantısı e-posta adresinize gönderildi.'),
+            content: Text(
+              'Sıfırlama bağlantısı e-posta adresinize gönderildi.',
+            ),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     }
   }
@@ -124,7 +130,8 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
@@ -140,11 +147,12 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
       return;
-      
     } catch (e) {
       if (mounted) setState(() => _isGoogleLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     }
   }
@@ -178,14 +186,16 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
       return;
-      
     } catch (e) {
       if (mounted) setState(() => _isAppleLoading = false);
       if (mounted) {
-        if (e is SignInWithAppleAuthorizationException && e.code == AuthorizationErrorCode.canceled) {
+        if (e is SignInWithAppleAuthorizationException &&
+            e.code == AuthorizationErrorCode.canceled) {
           return;
         }
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     }
   }

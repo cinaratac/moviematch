@@ -27,6 +27,7 @@ class _HomeShellState extends State<HomeShell> {
   late final AppLinks _appLinks;
   StreamSubscription<Uri>? _linkSubscription;
   Timer? _smartLoadingTimer;
+  Timer? _announcementTimer;
 
   final List<Widget> _pages = [
     const FeedPage(),
@@ -45,7 +46,7 @@ class _HomeShellState extends State<HomeShell> {
     TabService.instance.indexNotifier.addListener(_onTabServiceIndexChanged);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      AnnouncementService.instance.checkAndShowAnnouncement(context);
+      _scheduleAnnouncementCheck();
       GlobalDataService.instance.startPreloading();
       NotificationService.I.flushPendingNavigation();
       _startSmartLoading();
@@ -63,6 +64,16 @@ class _HomeShellState extends State<HomeShell> {
         _switchToTab(newIndex);
       }
     }
+  }
+
+  void _scheduleAnnouncementCheck() {
+    _announcementTimer?.cancel();
+    _announcementTimer = Timer(const Duration(milliseconds: 900), () {
+      if (!mounted || _index != 0) return;
+      final route = ModalRoute.of(context);
+      if (route != null && !route.isCurrent) return;
+      AnnouncementService.instance.checkAndShowAnnouncement(context);
+    });
   }
 
   void _switchToTab(int targetIndex) {
@@ -106,6 +117,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _smartLoadingTimer?.cancel();
+    _announcementTimer?.cancel();
     _linkSubscription?.cancel();
     TabService.instance.indexNotifier.removeListener(_onTabServiceIndexChanged);
     super.dispose();

@@ -133,11 +133,18 @@ class WatchedMoviesService {
 
     final idsMap = {for (final key in keys) key: true};
 
-    await docRef.set({
+    final userRef = _fs.collection('users').doc(uid);
+    final batch = _fs.batch();
+    batch.set(docRef, {
       'ids': idsMap,
       'recentIds': recentIds,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    batch.set(userRef, {
+      'recentWatchedIds': recentIds,
+      'recentWatchedUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await batch.commit();
   }
 
   Future<void> removeMovieFromWatched(String movieId) async {
@@ -156,6 +163,15 @@ class WatchedMoviesService {
         .update({
           'ids.$key': FieldValue.delete(),
           'recentIds': FieldValue.arrayRemove([key]),
+        })
+        .catchError((_) {});
+
+    await _fs
+        .collection('users')
+        .doc(uid)
+        .update({
+          'recentWatchedIds': FieldValue.arrayRemove([key]),
+          'recentWatchedUpdatedAt': FieldValue.serverTimestamp(),
         })
         .catchError((_) {});
   }

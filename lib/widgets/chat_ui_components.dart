@@ -20,7 +20,9 @@ class FeaturedMovieBannerWidget extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? const Color(0xFF252525) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black;
-    final border = isDark ? Colors.amber.withOpacity(0.3) : Colors.amber.withOpacity(0.5);
+    final border = isDark
+        ? Colors.amber.withOpacity(0.3)
+        : Colors.amber.withOpacity(0.5);
 
     return Container(
       width: double.infinity,
@@ -28,15 +30,25 @@ class FeaturedMovieBannerWidget extends StatelessWidget {
       decoration: BoxDecoration(
         color: bgColor,
         border: Border(bottom: BorderSide(color: border)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: () {
             if (movie['id'] != null) {
-              Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => MovieDetailScreen(tmdbId: movie['id'])));
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MovieDetailScreen(tmdbId: movie['id']),
+                ),
+              );
             }
           },
           child: Padding(
@@ -45,7 +57,10 @@ class FeaturedMovieBannerWidget extends StatelessWidget {
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(color: Colors.amber, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Colors.amber,
+                    shape: BoxShape.circle,
+                  ),
                   child: const Icon(Icons.star, color: Colors.black, size: 16),
                 ),
                 const SizedBox(width: 12),
@@ -53,16 +68,33 @@ class FeaturedMovieBannerWidget extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('HAFTANIN FİLMİ',
-                          style: TextStyle(fontWeight: FontWeight.w900, color: Colors.amber, fontSize: 10, letterSpacing: 1)),
+                      const Text(
+                        'HAFTANIN FİLMİ',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.amber,
+                          fontSize: 10,
+                          letterSpacing: 1,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(movie['title'] ?? 'Film',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: textColor, fontSize: 14),
-                          overflow: TextOverflow.ellipsis),
+                      Text(
+                        movie['title'] ?? 'Film',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
-                const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                const Icon(
+                  Icons.arrow_forward_ios,
+                  size: 14,
+                  color: Colors.grey,
+                ),
               ],
             ),
           ),
@@ -127,7 +159,9 @@ class MessageRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isMine
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMine) ...[
@@ -135,11 +169,26 @@ class MessageRow extends StatelessWidget {
             const SizedBox(width: 8),
           ],
           if (type == 'event' && eventData != null)
-            _EventMessageBubble(data: eventData, isMine: isMine, timestamp: timestamp, chatId: chatId)
+            _EventMessageBubble(
+              data: eventData,
+              isMine: isMine,
+              timestamp: timestamp,
+              chatId: chatId,
+            )
           else if (type == 'poll' && pollData != null)
-            _PollMessageBubble(initialData: pollData, isMine: isMine, timestamp: timestamp, chatId: chatId)
+            _PollMessageBubble(
+              initialData: pollData,
+              isMine: isMine,
+              timestamp: timestamp,
+              chatId: chatId,
+            )
           else
-            MessageBubble(text: text, movie: movie, isMine: isMine, timestamp: timestamp),
+            MessageBubble(
+              text: text,
+              movie: movie,
+              isMine: isMine,
+              timestamp: timestamp,
+            ),
           if (isMine) const SizedBox(width: 8),
         ],
       ),
@@ -197,13 +246,20 @@ class MessageBubble extends StatelessWidget {
     }
 
     final myGradient = LinearGradient(
-      colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primary.withOpacity(0.8)],
+      colors: [
+        Theme.of(context).colorScheme.primary,
+        Theme.of(context).colorScheme.primary.withOpacity(0.8),
+      ],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
     final otherColor = isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade200;
-    final textColor = isMine ? Colors.white : (isDark ? Colors.white : Colors.black87);
-    final timeColor = isMine ? Colors.white70 : (isDark ? Colors.white60 : Colors.black54);
+    final textColor = isMine
+        ? Colors.white
+        : (isDark ? Colors.white : Colors.black87);
+    final timeColor = isMine
+        ? Colors.white70
+        : (isDark ? Colors.white60 : Colors.black54);
     final maxBubbleWidth = MediaQuery.of(context).size.width * 0.70;
     const movieCardWidth = 200.0;
 
@@ -218,7 +274,13 @@ class MessageBubble extends StatelessWidget {
           bottomLeft: Radius.circular(isMine ? 20 : 4),
           bottomRight: Radius.circular(isMine ? 4 : 20),
         ),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 2, offset: const Offset(0, 1))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 2,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -231,20 +293,30 @@ class MessageBubble extends StatelessWidget {
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   width: movieCardWidth,
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), color: Colors.black26),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.black26,
+                  ),
                   clipBehavior: Clip.antiAlias,
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
                       onTap: () {
                         if (parsedMovieId != null) {
-                          Navigator.push(context, MaterialPageRoute(
-                            builder: (_) => MovieDetailScreen(
-                              tmdbId: parsedMovieId!,
-                              title: movieTitle.isNotEmpty ? movieTitle : null,
-                              posterUrl: posterUrl.isNotEmpty ? posterUrl : null,
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => MovieDetailScreen(
+                                tmdbId: parsedMovieId!,
+                                title: movieTitle.isNotEmpty
+                                    ? movieTitle
+                                    : null,
+                                posterUrl: posterUrl.isNotEmpty
+                                    ? posterUrl
+                                    : null,
+                              ),
                             ),
-                          ));
+                          );
                         }
                       },
                       child: Column(
@@ -253,21 +325,39 @@ class MessageBubble extends StatelessWidget {
                           if (posterUrl.isNotEmpty)
                             AspectRatio(
                               aspectRatio: 2 / 3,
-                              child: PosterImage(posterUrl: posterUrl, title: movieTitle, fit: BoxFit.cover),
+                              child: PosterImage(
+                                posterUrl: posterUrl,
+                                title: movieTitle,
+                                fit: BoxFit.cover,
+                              ),
                             )
                           else
                             Container(
-                              height: 120, width: double.infinity, color: Colors.grey.shade900,
-                              child: const Center(child: Icon(Icons.movie, size: 32, color: Colors.white24)),
+                              height: 120,
+                              width: double.infinity,
+                              color: Colors.grey.shade900,
+                              child: const Center(
+                                child: Icon(
+                                  Icons.movie,
+                                  size: 32,
+                                  color: Colors.white24,
+                                ),
+                              ),
                             ),
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(8),
                             color: Colors.black38,
-                            child: Text(movieTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                            child: Text(
+                              movieTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -278,8 +368,17 @@ class MessageBubble extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: hasMovie ? movieCardWidth : maxBubbleWidth - 24),
-                    child: Text(text, style: TextStyle(color: textColor, fontSize: 15, height: 1.3)),
+                    constraints: BoxConstraints(
+                      maxWidth: hasMovie ? movieCardWidth : maxBubbleWidth - 24,
+                    ),
+                    child: Text(
+                      text,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 15,
+                        height: 1.3,
+                      ),
+                    ),
                   ),
                 ),
               if (timestamp != null)
@@ -287,7 +386,10 @@ class MessageBubble extends StatelessWidget {
                   alignment: Alignment.bottomRight,
                   child: Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(_formatTime(timestamp!), style: TextStyle(fontSize: 10, color: timeColor)),
+                    child: Text(
+                      _formatTime(timestamp!),
+                      style: TextStyle(fontSize: 10, color: timeColor),
+                    ),
                   ),
                 ),
             ],
@@ -314,7 +416,8 @@ class UserAvatar extends StatefulWidget {
   State<UserAvatar> createState() => _UserAvatarState();
 }
 
-class _UserAvatarState extends State<UserAvatar> with AutomaticKeepAliveClientMixin {
+class _UserAvatarState extends State<UserAvatar>
+    with AutomaticKeepAliveClientMixin {
   String? _photoUrl;
 
   @override
@@ -352,8 +455,12 @@ class _UserAvatarState extends State<UserAvatar> with AutomaticKeepAliveClientMi
     super.build(context);
     return CircleAvatar(
       radius: widget.size,
-      backgroundImage: (_photoUrl != null && _photoUrl!.isNotEmpty) ? NetworkImage(_photoUrl!) : null,
-      child: (_photoUrl == null || _photoUrl!.isEmpty) ? Icon(Icons.person, size: widget.size) : null,
+      backgroundImage: (_photoUrl != null && _photoUrl!.isNotEmpty)
+          ? NetworkImage(_photoUrl!)
+          : null,
+      child: (_photoUrl == null || _photoUrl!.isEmpty)
+          ? Icon(Icons.person, size: widget.size)
+          : null,
     );
   }
 }
@@ -425,6 +532,22 @@ class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
     );
   }
 
+  bool _isOtherTyping(Map<String, dynamic>? data) {
+    if (data == null || widget.otherUid.isEmpty) return false;
+
+    final typing = data['typing'];
+    if (typing is! Map || typing[widget.otherUid] != true) return false;
+
+    final updatedAtMap = data['typingUpdatedAt'];
+    final rawUpdatedAt = updatedAtMap is Map
+        ? updatedAtMap[widget.otherUid]
+        : null;
+    if (rawUpdatedAt is! Timestamp) return false;
+
+    return DateTime.now().difference(rawUpdatedAt.toDate()) <
+        const Duration(seconds: 8);
+  }
+
   @override
   Widget build(BuildContext context) {
     // -------------------------------------------------------------------------
@@ -432,14 +555,19 @@ class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
     // -------------------------------------------------------------------------
     if (widget.isGroup) {
       return StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('clubs').doc(widget.chatId).snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('clubs')
+            .doc(widget.chatId)
+            .snapshots(),
         builder: (context, snap) {
           if (snap.hasData && snap.data!.exists) {
-            _groupCache[widget.chatId] = snap.data!.data() as Map<String, dynamic>;
+            _groupCache[widget.chatId] =
+                snap.data!.data() as Map<String, dynamic>;
           }
           final d = _groupCache[widget.chatId];
           final imageUrl = d?['imageUrl'] as String?;
-          final displayName = (d?['name'] as String?) ?? widget.groupName ?? 'Kulüp Sohbeti';
+          final displayName =
+              (d?['name'] as String?) ?? widget.groupName ?? 'Kulüp Sohbeti';
 
           return InkWell(
             onTap: () => _openClubDetails(context),
@@ -449,7 +577,9 @@ class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
                 CircleAvatar(
                   radius: 18,
                   backgroundColor: Colors.grey.shade800,
-                  backgroundImage: (imageUrl != null && imageUrl.isNotEmpty) ? NetworkImage(imageUrl) : null,
+                  backgroundImage: (imageUrl != null && imageUrl.isNotEmpty)
+                      ? NetworkImage(imageUrl)
+                      : null,
                   child: (imageUrl == null || imageUrl.isEmpty)
                       ? const Icon(Icons.groups, color: Colors.white, size: 20)
                       : null,
@@ -459,7 +589,9 @@ class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
                   child: Text(
                     displayName,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -482,14 +614,17 @@ class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
     final cachedUser = UserCacheService.instance.getFromCache(widget.otherUid);
     final photo = _photoUrl ?? cachedUser?.photoURL ?? '';
 
-    final title = (widget.initialTitle != null && widget.initialTitle!.isNotEmpty)
+    final title =
+        (widget.initialTitle != null && widget.initialTitle!.isNotEmpty)
         ? widget.initialTitle!
         : (cachedUser?.displayName ?? 'Kullanıcı');
 
     return InkWell(
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: widget.otherUid)),
+        MaterialPageRoute(
+          builder: (_) => PublicProfileScreen(uid: widget.otherUid),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -499,8 +634,10 @@ class _ChatAppBarTitleState extends State<ChatAppBarTitle> {
             backgroundColor: Colors.grey.shade800,
             backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
             child: photo.isEmpty
-                ? Text(title.isNotEmpty ? title[0].toUpperCase() : '?',
-                    style: const TextStyle(color: Colors.white))
+                ? Text(
+                    title.isNotEmpty ? title[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white),
+                  )
                 : null,
           ),
           const SizedBox(width: 10),
@@ -527,13 +664,19 @@ class _EventMessageBubble extends StatefulWidget {
   final DateTime? timestamp;
   final String? chatId;
 
-  const _EventMessageBubble({required this.data, required this.isMine, this.timestamp, this.chatId});
+  const _EventMessageBubble({
+    required this.data,
+    required this.isMine,
+    this.timestamp,
+    this.chatId,
+  });
 
   @override
   State<_EventMessageBubble> createState() => _EventMessageBubbleState();
 }
 
-class _EventMessageBubbleState extends State<_EventMessageBubble> with AutomaticKeepAliveClientMixin {
+class _EventMessageBubbleState extends State<_EventMessageBubble>
+    with AutomaticKeepAliveClientMixin {
   Stream<DocumentSnapshot>? _eventStream;
 
   @override
@@ -550,28 +693,42 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
     final chatId = widget.chatId;
     if (eventId != null && chatId != null) {
       _eventStream = FirebaseFirestore.instance
-          .collection('clubs').doc(chatId).collection('events').doc(eventId).snapshots();
+          .collection('clubs')
+          .doc(chatId)
+          .collection('events')
+          .doc(eventId)
+          .snapshots();
     }
   }
 
   @override
   void didUpdateWidget(covariant _EventMessageBubble old) {
     super.didUpdateWidget(old);
-    if (widget.data['id'] != old.data['id'] || widget.chatId != old.chatId) _initStream();
+    if (widget.data['id'] != old.data['id'] || widget.chatId != old.chatId)
+      _initStream();
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_eventStream == null) return _buildContent(context, widget.data, null, false);
+    if (_eventStream == null)
+      return _buildContent(context, widget.data, null, false);
     return StreamBuilder<DocumentSnapshot>(
       stream: _eventStream,
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.active && snap.hasData && !snap.data!.exists) {
+        if (snap.connectionState == ConnectionState.active &&
+            snap.hasData &&
+            !snap.data!.exists) {
           return Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-            child: const Text('Bu etkinlik silindi.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'Bu etkinlik silindi.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
           );
         }
         final liveData = (snap.hasData && snap.data!.exists)
@@ -579,12 +736,22 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
             : widget.data;
         final myUid = FirebaseAuth.instance.currentUser?.uid;
         final participants = List<String>.from(liveData['participants'] ?? []);
-        return _buildContent(context, liveData, widget.data['id'], participants.contains(myUid));
+        return _buildContent(
+          context,
+          liveData,
+          widget.data['id'],
+          participants.contains(myUid),
+        );
       },
     );
   }
 
-  Widget _buildContent(BuildContext context, Map<String, dynamic> eventMap, String? eventId, bool isJoined) {
+  Widget _buildContent(
+    BuildContext context,
+    Map<String, dynamic> eventMap,
+    String? eventId,
+    bool isJoined,
+  ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final borderColor = isDark ? Colors.white10 : Colors.black12;
@@ -612,11 +779,19 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
     } else {
       statusColor = Colors.amber.shade700;
       statusBgColor = Colors.amber.withOpacity(0.1);
-      timeText = difference.inDays > 0 ? '${difference.inDays} Gün Kaldı' : '${difference.inHours} Saat Kaldı';
+      timeText = difference.inDays > 0
+          ? '${difference.inDays} Gün Kaldı'
+          : '${difference.inHours} Saat Kaldı';
     }
 
-    final btnColor = isExpired ? Colors.grey : (isJoined ? Colors.redAccent : (isLive ? Colors.green : Colors.amber));
-    final btnText = isExpired ? 'Sona Erdi' : (isJoined ? 'Etkinlikten Ayrıl' : 'Etkinliğe Katıl');
+    final btnColor = isExpired
+        ? Colors.grey
+        : (isJoined
+              ? Colors.redAccent
+              : (isLive ? Colors.green : Colors.amber));
+    final btnText = isExpired
+        ? 'Sona Erdi'
+        : (isJoined ? 'Etkinlikten Ayrıl' : 'Etkinliğe Katıl');
 
     return Container(
       width: 260,
@@ -624,8 +799,17 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isLive ? Colors.green.withOpacity(0.5) : borderColor, width: isLive ? 2 : 1),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
+        border: Border.all(
+          color: isLive ? Colors.green.withOpacity(0.5) : borderColor,
+          width: isLive ? 2 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -633,59 +817,107 @@ class _EventMessageBubbleState extends State<_EventMessageBubble> with Automatic
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-                color: statusBgColor, borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
+              color: statusBgColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+            ),
             child: Row(
               children: [
                 Icon(Icons.calendar_today, color: statusColor, size: 20),
                 const SizedBox(width: 8),
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${date.day}.${date.month}.${date.year}',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: primaryTextColor, fontSize: 13)),
-                  Text(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${date.day}.${date.month}.${date.year}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: primaryTextColor,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
                       '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}',
-                      style: TextStyle(color: subTextColor, fontSize: 11)),
-                ]),
+                      style: TextStyle(color: subTextColor, fontSize: 11),
+                    ),
+                  ],
+                ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                      color: cardBg.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: statusColor)),
-                  child: Text(timeText,
-                      style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                    color: cardBg.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: statusColor),
+                  ),
+                  child: Text(
+                    timeText,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(eventMap['title'] ?? 'Etkinlik',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryTextColor)),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 36,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  eventMap['title'] ?? 'Etkinlik',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: primaryTextColor,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 36,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
                       backgroundColor: btnColor,
                       foregroundColor: isJoined ? Colors.white : Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       padding: EdgeInsets.zero,
-                      elevation: 0),
-                  onPressed: isExpired
-                      ? null
-                      : () {
-                          if (widget.chatId != null && eventId != null) {
-                            final myUid = FirebaseAuth.instance.currentUser?.uid;
-                            if (myUid != null) ClubService.instance.joinEvent(widget.chatId!, eventId, myUid);
-                          }
-                        },
-                  child: Text(btnText, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      elevation: 0,
+                    ),
+                    onPressed: isExpired
+                        ? null
+                        : () {
+                            if (widget.chatId != null && eventId != null) {
+                              final myUid =
+                                  FirebaseAuth.instance.currentUser?.uid;
+                              if (myUid != null)
+                                ClubService.instance.joinEvent(
+                                  widget.chatId!,
+                                  eventId,
+                                  myUid,
+                                );
+                            }
+                          },
+                    child: Text(
+                      btnText,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
           ),
         ],
       ),
@@ -702,13 +934,19 @@ class _PollMessageBubble extends StatefulWidget {
   final DateTime? timestamp;
   final String? chatId;
 
-  const _PollMessageBubble({required this.initialData, required this.isMine, this.timestamp, this.chatId});
+  const _PollMessageBubble({
+    required this.initialData,
+    required this.isMine,
+    this.timestamp,
+    this.chatId,
+  });
 
   @override
   State<_PollMessageBubble> createState() => _PollMessageBubbleState();
 }
 
-class _PollMessageBubbleState extends State<_PollMessageBubble> with AutomaticKeepAliveClientMixin {
+class _PollMessageBubbleState extends State<_PollMessageBubble>
+    with AutomaticKeepAliveClientMixin {
   Stream<DocumentSnapshot>? _pollStream;
 
   @override
@@ -725,28 +963,43 @@ class _PollMessageBubbleState extends State<_PollMessageBubble> with AutomaticKe
     final chatId = widget.chatId;
     if (pollId != null && chatId != null) {
       _pollStream = FirebaseFirestore.instance
-          .collection('clubs').doc(chatId).collection('polls').doc(pollId).snapshots();
+          .collection('clubs')
+          .doc(chatId)
+          .collection('polls')
+          .doc(pollId)
+          .snapshots();
     }
   }
 
   @override
   void didUpdateWidget(covariant _PollMessageBubble old) {
     super.didUpdateWidget(old);
-    if (widget.initialData['id'] != old.initialData['id'] || widget.chatId != old.chatId) _initStream();
+    if (widget.initialData['id'] != old.initialData['id'] ||
+        widget.chatId != old.chatId)
+      _initStream();
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_pollStream == null) return _buildContent(context, widget.initialData, null);
+    if (_pollStream == null)
+      return _buildContent(context, widget.initialData, null);
     return StreamBuilder<DocumentSnapshot>(
       stream: _pollStream,
       builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.active && snap.hasData && !snap.data!.exists) {
+        if (snap.connectionState == ConnectionState.active &&
+            snap.hasData &&
+            !snap.data!.exists) {
           return Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-            child: const Text('Bu anket silindi.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'Bu anket silindi.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
           );
         }
         final liveData = (snap.hasData && snap.data!.exists)
@@ -757,13 +1010,19 @@ class _PollMessageBubbleState extends State<_PollMessageBubble> with AutomaticKe
     );
   }
 
-  Widget _buildContent(BuildContext context, Map<String, dynamic> data, String? pollId) {
+  Widget _buildContent(
+    BuildContext context,
+    Map<String, dynamic> data,
+    String? pollId,
+  ) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final borderColor = isDark ? Colors.white10 : Colors.black12;
     final primaryTextColor = isDark ? Colors.white : Colors.black;
     final subTextColor = isDark ? Colors.white70 : Colors.black54;
-    final optionBg = isDark ? Colors.grey.withOpacity(0.1) : Colors.grey.withOpacity(0.05);
+    final optionBg = isDark
+        ? Colors.grey.withOpacity(0.1)
+        : Colors.grey.withOpacity(0.05);
 
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     final options = List<dynamic>.from(data['options'] ?? []);
@@ -775,78 +1034,129 @@ class _PollMessageBubbleState extends State<_PollMessageBubble> with AutomaticKe
       width: 280,
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-          color: cardBg, borderRadius: BorderRadius.circular(16), border: Border.all(color: borderColor)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          width: double.infinity,
-          decoration: BoxDecoration(
-              color: isDark ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.1),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
-          child: Row(children: [
-            const Icon(Icons.poll, color: Colors.lightBlueAccent, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-                child: Text(data['question'] ?? 'Anket',
-                    style: TextStyle(fontWeight: FontWeight.bold, color: primaryTextColor))),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            children: List.generate(options.length, (index) {
-              final opt = options[index];
-              final count = opt['voteCount'] ?? 0;
-              final percent = totalVotes == 0 ? 0.0 : (count / totalVotes);
-              final isSelected = (myVoteIndex == index);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: InkWell(
-                  onTap: () {
-                    if (widget.chatId != null && pollId != null && myUid != null) {
-                      ClubService.instance.votePoll(widget.chatId!, pollId, myUid, index);
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(8),
-                  child: Stack(children: [
-                    Container(
-                      height: 40,
-                      decoration: BoxDecoration(
-                          color: optionBg,
-                          borderRadius: BorderRadius.circular(8),
-                          border: isSelected ? Border.all(color: Colors.green) : null),
-                      child: FractionallySizedBox(
-                        widthFactor: percent > 0 ? percent : 0.01,
-                        child: Container(
-                          decoration: BoxDecoration(
-                              color: isSelected
-                                  ? Colors.green.withOpacity(0.3)
-                                  : Colors.lightBlueAccent.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.grey.withOpacity(0.1),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.poll, color: Colors.lightBlueAccent, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    data['question'] ?? 'Anket',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: primaryTextColor,
                     ),
-                    Container(
-                      height: 40,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                        Text(opt['text'], style: TextStyle(fontSize: 13, color: primaryTextColor)),
-                        Text('${(percent * 100).toInt()}% ($count)',
-                            style: TextStyle(fontSize: 11, color: subTextColor)),
-                      ]),
-                    ),
-                  ]),
+                  ),
                 ),
-              );
-            }),
+              ],
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          child: Text('$totalVotes Toplam Oy',
-              style: TextStyle(fontSize: 11, color: subTextColor.withOpacity(0.6))),
-        ),
-      ]),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: List.generate(options.length, (index) {
+                final opt = options[index];
+                final count = opt['voteCount'] ?? 0;
+                final percent = totalVotes == 0 ? 0.0 : (count / totalVotes);
+                final isSelected = (myVoteIndex == index);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    onTap: () {
+                      if (widget.chatId != null &&
+                          pollId != null &&
+                          myUid != null) {
+                        ClubService.instance.votePoll(
+                          widget.chatId!,
+                          pollId,
+                          myUid,
+                          index,
+                        );
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(
+                      children: [
+                        Container(
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: optionBg,
+                            borderRadius: BorderRadius.circular(8),
+                            border: isSelected
+                                ? Border.all(color: Colors.green)
+                                : null,
+                          ),
+                          child: FractionallySizedBox(
+                            widthFactor: percent > 0 ? percent : 0.01,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? Colors.green.withOpacity(0.3)
+                                    : Colors.lightBlueAccent.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          height: 40,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                opt['text'],
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: primaryTextColor,
+                                ),
+                              ),
+                              Text(
+                                '${(percent * 100).toInt()}% ($count)',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: subTextColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Text(
+              '$totalVotes Toplam Oy',
+              style: TextStyle(
+                fontSize: 11,
+                color: subTextColor.withOpacity(0.6),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

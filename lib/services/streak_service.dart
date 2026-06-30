@@ -11,15 +11,15 @@ class StreakService {
   final bool isTestMode = false;
 
   _StreakState? _cached;
-  String?       _cachedUid;
+  String? _cachedUid;
 
   void applyProfileData(Map<String, dynamic> data) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _cached = _StreakState(
-      lastActiveDate:   (data['lastActiveDate']  as String?) ?? '',
-      streakCount:      (data['streakCount']     as num?)?.toInt() ?? 0,
-      currentWeekKey:   (data['currentWeekKey']  as String?) ?? '',
+      lastActiveDate: (data['lastActiveDate'] as String?) ?? '',
+      streakCount: (data['streakCount'] as num?)?.toInt() ?? 0,
+      currentWeekKey: (data['currentWeekKey'] as String?) ?? '',
       weeklyActiveDays: List<int>.from(data['weeklyActiveDays'] ?? []),
     );
     _cachedUid = uid;
@@ -28,7 +28,10 @@ class StreakService {
   Future<void> preload(String uid) async {
     if (_cachedUid == uid && _cached != null) return;
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
       _applyDoc(uid, doc);
     } catch (_) {}
   }
@@ -37,9 +40,9 @@ class StreakService {
     if (!doc.exists) return;
     final d = (doc.data() as Map<String, dynamic>?) ?? {};
     _cached = _StreakState(
-      lastActiveDate:   (d['lastActiveDate']  as String?) ?? '',
-      streakCount:      (d['streakCount']     as num?)?.toInt() ?? 0,
-      currentWeekKey:   (d['currentWeekKey']  as String?) ?? '',
+      lastActiveDate: (d['lastActiveDate'] as String?) ?? '',
+      streakCount: (d['streakCount'] as num?)?.toInt() ?? 0,
+      currentWeekKey: (d['currentWeekKey'] as String?) ?? '',
       weeklyActiveDays: List<int>.from(d['weeklyActiveDays'] ?? []),
     );
     _cachedUid = uid;
@@ -52,24 +55,27 @@ class StreakService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+
     // 1. KESİN ÇÖZÜM: Uygulama yeniden başlatıldıysa hafıza (RAM) boşalmıştır.
     // İşlem yapmadan önce mutlaka veritabanındaki gerçek 'son tarihi' ve 'seriyi' çekiyoruz!
     if (_cached == null || _cachedUid != uid) {
       try {
-        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
         _applyDoc(uid, doc);
       } catch (e) {
         debugPrint('Streak okuma hatası: $e');
       }
     }
 
-    final rootNavigator = Navigator.of(context, rootNavigator: true);
-
-    final now        = DateTime.now();
-    final todayStr   = _dayStr(now);
-    final weekday    = now.weekday;
-    final weekKey    = _weekKey(now);
-    final yesterday  = _dayStr(now.subtract(const Duration(days: 1)));
+    final now = DateTime.now();
+    final todayStr = _dayStr(now);
+    final weekday = now.weekday;
+    final weekKey = _weekKey(now);
+    final yesterday = _dayStr(now.subtract(const Duration(days: 1)));
 
     final cached = (_cachedUid == uid) ? _cached : null;
 
@@ -78,19 +84,19 @@ class StreakService {
 
     // Yeni durumu hesapla
     final next = _computeNext(
-      current:      cached,
-      todayStr:     todayStr,
+      current: cached,
+      todayStr: todayStr,
       yesterdayStr: yesterday,
-      weekKey:      weekKey,
-      weekday:      weekday,
+      weekKey: weekKey,
+      weekday: weekday,
     );
 
     // Hafızayı anında güncelle
-    _cached    = next;
+    _cached = next;
     _cachedUid = uid;
 
-    // Arayüzü Göster (Seri 2 ve üstüyse animasyonu gösterir)
-    final required = isTestMode ? 1 : 2;
+    // Arayüzü Göster (ilk gün dahil, günde sadece bir kez)
+    final required = 1;
     if (next.streakCount >= required) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (rootNavigator.mounted) {
@@ -100,7 +106,7 @@ class StreakService {
             isScrollControlled: true,
             useSafeArea: true,
             builder: (_) => StreakBottomSheet(
-              streak:     next.streakCount,
+              streak: next.streakCount,
               activeDays: next.weeklyActiveDays,
             ),
           );
@@ -109,8 +115,10 @@ class StreakService {
     }
 
     // Firebase'e gerçek zamanlı kaydet
-    _saveToFirestore(uid, next)
-        .catchError((e) => debugPrint('Streak kayıt hatası: $e'));
+    _saveToFirestore(
+      uid,
+      next,
+    ).catchError((e) => debugPrint('Streak kayıt hatası: $e'));
   }
 
   // ---------------------------------------------------------------------------
@@ -123,10 +131,10 @@ class StreakService {
     required String weekKey,
     required int weekday,
   }) {
-    int streak          = current?.streakCount ?? 0;
-    String lastDate     = current?.lastActiveDate ?? '';
+    int streak = current?.streakCount ?? 0;
+    String lastDate = current?.lastActiveDate ?? '';
     List<int> activeDays = List<int>.from(current?.weeklyActiveDays ?? []);
-    String dbWeekKey    = current?.currentWeekKey ?? '';
+    String dbWeekKey = current?.currentWeekKey ?? '';
 
     final isAlreadyActiveToday = lastDate == todayStr;
 
@@ -142,18 +150,18 @@ class StreakService {
     if (!activeDays.contains(weekday)) activeDays.add(weekday);
 
     return _StreakState(
-      lastActiveDate:   todayStr,
-      streakCount:      streak,
-      currentWeekKey:   weekKey,
+      lastActiveDate: todayStr,
+      streakCount: streak,
+      currentWeekKey: weekKey,
       weeklyActiveDays: activeDays,
     );
   }
 
   Future<void> _saveToFirestore(String uid, _StreakState state) async {
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
-      'lastActiveDate':   state.lastActiveDate,
-      'streakCount':      state.streakCount,
-      'currentWeekKey':   state.currentWeekKey,
+      'lastActiveDate': state.lastActiveDate,
+      'streakCount': state.streakCount,
+      'currentWeekKey': state.currentWeekKey,
       'weeklyActiveDays': state.weeklyActiveDays,
     }, SetOptions(merge: true));
   }
@@ -168,9 +176,9 @@ class StreakService {
 }
 
 class _StreakState {
-  final String    lastActiveDate;
-  final int       streakCount;
-  final String    currentWeekKey;
+  final String lastActiveDate;
+  final int streakCount;
+  final String currentWeekKey;
   final List<int> weeklyActiveDays;
 
   const _StreakState({

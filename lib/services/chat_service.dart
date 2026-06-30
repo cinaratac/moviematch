@@ -96,7 +96,7 @@ class ChatService {
     required String otherUid,
     Map<String, dynamic>? movie,
     String? imageUrl,
-    String? customType, 
+    String? customType,
     Map<String, dynamic>? customData,
   }) async {
     final chatRef = _fs.collection('chats').doc(chatId);
@@ -122,19 +122,23 @@ class ChatService {
     } else if (customType != null) {
       msgData['type'] = customType;
       if (customData != null) {
-        msgData[customType] = customData; 
+        msgData[customType] = customData;
       }
     }
 
     batch.set(msgRef, msgData);
 
-    // 2. Sohbet Verisi 
+    // 2. Sohbet Verisi
     String lastMsgText = trimmed;
     if (lastMsgText.isEmpty) {
-      if (movie != null) lastMsgText = '🎬 Film paylaştı';
-      else if (imageUrl != null) lastMsgText = '📷 Fotoğraf';
-      else if (customType == 'event') lastMsgText = '📅 Etkinlik';
-      else if (customType == 'poll') lastMsgText = '📊 Anket';
+      if (movie != null)
+        lastMsgText = '🎬 Film paylaştı';
+      else if (imageUrl != null)
+        lastMsgText = '📷 Fotoğraf';
+      else if (customType == 'event')
+        lastMsgText = '📅 Etkinlik';
+      else if (customType == 'poll')
+        lastMsgText = '📊 Anket';
     }
 
     final me = _auth.currentUser;
@@ -145,7 +149,7 @@ class ChatService {
       'lastMessageAt': FieldValue.serverTimestamp(),
       'lastMessageAuthorId': fromUid,
       'updatedAt': FieldValue.serverTimestamp(),
-      'participants': FieldValue.arrayUnion([fromUid, otherUid]), 
+      'participants': FieldValue.arrayUnion([fromUid, otherUid]),
     };
 
     batch.set(chatRef, chatUpdate, SetOptions(merge: true));
@@ -153,12 +157,14 @@ class ChatService {
 
     // 3. Nokta notasyonu (İç içe map güncellemeleri) sadece update() ile güvenli çalışır:
     final Map<String, dynamic> nestedUpdates = {
-      'hiddenFor.$fromUid': FieldValue.delete(), // Mesaj atan kişi sildiyse sohbet tekrar görünsün
+      'hiddenFor.$fromUid':
+          FieldValue.delete(), // Mesaj atan kişi sildiyse sohbet tekrar görünsün
     };
 
     if (otherUid.isNotEmpty) {
       nestedUpdates['unreadCounts.$otherUid'] = FieldValue.increment(1);
-      nestedUpdates['hiddenFor.$otherUid'] = FieldValue.delete(); // Karşı taraf sildiyse ona da tekrar görünsün
+      nestedUpdates['hiddenFor.$otherUid'] =
+          FieldValue.delete(); // Karşı taraf sildiyse ona da tekrar görünsün
 
       if (me != null) {
         nestedUpdates['titles.$otherUid'] = me.displayName ?? 'Kullanıcı';
@@ -195,13 +201,12 @@ class ChatService {
       } catch (_) {}
     }
   }
+
   Future<void> markAsRead(String chatId, String uid) async {
     final chatRef = _fs.collection('chats').doc(chatId);
-    
+
     try {
-      await chatRef.update({
-        'unreadCounts.$uid': 0,
-      });
+      await chatRef.update({'unreadCounts.$uid': 0});
     } catch (_) {}
 
     // Okundu bilgisini güncelle...
@@ -212,17 +217,38 @@ class ChatService {
     }, SetOptions(merge: true));
   }
 
+  Future<void> setTyping(String chatId, String uid, bool isTyping) async {
+    if (chatId.isEmpty || uid.isEmpty) return;
+
+    final chatRef = _fs.collection('chats').doc(chatId);
+    final updates = <String, dynamic>{};
+
+    if (isTyping) {
+      updates['typing.$uid'] = true;
+      updates['typingUpdatedAt.$uid'] = FieldValue.serverTimestamp();
+    } else {
+      updates['typing.$uid'] = FieldValue.delete();
+      updates['typingUpdatedAt.$uid'] = FieldValue.delete();
+    }
+
+    try {
+      await chatRef.update(updates);
+    } catch (_) {}
+  }
+
   Future<void> hideChatFor(String chatId, String uid) async {
     if (uid.isEmpty) return;
     try {
       await _fs.collection('chats').doc(chatId).update({
         'hiddenFor.$uid': true,
-        'unreadCounts.$uid': 0, // Sadece bu kullanıcının okunmamış sayısını sıfırla
+        'unreadCounts.$uid':
+            0, // Sadece bu kullanıcının okunmamış sayısını sıfırla
       });
     } catch (e) {
       // Belge henüz yoksa oluşabilecek hatayı yoksayıyoruz
     }
   }
+
   Stream<int> unreadCountForChat(String chatId, String myUid) {
     return _fs.collection('chats').doc(chatId).snapshots().map((chatSnap) {
       final data = chatSnap.data();

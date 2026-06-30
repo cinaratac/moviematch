@@ -4,14 +4,16 @@ class StreakBottomSheet extends StatelessWidget {
   final int streak;
   final List<int> activeDays;
 
-  const StreakBottomSheet({super.key, required this.streak, required this.activeDays});
+  const StreakBottomSheet({
+    super.key,
+    required this.streak,
+    required this.activeDays,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // İngilizce kısaltmalar
-    final days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    final days = ['P', 'S', 'Ç', 'P', 'C', 'C', 'P'];
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -22,10 +24,14 @@ class StreakBottomSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text("🔥", style: TextStyle(fontSize: 64)),
+          const Icon(
+            Icons.local_fire_department_rounded,
+            color: Colors.orange,
+            size: 72,
+          ),
           const SizedBox(height: 8),
           Text(
-            "$streak Günlük Seri!",
+            '$streak Günlük Seri!',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -34,19 +40,17 @@ class StreakBottomSheet extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            "Harika gidiyorsun! Sinema tutkun böyle devam etsin.",
+            'Harika gidiyorsun! Sinema tutkun böyle devam etsin.',
             textAlign: TextAlign.center,
             style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
           ),
           const SizedBox(height: 24),
-          
-          // M T W T F S S TAKVİMİ
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: List.generate(7, (index) {
-              int dayNumber = index + 1; // 1 (Pzt) ile 7 (Pzr)
-              bool isActive = activeDays.contains(dayNumber);
-              
+              final dayNumber = index + 1;
+              final isActive = activeDays.contains(dayNumber);
+
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -55,11 +59,19 @@ class StreakBottomSheet extends StatelessWidget {
                     height: 36,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: isActive ? Colors.orange : (isDark ? Colors.grey[800] : Colors.grey[300]),
-                      border: isActive ? Border.all(color: Colors.orangeAccent, width: 2) : null,
+                      color: isActive
+                          ? Colors.orange
+                          : (isDark ? Colors.grey[800] : Colors.grey[300]),
+                      border: isActive
+                          ? Border.all(color: Colors.orangeAccent, width: 2)
+                          : null,
                     ),
                     child: isActive
-                        ? const Icon(Icons.local_fire_department, color: Colors.white, size: 20)
+                        ? const Icon(
+                            Icons.local_fire_department,
+                            color: Colors.white,
+                            size: 20,
+                          )
                         : null,
                   ),
                   const SizedBox(height: 8),
@@ -76,10 +88,7 @@ class StreakBottomSheet extends StatelessWidget {
               );
             }),
           ),
-          
           const SizedBox(height: 32),
-          
-          // DEVAM ET BUTONU
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -88,9 +97,14 @@ class StreakBottomSheet extends StatelessWidget {
                 backgroundColor: Colors.orange,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
-              child: const Text("Devam Et", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              child: const Text(
+                'Devam Et',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
             ),
           ),
           const SizedBox(height: 16),

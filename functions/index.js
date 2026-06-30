@@ -206,6 +206,67 @@ exports.deleteNewsArticle = onCall(async (request) => {
   return { ok: true };
 });
 
+exports.getAnnouncement = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertNewsEditor(uid);
+
+  const doc = await admin.firestore().collection("system").doc("announcement").get();
+  return { announcement: doc.exists ? doc.data() : null };
+});
+
+exports.saveAnnouncement = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertNewsEditor(uid);
+
+  const data = request.data || {};
+  const title = cleanText(data.title, 160);
+  const message = cleanText(data.message, 3000);
+  const imageUrl = cleanText(data.imageUrl, 1200);
+  const isActive = data.isActive === true;
+
+  if (isActive && (!title || !message)) {
+    throw new HttpsError("invalid-argument", "Aktif duyuru icin baslik ve mesaj gerekli.");
+  }
+
+  const db = admin.firestore();
+  const ref = db.collection("system").doc("announcement");
+  const snap = await ref.get();
+  const previous = snap.exists ? snap.data() : {};
+  const previousItems = Array.isArray(previous.items) ? previous.items : [];
+  const id = cleanText(data.id, 120) || `announcement_${Date.now()}`;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  let items = previousItems;
+  if (title || message) {
+    const item = {
+      id,
+      title,
+      message,
+      imageUrl,
+      date: admin.firestore.Timestamp.now(),
+      updatedBy: uid,
+    };
+
+    items = [
+      item,
+      ...previousItems.filter((entry) => entry && entry.id !== id),
+    ].slice(0, 30);
+  }
+
+  await ref.set({
+    id,
+    title,
+    message,
+    imageUrl,
+    isActive,
+    items,
+    updatedAt: now,
+    updatedBy: uid,
+  }, { merge: true });
+
+  return { ok: true, id };
+});
+
 exports.saveTriviaQuestion = onCall(async (request) => {
   const uid = request.auth && request.auth.uid;
   await assertTriviaEditor(uid);

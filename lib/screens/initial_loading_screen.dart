@@ -34,9 +34,10 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 3500),
+      duration: const Duration(milliseconds: 1600),
     );
 
+    _controller.forward();
     _preloadAndGo();
   }
 
@@ -52,8 +53,15 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
     GlobalDataService.instance.startPreloading();
 
     await Future.wait([
-      _controller.forward(),       // Animasyonun tamamlanmasını bekle
-      _waitForCriticalData(),      // Kritik verilerin gelmesini bekle
+      Future.delayed(const Duration(milliseconds: 700)),
+      _waitForCriticalData().timeout(
+        const Duration(milliseconds: 2500),
+        onTimeout: () {
+          debugPrint(
+            "Başlangıç verisi gecikti, uygulama açılışı sürdürülüyor.",
+          );
+        },
+      ),
     ]);
 
     // Animasyon bittikten sonra kısa yumuşatma
@@ -75,33 +83,27 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
   Future<void> _waitForCriticalData() async {
     // 1. Önce sadece ana akış yüklensin
     await FeedController.instance.init();
-    
+
     // Yığılmayı önlemek için araya çeyrek saniyelik nefes payı koyuyoruz
     await Future.delayed(const Duration(milliseconds: 250));
-    
+
     // 2. Takip edilenler akışı yüklensin
     await FeedController.instance.initFollowing();
-    
+
     // 3. Profil ve diğer global veriler yüklensin (Zaman aşımı korumalı)
     try {
-      await GlobalDataService.instance.profileReady
-          .timeout(const Duration(seconds: 3));
+      await GlobalDataService.instance.profileReady.timeout(
+        const Duration(seconds: 3),
+      );
     } catch (_) {
       debugPrint("Profil yüklemesi zaman aşımına uğradı, devam ediliyor.");
     }
   }
 
-  /// Belirli bir koşul sağlanana kadar 50ms aralıklarla bekler.
-  Future<void> _waitUntil(bool Function() condition) async {
-    while (!condition()) {
-      await Future.delayed(const Duration(milliseconds: 50));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    const double barWidth       = 260.0;
-    const double characterSize  = 55.0;
+    const double barWidth = 260.0;
+    const double characterSize = 55.0;
     const double travelDistance = barWidth - characterSize;
 
     return Scaffold(
@@ -116,47 +118,62 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
                 animation: _controller,
                 builder: (context, _) {
                   final travel = _controller.value * travelDistance;
-                  return Column(children: [
-                    SizedBox(
-                      width: barWidth,
-                      height: characterSize,
-                      child: Stack(children: [
-                        Positioned(
-                          left: travel,
-                          bottom: 0,
-                          child: Transform.rotate(
-                            angle: _controller.value * 2 * pi * 3,
-                            child: const GreenEyesCharacter(size: characterSize),
-                          ),
+                  return Column(
+                    children: [
+                      SizedBox(
+                        width: barWidth,
+                        height: characterSize,
+                        child: Stack(
+                          children: [
+                            Positioned(
+                              left: travel,
+                              bottom: 0,
+                              child: Transform.rotate(
+                                angle: _controller.value * 2 * pi * 3,
+                                child: const GreenEyesCharacter(
+                                  size: characterSize,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ]),
-                    ),
-                    const SizedBox(height: 5),
-                    SizedBox(
-                      width: barWidth,
-                      height: 8,
-                      child: Stack(children: [
-                        Container(
-                          width: barWidth, height: 8,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
+                      ),
+                      const SizedBox(height: 5),
+                      SizedBox(
+                        width: barWidth,
+                        height: 8,
+                        child: Stack(
+                          children: [
+                            Container(
+                              width: barWidth,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                            ),
+                            Container(
+                              width: travel + characterSize,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2E7D32),
+                                borderRadius: BorderRadius.circular(4),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(
+                                      0xFF2E7D32,
+                                    ).withValues(alpha: 0.4),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        Container(
-                          width: travel + characterSize, height: 8,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2E7D32),
-                            borderRadius: BorderRadius.circular(4),
-                            boxShadow: [BoxShadow(
-                              color: const Color(0xFF2E7D32).withValues(alpha: 0.4),
-                              blurRadius: 8, offset: const Offset(0, 2),
-                            )],
-                          ),
-                        ),
-                      ]),
-                    ),
-                  ]);
+                      ),
+                    ],
+                  );
                 },
               ),
               const SizedBox(height: 40),
@@ -175,11 +192,9 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
                 style: TextStyle(
                   fontSize: 15,
                   height: 1.4,
-                  color: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.color
-                      ?.withValues(alpha: 0.7),
+                  color: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
                   fontStyle: FontStyle.italic,
                 ),
               ),
