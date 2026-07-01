@@ -43,7 +43,9 @@ class _MatchListScreenState extends State<MatchListScreen> {
 
     setState(() => _loading = true);
 
-    if (!forceRefresh && GlobalDataService.instance.myMatches != null && GlobalDataService.instance.myMatches!.isNotEmpty) {
+    if (!forceRefresh &&
+        GlobalDataService.instance.myMatches != null &&
+        GlobalDataService.instance.myMatches!.isNotEmpty) {
       if (mounted) {
         setState(() {
           _all = GlobalDataService.instance.myMatches!;
@@ -117,8 +119,8 @@ class _MatchListScreenState extends State<MatchListScreen> {
           : PageView.builder(
               scrollDirection: Axis.vertical,
               controller: _pageController,
-              physics: const BouncingScrollPhysics(),
-              allowImplicitScrolling: true,
+              physics: const ClampingScrollPhysics(),
+              allowImplicitScrolling: false,
               onPageChanged: (index) {
                 _markVisibleAsSeen(me.uid, _all[index].uid);
               },
@@ -126,7 +128,10 @@ class _MatchListScreenState extends State<MatchListScreen> {
               itemBuilder: (context, index) {
                 final m = _all[index];
                 // Dışarıdan çağırdığımız o temiz widget'ı basıyoruz
-                return MatchCard(key: ValueKey(m.uid), result: m);
+                return RepaintBoundary(
+                  key: ValueKey(m.uid),
+                  child: MatchCard(result: m),
+                );
               },
             ),
     );
@@ -141,11 +146,25 @@ class _NoMatchesCharacter extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.theater_comedy_rounded, size: 100, color: Colors.grey[700]),
+          Icon(
+            Icons.theater_comedy_rounded,
+            size: 100,
+            color: Colors.grey[700],
+          ),
           const SizedBox(height: 16),
-          const Text('Şimdilik bu kadar!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
+          const Text(
+            'Şimdilik bu kadar!',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
           const SizedBox(height: 8),
-          const Text('Daha fazla ortak zevk için filmlerini puanla.', style: TextStyle(color: Colors.grey)),
+          const Text(
+            'Daha fazla ortak zevk için filmlerini puanla.',
+            style: TextStyle(color: Colors.grey),
+          ),
         ],
       ),
     );

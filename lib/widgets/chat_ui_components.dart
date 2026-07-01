@@ -128,6 +128,93 @@ class EmptyChatView extends StatelessWidget {
 }
 
 // =============================================================================
+// GÜN AYIRICI (Instagram DM tarzı: Bugün / Dün / Çrş, 25 Haziran)
+// =============================================================================
+class DateSeparator extends StatelessWidget {
+  final DateTime date;
+
+  const DateSeparator({super.key, required this.date});
+
+  static const _dayNames = [
+    'Pzt',
+    'Sal',
+    'Çrş',
+    'Prş',
+    'Cum',
+    'Cmt',
+    'Paz',
+  ];
+
+  static const _monthNames = [
+    'Ocak',
+    'Şubat',
+    'Mart',
+    'Nisan',
+    'Mayıs',
+    'Haziran',
+    'Temmuz',
+    'Ağustos',
+    'Eylül',
+    'Ekim',
+    'Kasım',
+    'Aralık',
+  ];
+
+  String _label() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final thatDay = DateTime(date.year, date.month, date.day);
+
+    if (thatDay == today) return 'Bugün';
+    if (thatDay == yesterday) return 'Dün';
+
+    final dayName = _dayNames[date.weekday - 1];
+    final monthName = _monthNames[date.month - 1];
+
+    if (date.year == now.year) {
+      return '$dayName, ${date.day} $monthName';
+    }
+    return '$dayName, ${date.day} $monthName ${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark
+        ? Colors.white.withOpacity(0.08)
+        : Colors.black.withOpacity(0.06);
+    final textColor = isDark ? Colors.white70 : Colors.black54;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            _label(),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// MESAJ TESLİM DURUMU (Gönderildi / Teslim Edildi / Görüldü)
+// =============================================================================
+enum MessageDeliveryStatus { sent, delivered, read }
+
+// =============================================================================
 // MESAJ SATIRI
 // =============================================================================
 class MessageRow extends StatelessWidget {
@@ -140,6 +227,7 @@ class MessageRow extends StatelessWidget {
   final dynamic eventData;
   final dynamic pollData;
   final String? chatId;
+  final MessageDeliveryStatus? deliveryStatus;
 
   const MessageRow({
     super.key,
@@ -152,6 +240,7 @@ class MessageRow extends StatelessWidget {
     this.eventData,
     this.pollData,
     this.chatId,
+    this.deliveryStatus,
   });
 
   @override
@@ -188,6 +277,7 @@ class MessageRow extends StatelessWidget {
               movie: movie,
               isMine: isMine,
               timestamp: timestamp,
+              deliveryStatus: isMine ? deliveryStatus : null,
             ),
           if (isMine) const SizedBox(width: 8),
         ],
@@ -199,11 +289,39 @@ class MessageRow extends StatelessWidget {
 // =============================================================================
 // MESAJ BALONU
 // =============================================================================
+// =============================================================================
+// TESLİM/OKUNDU TİKLERİ (WhatsApp tarzı)
+// =============================================================================
+class _DeliveryTicks extends StatelessWidget {
+  final MessageDeliveryStatus status;
+  final Color baseColor;
+
+  const _DeliveryTicks({required this.status, required this.baseColor});
+
+  @override
+  Widget build(BuildContext context) {
+    // Görüldü: mavi/vurgu renginde çift tik
+    // Teslim edildi: soluk renkte çift tik
+    // Gönderildi: soluk renkte tek tik
+    final readColor = Colors.lightBlueAccent.shade100;
+
+    switch (status) {
+      case MessageDeliveryStatus.sent:
+        return Icon(Icons.done, size: 14, color: baseColor);
+      case MessageDeliveryStatus.delivered:
+        return Icon(Icons.done_all, size: 14, color: baseColor);
+      case MessageDeliveryStatus.read:
+        return Icon(Icons.done_all, size: 14, color: readColor);
+    }
+  }
+}
+
 class MessageBubble extends StatelessWidget {
   final String text;
   final dynamic movie;
   final bool isMine;
   final DateTime? timestamp;
+  final MessageDeliveryStatus? deliveryStatus;
 
   const MessageBubble({
     super.key,
@@ -211,6 +329,7 @@ class MessageBubble extends StatelessWidget {
     this.movie,
     required this.isMine,
     this.timestamp,
+    this.deliveryStatus,
   });
 
   String _formatTime(DateTime dt) {
@@ -386,9 +505,21 @@ class MessageBubble extends StatelessWidget {
                   alignment: Alignment.bottomRight,
                   child: Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      _formatTime(timestamp!),
-                      style: TextStyle(fontSize: 10, color: timeColor),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatTime(timestamp!),
+                          style: TextStyle(fontSize: 10, color: timeColor),
+                        ),
+                        if (isMine && deliveryStatus != null) ...[
+                          const SizedBox(width: 3),
+                          _DeliveryTicks(
+                            status: deliveryStatus!,
+                            baseColor: timeColor,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),

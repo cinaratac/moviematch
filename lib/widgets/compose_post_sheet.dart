@@ -1,29 +1,30 @@
-import 'dart:io'; 
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart'; 
+import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
-import '../screens/search_movie.dart'; 
+import '../screens/search_movie.dart';
 import '../services/text_filter_service.dart';
 
 class ComposePostPage extends StatefulWidget {
   final int maxChars;
   final Map<String, dynamic>? initialMovie;
-  
+
   final Future<void> Function({
-    required String text, 
-    Map<String, dynamic>? movie, 
+    required String text,
+    Map<String, dynamic>? movie,
     // DİKKAT: Artık tek bir File yerine List<File> alıyor.
-    // Eğer mevcut onSend fonksiyonunuz tek resim destekliyorsa 
+    // Eğer mevcut onSend fonksiyonunuz tek resim destekliyorsa
     // bunu images.isNotEmpty ? images.first : null şeklinde dönüştürebilirsiniz.
     // Ancak tam destek için FeedService'in de güncellenmesi gerekir.
     // Şimdilik burada UI tarafını çoklu hale getiriyoruz.
-    List<File>? images, 
+    List<File>? images,
     double? rating,
     required bool isSpoiler,
     List<String>? tags,
     String? reviewTitle,
-  }) onSend;
+  })
+  onSend;
 
   const ComposePostPage({
     super.key,
@@ -41,15 +42,16 @@ class _ComposePostPageState extends State<ComposePostPage> {
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _tagsCtrl = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  final ImagePicker _picker = ImagePicker(); 
-  
+  final ImagePicker _picker = ImagePicker();
+
   Map<String, dynamic>? _selectedMovie;
-  
+
   // ÇOKLU RESİM LİSTESİ
   final List<File> _selectedImages = [];
-  
+
   double _rating = 0.0;
   bool _isSpoiler = false;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -58,11 +60,11 @@ class _ComposePostPageState extends State<ComposePostPage> {
       _selectedMovie = widget.initialMovie;
     }
   }
-  
+
   Future<void> _pickImages() async {
     try {
       final List<XFile> picked = await _picker.pickMultiImage(
-        maxWidth: 1080, 
+        maxWidth: 1080,
         imageQuality: 85,
       );
       if (picked.isNotEmpty) {
@@ -98,10 +100,10 @@ class _ComposePostPageState extends State<ComposePostPage> {
         _selectedMovie = {
           'title': result['title'],
           'poster': result['poster'],
-          'tmdbId': result['id'], 
+          'tmdbId': result['id'],
           'releaseDate': result['releaseDate'],
         };
-        _rating = 0; 
+        _rating = 0;
       });
     }
   }
@@ -110,7 +112,9 @@ class _ComposePostPageState extends State<ComposePostPage> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryGreen = const Color(0xFF2E7D32);
-    final bgGradientStart = isDark ? const Color(0xFF0D2410) : const Color(0xFFE8F5E9);
+    final bgGradientStart = isDark
+        ? const Color(0xFF0D2410)
+        : const Color(0xFFE8F5E9);
     final bgGradientEnd = isDark ? const Color(0xFF000000) : Colors.white;
     final cardColor = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -118,7 +122,13 @@ class _ComposePostPageState extends State<ComposePostPage> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text('Yeni Gönderi', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold)),
+        title: Text(
+          'Yeni Gönderi',
+          style: TextStyle(
+            color: isDark ? Colors.white : Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: IconThemeData(color: isDark ? Colors.white : Colors.black),
@@ -137,10 +147,16 @@ class _ComposePostPageState extends State<ComposePostPage> {
             builder: (context, value, _) {
               final text = value.text;
               final remaining = widget.maxChars - text.characters.length;
-              final hasContent = text.trim().isNotEmpty || _selectedImages.isNotEmpty || _selectedMovie != null;
+              final hasContent =
+                  text.trim().isNotEmpty ||
+                  _selectedImages.isNotEmpty ||
+                  _selectedMovie != null;
 
               return ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 children: [
                   // Kullanıcı Bilgisi
                   Row(
@@ -148,31 +164,46 @@ class _ComposePostPageState extends State<ComposePostPage> {
                       CircleAvatar(
                         radius: 20,
                         backgroundColor: Colors.grey.shade300,
-                        backgroundImage: FirebaseAuth.instance.currentUser?.photoURL != null
-                            ? NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!)
+                        backgroundImage:
+                            FirebaseAuth.instance.currentUser?.photoURL != null
+                            ? NetworkImage(
+                                FirebaseAuth.instance.currentUser!.photoURL!,
+                              )
                             : null,
-                        child: FirebaseAuth.instance.currentUser?.photoURL == null
+                        child:
+                            FirebaseAuth.instance.currentUser?.photoURL == null
                             ? const Icon(Icons.person, color: Colors.grey)
                             : null,
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        FirebaseAuth.instance.currentUser?.displayName ?? 'Kullanıcı',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor),
+                        FirebaseAuth.instance.currentUser?.displayName ??
+                            'Kullanıcı',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: textColor,
+                        ),
                       ),
                     ],
                   ),
-                  
+
                   const SizedBox(height: 16),
 
                   // Başlık (Opsiyonel)
                   if (_selectedMovie != null)
                     TextField(
                       controller: _titleCtrl,
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: textColor),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: textColor,
+                      ),
                       decoration: InputDecoration(
                         hintText: 'Başlık (İsteğe bağlı)',
-                        hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[400]),
+                        hintStyle: TextStyle(
+                          color: isDark ? Colors.grey[500] : Colors.grey[400],
+                        ),
                         border: InputBorder.none,
                         isDense: true,
                       ),
@@ -187,7 +218,9 @@ class _ComposePostPageState extends State<ComposePostPage> {
                     style: TextStyle(fontSize: 16, color: textColor),
                     decoration: InputDecoration(
                       hintText: 'Neler düşünüyorsun?',
-                      hintStyle: TextStyle(color: isDark ? Colors.grey[500] : Colors.grey[400]),
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.grey[500] : Colors.grey[400],
+                      ),
                       border: InputBorder.none,
                     ),
                   ),
@@ -218,11 +251,20 @@ class _ComposePostPageState extends State<ComposePostPage> {
                                 top: 4,
                                 right: 4,
                                 child: GestureDetector(
-                                  onTap: () => setState(() => _selectedImages.removeAt(index)),
+                                  onTap: () => setState(
+                                    () => _selectedImages.removeAt(index),
+                                  ),
                                   child: Container(
                                     padding: const EdgeInsets.all(4),
-                                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                                    child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.close,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -231,7 +273,7 @@ class _ComposePostPageState extends State<ComposePostPage> {
                         },
                       ),
                     ),
-                  
+
                   if (_selectedImages.isNotEmpty) const SizedBox(height: 16),
 
                   // FİLM KARTI
@@ -241,7 +283,12 @@ class _ComposePostPageState extends State<ComposePostPage> {
                       decoration: BoxDecoration(
                         color: cardColor,
                         borderRadius: BorderRadius.circular(12),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)],
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 8,
+                          ),
+                        ],
                       ),
                       child: Row(
                         children: [
@@ -251,20 +298,28 @@ class _ComposePostPageState extends State<ComposePostPage> {
                               child: PosterImage(
                                 posterUrl: _selectedMovie!['poster'],
                                 title: _selectedMovie!['title'],
-                                width: 40, height: 60, fit: BoxFit.cover,
+                                width: 40,
+                                height: 60,
+                                fit: BoxFit.cover,
                               ),
                             ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               _selectedMovie!['title'] ?? '',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: textColor),
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: textColor,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           IconButton(
-                            onPressed: () => setState(() { _selectedMovie = null; _rating = 0; }),
+                            onPressed: () => setState(() {
+                              _selectedMovie = null;
+                              _rating = 0;
+                            }),
                             icon: const Icon(Icons.close, color: Colors.grey),
                           ),
                         ],
@@ -286,16 +341,27 @@ class _ComposePostPageState extends State<ComposePostPage> {
                         if (_selectedMovie != null) ...[
                           Row(
                             children: [
-                              Text("Puan:", style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+                              Text(
+                                "Puan:",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: textColor,
+                                ),
+                              ),
                               const SizedBox(width: 12),
                               Row(
                                 children: List.generate(5, (index) {
                                   return GestureDetector(
-                                    onTap: () => setState(() => _rating = index + 1.0),
+                                    onTap: () =>
+                                        setState(() => _rating = index + 1.0),
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 2.0,
+                                      ),
                                       child: Icon(
-                                        index < _rating ? Icons.star_rounded : Icons.star_border_rounded,
+                                        index < _rating
+                                            ? Icons.star_rounded
+                                            : Icons.star_border_rounded,
                                         color: Colors.amber,
                                         size: 28,
                                       ),
@@ -322,14 +388,26 @@ class _ComposePostPageState extends State<ComposePostPage> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(children: [
-                              Icon(Icons.visibility_off_outlined, color: _isSpoiler ? Colors.red : Colors.grey),
-                              const SizedBox(width: 8),
-                              Text("Spoiler içerir", style: TextStyle(color: textColor, fontWeight: FontWeight.w500)),
-                            ]),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.visibility_off_outlined,
+                                  color: _isSpoiler ? Colors.red : Colors.grey,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  "Spoiler içerir",
+                                  style: TextStyle(
+                                    color: textColor,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
                             Switch(
                               value: _isSpoiler,
-                              onChanged: (val) => setState(() => _isSpoiler = val),
+                              onChanged: (val) =>
+                                  setState(() => _isSpoiler = val),
                               activeColor: Colors.red,
                             ),
                           ],
@@ -345,12 +423,18 @@ class _ComposePostPageState extends State<ComposePostPage> {
                     children: [
                       IconButton(
                         onPressed: _pickImages,
-                        icon: Icon(Icons.photo_library_outlined, color: primaryGreen),
+                        icon: Icon(
+                          Icons.photo_library_outlined,
+                          color: primaryGreen,
+                        ),
                         tooltip: 'Fotoğraf Ekle',
                       ),
                       IconButton(
                         onPressed: _pickMovie,
-                        icon: Icon(Icons.movie_creation_outlined, color: primaryGreen),
+                        icon: Icon(
+                          Icons.movie_creation_outlined,
+                          color: primaryGreen,
+                        ),
                         tooltip: 'Film Ekle',
                       ),
                       const Spacer(),
@@ -358,38 +442,77 @@ class _ComposePostPageState extends State<ComposePostPage> {
                         '$remaining',
                         style: TextStyle(
                           color: remaining < 0 ? Colors.red : Colors.grey,
-                          fontWeight: FontWeight.bold
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(width: 12),
                       FilledButton(
-                        onPressed: !hasContent || remaining < 0
+                        onPressed: _isSubmitting || !hasContent || remaining < 0
                             ? null
-                            : () {
-                                if (TextFilterService.hasProfanity(text) || TextFilterService.hasProfanity(_titleCtrl.text)) {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uygunsuz içerik.'), backgroundColor: Colors.red));
+                            : () async {
+                                if (TextFilterService.hasProfanity(text) ||
+                                    TextFilterService.hasProfanity(
+                                      _titleCtrl.text,
+                                    )) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Uygunsuz içerik.'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
                                   return;
                                 }
                                 List<String> tagsList = [];
                                 if (_tagsCtrl.text.isNotEmpty) {
-                                  tagsList = _tagsCtrl.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+                                  tagsList = _tagsCtrl.text
+                                      .split(',')
+                                      .map((e) => e.trim())
+                                      .where((e) => e.isNotEmpty)
+                                      .toList();
                                 }
-                                widget.onSend(
-                                  text: text, 
-                                  movie: _selectedMovie, 
-                                  images: _selectedImages, // LİSTE GÖNDERİLİYOR
-                                  rating: _rating > 0 ? _rating : null,
-                                  isSpoiler: _isSpoiler,
-                                  tags: tagsList,
-                                  reviewTitle: _titleCtrl.text,
-                                );
+                                setState(() => _isSubmitting = true);
+                                try {
+                                  await widget.onSend(
+                                    text: text,
+                                    movie: _selectedMovie,
+                                    images:
+                                        _selectedImages, // LİSTE GÖNDERİLİYOR
+                                    rating: _rating > 0 ? _rating : null,
+                                    isSpoiler: _isSpoiler,
+                                    tags: tagsList,
+                                    reviewTitle: _titleCtrl.text,
+                                  );
+                                } catch (_) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Hata oluÅŸtu.'),
+                                      ),
+                                    );
+                                  }
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _isSubmitting = false);
+                                  }
+                                }
                               },
                         style: FilledButton.styleFrom(
                           backgroundColor: primaryGreen,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
                         ),
-                        child: const Text('Paylaş', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Paylaş',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ],
                   ),

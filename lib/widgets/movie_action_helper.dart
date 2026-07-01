@@ -7,11 +7,13 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../services/chat_service.dart';
+import '../controllers/feed_controller.dart';
 import '../services/user_cache_service.dart';
 import '../widgets/compose_post_sheet.dart';
 import '../widgets/poster_image.dart';
 import '../models/shelf_target.dart';
 import '../services/feed_service.dart';
+import '../services/tab_service.dart';
 import '../services/watched_movies_service.dart';
 import '../screens/movie_detail_screen.dart';
 
@@ -331,8 +333,14 @@ class _MovieActionSheetState extends State<_MovieActionSheet> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ComposePostPage(
-          maxChars: 280,
-          initialMovie: {'title': title, 'poster': posterUrl},
+          maxChars: 1000,
+          initialMovie: {
+            'title': title,
+            'poster': posterUrl,
+            if (tmdbId != null) 'tmdbId': tmdbId,
+            if (tmdbId != null) 'id': tmdbId,
+            if (docId != null) 'docId': docId,
+          },
           onSend:
               ({
                 required text,
@@ -379,7 +387,13 @@ class _MovieActionSheetState extends State<_MovieActionSheet> {
                 );
 
                 if (context.mounted) {
-                  Navigator.pop(context);
+                  FeedController.instance.refresh();
+                  TabService.instance.changeTab(0);
+                  Future.microtask(
+                    () => Navigator.of(
+                      context,
+                    ).popUntil((route) => route.isFirst),
+                  );
                   ScaffoldMessenger.of(
                     context,
                   ).showSnackBar(const SnackBar(content: Text('Paylaşıldı!')));

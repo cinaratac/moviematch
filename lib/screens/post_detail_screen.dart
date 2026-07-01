@@ -12,8 +12,9 @@ class PostDetailScreen extends StatelessWidget {
   // Film ID'sini güvenli şekilde çekmek için yardımcı fonksiyon
   int? _parseTmdbId(Map<String, dynamic> m) {
     dynamic rawId = (m['movie'] is Map)
-        ? (m['movie']['tmdbId'] ?? m['movie']['id'])
-        : m['tmdbId'];
+        ? (m['movie']['tmdbId'] ?? m['movie']['id'] ?? m['movie']['movieId'])
+        : null;
+    rawId ??= m['tmdbId'] ?? m['movieId'] ?? m['id'];
     if (rawId is int) return rawId;
     if (rawId is String) return int.tryParse(rawId);
     if (rawId is double) return rawId.toInt();
@@ -160,8 +161,14 @@ class PostDetailScreen extends StatelessWidget {
                   tags: tags,
 
                   // Film Bilgileri
-                  movieTitle: m['movieTitle'] ?? m['movie']?['title'],
-                  moviePoster: m['moviePoster'] ?? m['movie']?['poster'],
+                  movieTitle:
+                      m['movieTitle'] ??
+                      (m['movie'] is Map ? m['movie']['title'] : null),
+                  moviePoster:
+                      m['moviePoster'] ??
+                      (m['movie'] is Map
+                          ? (m['movie']['poster'] ?? m['movie']['posterUrl'])
+                          : null),
                   movieTmdbId: movieTmdbId,
 
                   // Görseller (Hem eski hem yeni yapı desteği)

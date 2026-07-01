@@ -217,6 +217,52 @@ class ChatService {
     }, SetOptions(merge: true));
   }
 
+  // --- YENİ EKLENEN: TESLİM EDİLDİ SİSTEMİ ---
+  // Mesaj sayısından bağımsız, sohbet dokümanında TEK bir alanı güncelliyor.
+  // Bu yüzden 100 mesaj da gelse 1000 mesaj da gelse maliyet sabittir.
+  Future<void> markDelivered(String chatId, String uid) async {
+    if (chatId.isEmpty || uid.isEmpty) return;
+    try {
+      await _fs.collection('chats').doc(chatId).update({
+        'deliveredUpTo.$uid': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Sohbet dokümanı henüz yoksa veya erişim yoksa sessizce geç
+    }
+  }
+
+  /// Karşı tarafın sohbeti en son ne zaman okuduğunu dinler (mavi çift tik için).
+  Stream<DateTime?> otherReadAtStream(String chatId, String otherUid) {
+    if (chatId.isEmpty || otherUid.isEmpty) {
+      return Stream.value(null);
+    }
+    return _fs
+        .collection('chats')
+        .doc(chatId)
+        .collection('reads')
+        .doc(otherUid)
+        .snapshots()
+        .map((snap) => (snap.data()?['lastReadAt'] as Timestamp?)?.toDate());
+  }
+
+  /// Karşı tarafın cihazına en son hangi ana kadar mesaj ulaştığını dinler
+  /// (gri çift tik için). Sohbet dokümanındaki tek bir alanı dinlediği için ucuzdur.
+  Stream<DateTime?> otherDeliveredAtStream(String chatId, String otherUid) {
+    if (chatId.isEmpty || otherUid.isEmpty) {
+      return Stream.value(null);
+    }
+    return _fs.collection('chats').doc(chatId).snapshots().map((snap) {
+      final data = snap.data();
+      if (data == null) return null;
+      final map = data['deliveredUpTo'];
+      if (map is Map) {
+        final ts = map[otherUid];
+        if (ts is Timestamp) return ts.toDate();
+      }
+      return null;
+    });
+  }
+
   Future<void> setTyping(String chatId, String uid, bool isTyping) async {
     if (chatId.isEmpty || uid.isEmpty) return;
 

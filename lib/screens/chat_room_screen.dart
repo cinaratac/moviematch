@@ -62,6 +62,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   late Stream<List<String>> _mutedChatsStream;
 
+  // --- YENİ EKLENEN: Teslim edildi / Görüldü tik sistemi ---
+  DateTime? _otherReadAt;
+  DateTime? _otherDeliveredAt;
+  StreamSubscription? _otherReadSub;
+  StreamSubscription? _otherDeliveredSub;
+
   Future<void> _loadBlockStatus() async {
     if (widget.isGroup) {
       if (mounted) setState(() => _isLoadingBlock = false);
@@ -120,6 +126,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
 
     _svc.markAsRead(widget.chatId, myUid);
+    // Oda açıldığı an, o ana kadarki tüm mesajlar bu cihaza teslim edilmiş
+    // sayılır (görüldü zaten markAsRead ile ayrıca işaretleniyor).
+    _svc.markDelivered(widget.chatId, myUid);
+
+    // --- YENİ EKLENEN: Karşı tarafın "teslim edildi" / "görüldü" bilgisini dinle ---
+    if (!widget.isGroup) {
+      _otherReadSub = _svc
+          .otherReadAtStream(widget.chatId, widget.otherUid)
+          .listen((dt) {
+            if (mounted) setState(() => _otherReadAt = dt);
+          });
+      _otherDeliveredSub = _svc
+          .otherDeliveredAtStream(widget.chatId, widget.otherUid)
+          .listen((dt) {
+            if (mounted) setState(() => _otherDeliveredAt = dt);
+          });
+    }
 
     // 4. En son mesajın okundu bilgisi için dinleyici
     _latestSub = FirebaseFirestore.instance
@@ -135,6 +158,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           final author = (data['authorId'] ?? data['from'] ?? '') as String;
           if (author != myUid) {
             _svc.markAsRead(widget.chatId, myUid);
+            _svc.markDelivered(widget.chatId, myUid);
           }
         });
 
@@ -260,6 +284,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
 
     _latestSub?.cancel();
+    _otherReadSub?.cancel();
+    _otherDeliveredSub?.cancel();
     _muteDebounceTimer?.cancel();
     _typingStopTimer?.cancel();
     _ctrl.removeListener(_handleTypingChanged);
@@ -639,6 +665,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                 final mine = author == myUid;
                                 final text = (m['text'] ?? '') as String;
                                 final ts = (m['createdAt'] as Timestamp?);
+                                final dt = ts?.toDate();
 
                                 final type = m['type'] as String?;
                                 final eventData =
@@ -646,17 +673,72 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                 final pollData =
                                     m['poll'] as Map<String, dynamic>?;
 
-                                return MessageRow(
+                                // --- YENİ EKLENEN: Teslim/Görüldü tik durumu ---
+                                // Sadece kendi mesajlarım için, gruplarda gösterilmez.
+                                MessageDeliveryStatus? deliveryStatus;
+                                if (mine && dt != null && !widget.isGroup) {
+                                  if (_otherReadAt != null &&
+                                      !dt.isAfter(_otherReadAt!)) {
+                                    deliveryStatus =
+                                        MessageDeliveryStatus.read;
+                                  } else if (_otherDeliveredAt != null &&
+                                      !dt.isAfter(_otherDeliveredAt!)) {
+                                    deliveryStatus =
+                                        MessageDeliveryStatus.delivered;
+                                  } else {
+                                    deliveryStatus =
+                                        MessageDeliveryStatus.sent;
+                                  }
+                                }
+
+                                final row = MessageRow(
                                   key: ValueKey(doc.id),
                                   text: text,
                                   movie: m['movie'],
                                   isMine: mine,
-                                  timestamp: ts?.toDate(),
+                                  timestamp: dt,
                                   authorId: author,
                                   type: type,
                                   eventData: eventData,
                                   pollData: pollData,
                                   chatId: widget.chatId,
+                                  deliveryStatus: deliveryStatus,
+                                );
+
+                                // --- GÜN AYIRICI: Instagram DM tarzı ---
+                                // Liste 'reverse: true' olduğundan i+1
+                                // ekrandaki bir üst (daha eski) mesajı temsil eder.
+                                // Bu mesaj günün ilk mesajıysa (kendinden bir
+                                // önceki -eski- mesaj farklı bir güne aitse ya
+                                // da sohbetteki en eski mesajsa) üzerine
+                                // tarih etiketi ekleriz.
+                                bool isFirstOfDay = false;
+                                if (dt != null) {
+                                  if (i == docs.length - 1) {
+                                    isFirstOfDay = true;
+                                  } else {
+                                    final nextData = docs[i + 1].data();
+                                    final nextTs =
+                                        nextData['createdAt'] as Timestamp?;
+                                    final nextDt = nextTs?.toDate();
+                                    if (nextDt == null ||
+                                        nextDt.year != dt.year ||
+                                        nextDt.month != dt.month ||
+                                        nextDt.day != dt.day) {
+                                      isFirstOfDay = true;
+                                    }
+                                  }
+                                }
+
+                                if (!isFirstOfDay) return row;
+
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    DateSeparator(date: dt!),
+                                    row,
+                                  ],
                                 );
                               },
                             );

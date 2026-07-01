@@ -99,7 +99,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                       onPressed: () async {
                         // Engeli kaldır aksiyonu (BlockingService kullanılıyor)
                         await BlockingService.instance.unblockUser(
-                          currentUserId: _currentUid!,
+                          currentUserId: _currentUid,
                           targetUserId: targetUid,
                         );
 

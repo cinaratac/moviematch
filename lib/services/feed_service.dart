@@ -3,10 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 class FeedService {
   FeedService._internal();
-  
+
   // Bellekteki TEK ve yegane kopya
   static final FeedService instance = FeedService._internal();
-  
+
   // Geriye dönük uyumluluk: Uygulamanın diğer yerlerinde hata vermemesi için
   // diğer erişim yöntemlerini de bu TEK kopyaya yönlendiriyoruz.
   factory FeedService() => instance;
@@ -94,6 +94,7 @@ class FeedService {
 
     final doc = _fs.collection('posts').doc();
     final now = FieldValue.serverTimestamp();
+    final normalizedMovie = _normalizeMovie(movie);
 
     await doc.set({
       'id': doc.id,
@@ -102,7 +103,11 @@ class FeedService {
       'handle': (handle ?? '').trim(),
       'photoURL': photoURL ?? '', // Geriye dönük uyumluluk
       'photoURLs': photoURLs ?? [], // Yeni liste
-      'movie': movie,
+      'movie': normalizedMovie,
+      'movieTitle': normalizedMovie?['title'],
+      'moviePoster':
+          normalizedMovie?['poster'] ?? normalizedMovie?['posterUrl'],
+      'tmdbId': normalizedMovie?['tmdbId'],
       'text': text.trim(),
       'rating': rating,
       'isSpoiler': isSpoiler,
@@ -116,6 +121,50 @@ class FeedService {
       'createdAt': now,
       'updatedAt': now,
     }, SetOptions(merge: false));
+  }
+
+  Map<String, dynamic>? _normalizeMovie(Map<String, dynamic>? movie) {
+    if (movie == null) return null;
+
+    final normalized = Map<String, dynamic>.from(movie);
+    final title = (normalized['title'] ?? normalized['name'] ?? '').toString();
+    var poster =
+        (normalized['poster'] ??
+                normalized['posterUrl'] ??
+                normalized['image'] ??
+                normalized['poster_path'] ??
+                '')
+            .toString();
+    if (poster.startsWith('/')) {
+      poster = 'https://image.tmdb.org/t/p/w500$poster';
+    }
+    final tmdbId = _coerceTmdbId(
+      normalized['tmdbId'] ?? normalized['id'] ?? normalized['movieId'],
+    );
+
+    if (title.isNotEmpty) normalized['title'] = title;
+    if (poster.isNotEmpty) {
+      normalized['poster'] = poster;
+      normalized['posterUrl'] = poster;
+    }
+    if (tmdbId != null) {
+      normalized['tmdbId'] = tmdbId;
+      normalized['id'] = tmdbId;
+    }
+
+    return normalized;
+  }
+
+  int? _coerceTmdbId(dynamic raw) {
+    if (raw is int && raw > 0) return raw;
+    if (raw is num && raw > 0) return raw.toInt();
+    if (raw is String) {
+      final trimmed = raw.trim();
+      if (trimmed.startsWith('film:')) return null;
+      final parsed = int.tryParse(trimmed);
+      if (parsed != null && parsed > 0) return parsed;
+    }
+    return null;
   }
 
   Future<void> toggleLike({required String postId, required bool like}) async {

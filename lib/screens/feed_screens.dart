@@ -21,6 +21,7 @@ import 'package:fluttergirdi/widgets/dashboard_stats_row.dart';
 import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
 import 'package:fluttergirdi/widgets/friends_popular_watched.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
+import 'package:fluttergirdi/services/tab_service.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -72,8 +73,9 @@ class _FeedPageState extends State<FeedPage> {
 
   int? _parseTmdbId(Map<String, dynamic> m) {
     dynamic rawId = (m['movie'] is Map)
-        ? (m['movie']['tmdbId'] ?? m['movie']['id'])
-        : m['tmdbId'];
+        ? (m['movie']['tmdbId'] ?? m['movie']['id'] ?? m['movie']['movieId'])
+        : null;
+    rawId ??= m['tmdbId'] ?? m['movieId'] ?? m['id'];
     if (rawId is int) return rawId;
     if (rawId is String) return int.tryParse(rawId);
     if (rawId is double) return rawId.toInt();
@@ -210,7 +212,7 @@ class _FeedPageState extends State<FeedPage> {
                 isScrollControlled: true,
                 useSafeArea: true,
                 builder: (_) => ComposePostPage(
-                  maxChars: 280,
+                  maxChars: 1000,
                   // --- GÜNCELLENEN KISIM: images (List<File>) ALINIYOR ---
                   onSend:
                       ({
@@ -222,7 +224,6 @@ class _FeedPageState extends State<FeedPage> {
                         tags,
                         reviewTitle,
                       }) async {
-                        Navigator.pop(context);
                         final user = FirebaseAuth.instance.currentUser;
                         if (user == null) return;
 
@@ -260,10 +261,12 @@ class _FeedPageState extends State<FeedPage> {
                           );
 
                           if (mounted) {
+                            Navigator.of(context).pop();
+                            TabService.instance.changeTab(0);
+                            _controller.refresh();
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Gönderildi!')),
                             );
-                            _controller.refresh();
                           }
                         } catch (e) {
                           if (mounted)
@@ -331,12 +334,13 @@ class _FeedPageState extends State<FeedPage> {
         final createdAt = (m['createdAt'] as Timestamp?);
         final timeLabel = DateHelper.timeAgo(createdAt);
 
-        final movieTitle = ((m['movieTitle'] ?? m['movie']?['title']) ?? '')
+        final movieMap = m['movie'] is Map ? m['movie'] as Map : null;
+        final movieTitle = ((m['movieTitle'] ?? movieMap?['title']) ?? '')
             .toString();
         final moviePoster =
             ((m['moviePoster'] ??
-                        m['movie']?['poster'] ??
-                        m['movie']?['posterUrl']) ??
+                        movieMap?['poster'] ??
+                        movieMap?['posterUrl']) ??
                     '')
                 .toString();
 
@@ -429,9 +433,9 @@ class _FollowingFeedState extends State<_FollowingFeed>
     dynamic rawId;
     if (m['movie'] is Map) {
       final movieMap = m['movie'] as Map;
-      rawId = movieMap['tmdbId'] ?? movieMap['id'];
+      rawId = movieMap['tmdbId'] ?? movieMap['id'] ?? movieMap['movieId'];
     }
-    rawId ??= m['tmdbId'];
+    rawId ??= m['tmdbId'] ?? m['movieId'] ?? m['id'];
     if (rawId is int) return rawId;
     if (rawId is String) return int.tryParse(rawId);
     if (rawId is double) return rawId.toInt();
@@ -521,12 +525,13 @@ class _FollowingFeedState extends State<_FollowingFeed>
           final timeLabel = createdAt == null
               ? ''
               : DateHelper.timeAgo(createdAt.toDate());
-          final movieTitle = ((m['movieTitle'] ?? (m['movie']?['title'])) ?? '')
+          final movieMap = m['movie'] is Map ? m['movie'] as Map : null;
+          final movieTitle = ((m['movieTitle'] ?? movieMap?['title']) ?? '')
               .toString();
           final moviePoster =
               ((m['moviePoster'] ??
-                          (m['movie']?['poster'] ??
-                              m['movie']?['posterUrl'])) ??
+                          movieMap?['poster'] ??
+                          movieMap?['posterUrl']) ??
                       '')
                   .toString();
 

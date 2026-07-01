@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -157,7 +158,7 @@ class _MatchCardState extends State<MatchCard>
       ...m.commonFavorites,
       ...m.commonFiveStars,
       ...m.commonWatchlist,
-    }.take(5).toList();
+    }.take(18).toList();
 
     final commonFuture = commonKeys.isEmpty
         ? Future.value(<FilmItem>[])
@@ -165,37 +166,39 @@ class _MatchCardState extends State<MatchCard>
     final userFuture = _loadMatchUserData(widget.result.uid);
     final followFuture = _loadMatchFollowStatus(me, widget.result.uid);
 
-    try {
-      final films = await commonFuture;
-      if (mounted) setState(() => _commonFilms = films);
-    } catch (_) {
-      if (mounted) setState(() => _commonFilms = []);
-    }
+    List<FilmItem> commonFilms = [];
+    List<FilmItem> favoriteFilms = [];
+    Map<String, dynamic>? userData;
+    bool isFollowing = false;
 
     try {
-      final data = await userFuture;
-      if (mounted && data != null) {
-        setState(() => _userData = data);
-        var favKeys = List<String>.from(data['favoritesKeys'] ?? []);
-        if (favKeys.isEmpty) {
-          favKeys = List<String>.from(data['fiveStarKeys'] ?? []);
-        }
-
-        final films = favKeys.isEmpty
-            ? <FilmItem>[]
-            : await fetchFilmsByKeys(favKeys.take(5).toList());
-        if (mounted) setState(() => _favoriteFilms = films);
-      } else {
-        if (mounted) setState(() => _favoriteFilms = []);
-      }
-    } catch (_) {
-      if (mounted) setState(() => _favoriteFilms = []);
-    }
-
-    try {
-      final isFollowing = await followFuture;
-      if (mounted) setState(() => _isAdded = isFollowing);
+      commonFilms = await commonFuture;
     } catch (_) {}
+
+    try {
+      userData = await userFuture;
+      if (userData != null) {
+        var favKeys = List<String>.from(userData['favoritesKeys'] ?? []);
+        if (favKeys.isEmpty) {
+          favKeys = List<String>.from(userData['fiveStarKeys'] ?? []);
+        }
+        favoriteFilms = favKeys.isEmpty
+            ? <FilmItem>[]
+            : await fetchFilmsByKeys(favKeys.take(18).toList());
+      }
+    } catch (_) {}
+
+    try {
+      isFollowing = await followFuture;
+    } catch (_) {}
+
+    if (!mounted) return;
+    setState(() {
+      _commonFilms = commonFilms;
+      _userData = userData;
+      _favoriteFilms = favoriteFilms;
+      _isAdded = isFollowing;
+    });
   }
 
   Future<void> _addFriend() async {
@@ -321,25 +324,32 @@ class _MatchCardState extends State<MatchCard>
           const SizedBox(height: 7),
           SizedBox(
             height: 76,
-            child: ListView.builder(
+            child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: math.min(films.length, 5),
+              primary: false,
+              physics: const BouncingScrollPhysics(),
+              clipBehavior: Clip.none,
+              itemCount: films.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 final film = films[index];
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
+                return RepaintBoundary(
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => _handleFilmTap(context, film),
-                    child: AspectRatio(
-                      aspectRatio: 2 / 3,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: PosterImage(
-                          posterUrl: film.posterUrl,
-                          title: film.title,
-                          tmdbId: film.tmdbId,
-                          enableFallback: true,
-                          cacheWidth: 120,
+                    child: Tooltip(
+                      message: film.title,
+                      child: AspectRatio(
+                        aspectRatio: 2 / 3,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: PosterImage(
+                            posterUrl: film.posterUrl,
+                            title: film.title,
+                            tmdbId: film.tmdbId,
+                            enableFallback: true,
+                            cacheWidth: 120,
+                          ),
                         ),
                       ),
                     ),
@@ -478,19 +488,24 @@ class _MatchCardState extends State<MatchCard>
       fit: StackFit.expand,
       children: [
         if (photoUrl != null && photoUrl.isNotEmpty)
-          ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Transform.scale(
-              scale: 1.06,
-              child: Image.network(
-                photoUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  color: const Color(0xFF101510),
-                  child: const Icon(
-                    Icons.person,
-                    size: 120,
-                    color: Colors.white24,
+          RepaintBoundary(
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+              child: Transform.scale(
+                scale: 1.03,
+                child: CachedNetworkImage(
+                  imageUrl: photoUrl,
+                  fit: BoxFit.cover,
+                  memCacheWidth: 480,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  errorWidget: (_, _, _) => Container(
+                    color: const Color(0xFF101510),
+                    child: const Icon(
+                      Icons.person,
+                      size: 120,
+                      color: Colors.white24,
+                    ),
                   ),
                 ),
               ),
@@ -528,247 +543,239 @@ class _MatchCardState extends State<MatchCard>
             alignment: Alignment.bottomCenter,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 10.0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(28),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.34),
-                      borderRadius: BorderRadius.circular(28),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.10),
-                      ),
+              child: RepaintBoundary(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.50),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.10),
                     ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: Colors.greenAccent,
-                              width: 1.2,
-                            ),
-                          ),
-                          child: Text(
-                            '%$pct Sinema Uyumu',
-                            style: const TextStyle(
-                              color: Colors.greenAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.greenAccent,
+                            width: 1.2,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        child: Text(
+                          '%$pct Sinema Uyumu',
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
 
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            GestureDetector(
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: _openProfile,
+                            child: CircleAvatar(
+                              radius: 40,
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.14,
+                              ),
+                              backgroundImage:
+                                  photoUrl != null && photoUrl.isNotEmpty
+                                  ? CachedNetworkImageProvider(
+                                      photoUrl,
+                                      maxWidth: 160,
+                                      maxHeight: 160,
+                                    )
+                                  : null,
+                              child: photoUrl == null || photoUrl.isEmpty
+                                  ? const Icon(
+                                      Icons.person,
+                                      color: Colors.white70,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: GestureDetector(
                               onTap: _openProfile,
-                              child: CircleAvatar(
-                                radius: 40,
-                                backgroundColor: Colors.white.withValues(
-                                  alpha: 0.14,
-                                ),
-                                backgroundImage:
-                                    photoUrl != null && photoUrl.isNotEmpty
-                                    ? NetworkImage(photoUrl)
-                                    : null,
-                                child: photoUrl == null || photoUrl.isEmpty
-                                    ? const Icon(
-                                        Icons.person,
-                                        color: Colors.white70,
-                                      )
-                                    : null,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: _openProfile,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      displayName,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 26,
-                                        fontWeight: FontWeight.bold,
-                                        height: 1.1,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    displayName,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.bold,
+                                      height: 1.1,
                                     ),
-                                  ],
-                                ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
                               ),
                             ),
+                          ),
+                        ],
+                      ),
+
+                      if (bio.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+                          child: Text(
+                            bio,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              height: 1.3,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (age != null && age > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: _buildPrefChip('$age Yaş', Colors.white),
+                              ),
+
+                            // TÜR TIKLANAMAZ (ID'si yok)
+                            if (genres.isNotEmpty)
+                              _buildDetailRowWithChips(
+                                'Sevilen Türler:',
+                                genres,
+                                Colors.blueAccent,
+                              ),
+
+                            // YÖNETMENE TIKLAYINCA YÖNETMEN SAYFASINA GİDER
+                            if (directors.isNotEmpty)
+                              _buildDetailRowWithChips(
+                                'Yönetmenler:',
+                                directors,
+                                Colors.amberAccent,
+                                onTapChip: (id, name) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => DirectorScreen(
+                                        directorId: id,
+                                        directorName: name,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+
+                            // OYUNCUYA TIKLAYINCA OYUNCU SAYFASINA GİDER
+                            if (actors.isNotEmpty)
+                              _buildDetailRowWithChips(
+                                'Oyuncular:',
+                                actors,
+                                Colors.purpleAccent,
+                                onTapChip: (id, name) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ActorScreen(
+                                        actorId: id,
+                                        actorName: name,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                           ],
                         ),
+                      ),
 
-                        if (bio.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              top: 8.0,
-                              bottom: 4.0,
-                            ),
-                            child: Text(
-                              bio,
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13,
-                                height: 1.3,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (age != null && age > 0)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8.0),
-                                  child: _buildPrefChip(
-                                    '$age Yaş',
-                                    Colors.white,
-                                  ),
-                                ),
-
-                              // TÜR TIKLANAMAZ (ID'si yok)
-                              if (genres.isNotEmpty)
-                                _buildDetailRowWithChips(
-                                  'Sevilen Türler:',
-                                  genres,
-                                  Colors.blueAccent,
-                                ),
-
-                              // YÖNETMENE TIKLAYINCA YÖNETMEN SAYFASINA GİDER
-                              if (directors.isNotEmpty)
-                                _buildDetailRowWithChips(
-                                  'Yönetmenler:',
-                                  directors,
-                                  Colors.amberAccent,
-                                  onTapChip: (id, name) {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => DirectorScreen(
-                                          directorId: id,
-                                          directorName: name,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-
-                              // OYUNCUYA TIKLAYINCA OYUNCU SAYFASINA GİDER
-                              if (actors.isNotEmpty)
-                                _buildDetailRowWithChips(
-                                  'Oyuncular:',
-                                  actors,
-                                  Colors.purpleAccent,
-                                  onTapChip: (id, name) {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ActorScreen(
-                                          actorId: id,
-                                          actorName: name,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
-
-                        if (_commonFilms == null && _favoriteFilms == null)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 20.0),
-                            child: Center(
-                              child: SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ),
-                          )
-                        else ...[
-                          if (_commonFilms != null && _commonFilms!.isNotEmpty)
-                            _buildFilmRow('Ortak Filmleriniz', _commonFilms!),
-                          if (_favoriteFilms != null &&
-                              _favoriteFilms!.isNotEmpty)
-                            _buildFilmRow('Favori Filmleri', _favoriteFilms!),
-                        ],
-
-                        const SizedBox(height: 14),
-
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _isAdded || _isLoading
-                                ? null
-                                : _addFriend,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _isAdded
-                                  ? Colors.white24
-                                  : const Color(0xFF2E7D32),
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: Colors.white24,
-                              disabledForegroundColor: Colors.white70,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              elevation: 0,
-                            ),
-                            icon: _isLoading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Icon(
-                                    _isAdded
-                                        ? Icons.how_to_reg_rounded
-                                        : Icons.person_add_alt_1_rounded,
-                                    size: 20,
-                                  ),
-                            label: Text(
-                              _isAdded ? 'Arkadaş Eklendi' : 'Arkadaş Ekle',
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
+                      if (_commonFilms == null && _favoriteFilms == null)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 20.0),
+                          child: Center(
+                            child: SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.grey,
                               ),
                             ),
                           ),
-                        ),
+                        )
+                      else ...[
+                        if (_commonFilms != null && _commonFilms!.isNotEmpty)
+                          _buildFilmRow('Ortak Filmleriniz', _commonFilms!),
+                        if (_favoriteFilms != null &&
+                            _favoriteFilms!.isNotEmpty)
+                          _buildFilmRow('Favori Filmleri', _favoriteFilms!),
                       ],
-                    ),
+
+                      const SizedBox(height: 14),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isAdded || _isLoading ? null : _addFriend,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isAdded
+                                ? Colors.white24
+                                : const Color(0xFF2E7D32),
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.white24,
+                            disabledForegroundColor: Colors.white70,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                          icon: _isLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  _isAdded
+                                      ? Icons.how_to_reg_rounded
+                                      : Icons.person_add_alt_1_rounded,
+                                  size: 20,
+                                ),
+                          label: Text(
+                            _isAdded ? 'Arkadaş Eklendi' : 'Arkadaş Ekle',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

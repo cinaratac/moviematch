@@ -13,6 +13,8 @@ import 'package:fluttergirdi/widgets/messages_skeleton.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
 // --- YENİ EKLENEN: Merkezi Önbellek Servisi ---
 import 'package:fluttergirdi/services/user_cache_service.dart';
+import 'package:fluttergirdi/services/follow_system_service.dart';
+import 'package:fluttergirdi/widgets/app_confirm_dialog.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -202,6 +204,16 @@ class _ChatsViewState extends State<_ChatsView>
   late Stream<QuerySnapshot<Map<String, dynamic>>> _chatsStream;
   final Set<String> _requestedUserUids = {};
 
+  // --- YENİ EKLENEN: Okunmamış / Arkadaşlar filtreleri ---
+  bool _showUnreadOnly = false;
+  bool _showFriendsOnly = false;
+  bool _loadingFriends = false;
+  Set<String>? _mutualFriendUids;
+
+  // --- YENİ EKLENEN: Genel teslim (delivered) işaretleme için tekrar
+  // yazmayı önleyen yerel önbellek (chatId -> en son işaretlenen zaman)
+  final Map<String, DateTime> _deliveredMarkedAt = {};
+
   @override
   bool get wantKeepAlive => true;
 
@@ -227,6 +239,61 @@ class _ChatsViewState extends State<_ChatsView>
         .snapshots();
   }
 
+  void _maybeMarkDelivered(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    for (final doc in docs) {
+      final data = doc.data();
+      final authorId = data['lastMessageAuthorId'] as String?;
+      // Son mesajı ben atmışsam veya yazan belli değilse atla.
+      if (authorId == null || authorId.isEmpty || authorId == widget.uid) {
+        continue;
+      }
+      final lastMsgAt = (data['lastMessageAt'] as Timestamp?)?.toDate();
+      if (lastMsgAt == null) continue;
+
+      final alreadyMarked = _deliveredMarkedAt[doc.id];
+      if (alreadyMarked != null && !lastMsgAt.isAfter(alreadyMarked)) {
+        continue; // Bu mesaj için zaten işaretlendi, gereksiz yazma yapma.
+      }
+      _deliveredMarkedAt[doc.id] = lastMsgAt;
+      ChatService.instance.markDelivered(doc.id, widget.uid);
+    }
+  }
+
+  Future<void> _loadMutualFriends() async {
+    try {
+      final results = await Future.wait([
+        FollowSystemService.I.fetchExistingFollowUsers(
+          uid: widget.uid,
+          collection: 'following',
+        ),
+        FollowSystemService.I.fetchExistingFollowUsers(
+          uid: widget.uid,
+          collection: 'followers',
+        ),
+      ]);
+      final followingIds = results[0].map((u) => u.uid).toSet();
+      final followerIds = results[1].map((u) => u.uid).toSet();
+      if (!mounted) return;
+      setState(() {
+        _mutualFriendUids = followingIds.intersection(followerIds);
+      });
+    } catch (_) {
+      if (mounted) setState(() => _mutualFriendUids = {});
+    }
+  }
+
+  Future<void> _toggleFriendsFilter() async {
+    if (!_showFriendsOnly && _mutualFriendUids == null) {
+      setState(() => _loadingFriends = true);
+      await _loadMutualFriends();
+      if (!mounted) return;
+      setState(() => _loadingFriends = false);
+    }
+    setState(() => _showFriendsOnly = !_showFriendsOnly);
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -234,6 +301,7 @@ class _ChatsViewState extends State<_ChatsView>
     return Scaffold(
       body: Column(
         children: [
+          _buildFilterChipsRow(context),
           if (widget.filterText.isEmpty) NewMatchHeader(currentUid: widget.uid),
 
           Expanded(
@@ -266,6 +334,12 @@ class _ChatsViewState extends State<_ChatsView>
 
                   return false;
                 });
+
+                // --- YENİ EKLENEN: GENEL TESLİM SİSTEMİ ---
+                // Sohbet odası açık olmasa bile, sohbet listesi ekranı açıkken
+                // karşı taraftan gelen yeni mesajları "teslim edildi" olarak
+                // işaretler. Sohbet başına TEK bir alanı günceller (ucuzdur).
+                Future.microtask(() => _maybeMarkDelivered(docs));
 
                 final otherUids = <String>{};
                 for (var doc in docs) {
@@ -324,6 +398,33 @@ class _ChatsViewState extends State<_ChatsView>
                   }).toList();
                 }
 
+                // --- YENİ EKLENEN: Okunmamışlar filtresi ---
+                if (_showUnreadOnly) {
+                  docs = docs.where((doc) {
+                    final data = doc.data();
+                    final unreadMap = (data['unreadCounts'] as Map?) ?? {};
+                    final count =
+                        (unreadMap[widget.uid] as num?)?.toInt() ?? 0;
+                    return count > 0;
+                  }).toList();
+                }
+
+                // --- YENİ EKLENEN: Arkadaşlar (karşılıklı takip) filtresi ---
+                if (_showFriendsOnly) {
+                  final friendIds = _mutualFriendUids ?? const <String>{};
+                  docs = docs.where((doc) {
+                    final parts = List.from(
+                      doc.data()['participants'] ?? [],
+                    );
+                    final otherId = parts.firstWhere(
+                      (id) => id != widget.uid,
+                      orElse: () => null,
+                    );
+                    if (otherId == null) return false;
+                    return friendIds.contains(otherId.toString());
+                  }).toList();
+                }
+
                 docs.sort((a, b) {
                   final tA =
                       (a.data()['updatedAt'] as Timestamp?)?.toDate() ??
@@ -334,8 +435,13 @@ class _ChatsViewState extends State<_ChatsView>
                   return tB.compareTo(tA);
                 });
 
+                final hasActiveFilter =
+                    widget.filterText.isNotEmpty ||
+                    _showUnreadOnly ||
+                    _showFriendsOnly;
+
                 if (docs.isEmpty) {
-                  return widget.filterText.isNotEmpty
+                  return hasActiveFilter
                       ? const Center(
                           child: Padding(
                             padding: EdgeInsets.all(20.0),
@@ -378,6 +484,93 @@ class _ChatsViewState extends State<_ChatsView>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChipsRow(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Row(
+        children: [
+          _FilterCloudChip(
+            label: 'Okunmamışlar',
+            icon: Icons.mark_chat_unread_outlined,
+            selected: _showUnreadOnly,
+            onTap: () => setState(() => _showUnreadOnly = !_showUnreadOnly),
+          ),
+          const SizedBox(width: 8),
+          _FilterCloudChip(
+            label: 'Arkadaşlar',
+            icon: Icons.people_alt_outlined,
+            selected: _showFriendsOnly,
+            loading: _loadingFriends,
+            onTap: _toggleFriendsFilter,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- YENİ EKLENEN: Sohbet filtreleme "bulut" çipi ---
+class _FilterCloudChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool loading;
+  final VoidCallback onTap;
+
+  const _FilterCloudChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final bgColor = selected
+        ? cs.primary
+        : cs.surfaceContainerHighest.withOpacity(0.5);
+    final fgColor = selected ? Colors.white : cs.onSurfaceVariant;
+
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: loading ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (loading)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: fgColor,
+                  ),
+                )
+              else
+                Icon(icon, size: 16, color: fgColor),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: fgColor,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -530,23 +723,13 @@ class ChatListTile extends StatelessWidget {
   }
 
   Future<void> _showDeleteDialog(BuildContext context, String docId) async {
-    final confirm = await showDialog<bool>(
+    final confirm = await showAppConfirmDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sohbeti Sil?'),
-        content: const Text('Sohbet listenizden kaldırılacak.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('İptal'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sil'),
-          ),
-        ],
-      ),
+      title: 'Sohbeti Sil?',
+      message: 'Sohbet listenizden kaldırılacak.',
+      confirmText: 'Sil',
+      icon: Icons.delete_outline_rounded,
+      destructive: true,
     );
 
     if (confirm == true) {
