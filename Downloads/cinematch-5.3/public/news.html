@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CineMatch - Sinema Gündemi</title>
+    <meta
+      name="description"
+      content="CineMatch sinema gündemi, film haberleri, vizyon notları ve eleştiriler."
+    />
+    <link rel="apple-touch-icon" sizes="180x180" href="images/favicon/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="images/favicon/favicon-16x16.png" />
+    <link rel="stylesheet" href="css/news.css" />
+  </head>
+  <body data-news-page="list">
+    <header class="news-header">
+      <nav class="news-nav">
+        <a class="brand" href="index.html">CineMatch</a>
+        <a class="nav-link" href="index.html">Ana Sayfa</a>
+      </nav>
+      <section class="news-hero">
+        <p>Sinema Gündemi</p>
+        <h1>Film haberleri, vizyon notları ve eleştiriler</h1>
+      </section>
+    </header>
+
+    <main class="news-shell">
+      <section class="news-toolbar">
+        <div>
+          <h2>Son Haberler</h2>
+          <p id="newsCount">Yükleniyor...</p>
+        </div>
+        <input id="newsSearch" type="search" placeholder="Haber ara" />
+      </section>
+
+      <section id="newsList" class="news-grid" aria-live="polite"></section>
+    </main>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="js/news.js"></script>
+  </body>
+</html>
