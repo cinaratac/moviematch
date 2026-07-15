@@ -131,21 +131,23 @@ function isPermissionError(error) {
 
 async function botFetch(path, options = {}) {
   if (!botAccess) throw new Error("Bot backend erişimi hazır değil.");
-  const res = await fetch(`${botAccess.baseUrl}${path}`, {
+  
+  // baseUrl yerine doğrudan doğru adresi yazıyoruz:
+  const res = await fetch(`https://cinematchbotai.onrender.com${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-Admin-Key": botAccess.key,
+      "X-Admin-Key": botAccess.key, // Şifreyi hala güvenli bir şekilde alıyoruz
       ...(options.headers || {}),
     },
   });
+  
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.status === "error") {
     throw new Error(body.message || `İstek başarısız (${res.status})`);
   }
   return body;
 }
-
 // ---------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------
