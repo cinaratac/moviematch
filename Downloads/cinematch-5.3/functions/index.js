@@ -66,6 +66,21 @@ async function assertTriviaEditor(uid) {
   throw new HttpsError("permission-denied", "Bu panel icin yetkiniz yok.");
 }
 
+async function assertBotAdmin(uid) {
+  if (!uid) throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
+  if (NEWS_ADMIN_UIDS.has(uid)) return true;
+
+  const db = admin.firestore();
+  const editorDoc = await db.collection("bot_editors").doc(uid).get();
+  if (editorDoc.exists && editorDoc.data().active !== false) return true;
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  const role = userDoc.exists ? userDoc.data().role : null;
+  if (["admin", "botAdmin"].includes(role)) return true;
+
+  throw new HttpsError("permission-denied", "Bu panel için yetkiniz yok.");
+}
+
 function normalizeTriviaQuestion(data) {
   const question = cleanText(data.question, 500);
   if (!question) throw new HttpsError("invalid-argument", "Soru metni gerekli.");
@@ -120,6 +135,40 @@ exports.isTriviaAdmin = onCall(async (request) => {
   await assertTriviaEditor(request.auth && request.auth.uid);
   return { ok: true };
 });
+
+exports.isBotAdmin = onCall(async (request) => {
+  await assertBotAdmin(request.auth && request.auth.uid);
+  return { ok: true };
+});
+
+// ==================================================================
+// BOT ADMIN PANELİ ERİŞİMİ
+// CineBot AI (cinematchbotai) backend'i Firebase dışında (Render'da
+// SQLite ile) çalıştığı için oradaki veriye Firestore üzerinden değil,
+// doğrudan REST üzerinden erişilir. Panel, bu backend'in admin uçlarını
+// (/api/admin/...) çağırmak için gereken base URL + gizli anahtarı
+// SADECE yetkili admin kullanıcılara, giriş yaptıktan sonra bu callable
+// üzerinden verir -- anahtar hiçbir zaman istemci kaynak koduna gömülmez.
+// Gerekli secret'lar: BOTAI_API_BASE, BOTAI_ADMIN_KEY
+// (firebase functions:secrets:set BOTAI_API_BASE / BOTAI_ADMIN_KEY)
+// ==================================================================
+exports.getBotAdminAccess = onCall(
+  { secrets: ["BOTAI_API_BASE", "BOTAI_ADMIN_KEY"] },
+  async (request) => {
+    await assertBotAdmin(request.auth && request.auth.uid);
+
+    const baseUrl = process.env.BOTAI_API_BASE;
+    const key = process.env.BOTAI_ADMIN_KEY;
+    if (!baseUrl || !key) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Bot admin paneli için sunucu tarafında BOTAI_API_BASE / BOTAI_ADMIN_KEY tanımlı değil."
+      );
+    }
+
+    return { baseUrl, key };
+  }
+);
 
 exports.saveNewsArticle = onCall(async (request) => {
   const uid = request.auth && request.auth.uid;
