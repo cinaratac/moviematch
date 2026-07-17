@@ -21,6 +21,7 @@
   // --- AYARLAR: KENDİ BACKEND ADRESİNLE DEĞİŞTİR ---
   var API_BASE_URL = 'https://cinematchbotai.onrender.com';
   var CHAT_ENDPOINT = API_BASE_URL + '/api/chat';
+  var RATE_ENDPOINT_BASE = API_BASE_URL + '/api/sessions/'; 
 
   // TMDB'de arama yapmak için (film kartlarını tıklanabilir yapmak amacıyla,
   // site ayrı bir film detay sayfasına sahip olmadığı için TMDB'ye linkliyoruz).
@@ -119,6 +120,9 @@
     var hasGreeted = false;
     var voiceReplyEnabled = false;
 
+    var currentSessionId = null;
+    var hasConversation = false;
+    var hasRated = false;
     // --- Web Speech API desteği (mikrofon girişi + sesli okuma) ---
     var SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
     var recognition = null;
@@ -229,6 +233,8 @@
           addMessage(answer, false);
           addMovieChips(data.recommended_movies);
           speak(answer);
+          if (data.session_id) currentSessionId = data.session_id;
+          hasConversation = true;
         })
         .catch(function () {
           removeTypingIndicator();
@@ -242,6 +248,47 @@
           sendBtn.disabled = false;
         });
     }
+    // --- Değerlendirme (rating) ---
+function submitRating(rating) {
+  if (!currentSessionId) return;
+  fetch(RATE_ENDPOINT_BASE + currentSessionId + '/rate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating: rating }),
+  }).catch(function () {});
+  hasRated = true;
+}
+
+function showRatingPrompt(onDone) {
+  var overlay = document.createElement('div');
+  overlay.className = 'cinebot-rating-overlay';
+  overlay.innerHTML =
+    '<div class="cinebot-rating-card">' +
+    '  <p>Bu sohbeti nasıl değerlendirirsin?</p>' +
+    '  <div class="cinebot-stars">' +
+      [5, 4, 3, 2, 1]
+      .map(function (n) {
+        return '<button class="cinebot-star" data-rating="' + n + '" aria-label="' + n + ' yıldız">★</button>';
+    })
+  .join('') +
+    '  </div>' +
+    '  <button class="cinebot-rating-skip">Geç</button>' +
+    '</div>';
+
+  panel.appendChild(overlay);
+
+  overlay.querySelectorAll('.cinebot-star').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      submitRating(parseInt(btn.getAttribute('data-rating'), 10));
+      overlay.remove();
+      onDone();
+    });
+  });
+  overlay.querySelector('.cinebot-rating-skip').addEventListener('click', function () {
+    overlay.remove();
+    onDone();
+  });
+}
 
     // --- Panel aç/kapat ---
     function openPanel() {
@@ -265,7 +312,19 @@
     launcher.addEventListener('click', function () {
       isOpen ? closePanel() : openPanel();
     });
-    closeBtn.addEventListener('click', closePanel);
+    closeBtn.addEventListener('click', function () {
+  if (hasConversation && currentSessionId && !hasRated) {
+    showRatingPrompt(function () {
+      closePanel();
+      // Bir sonraki sohbet için sıfırla
+      hasConversation = false;
+      hasRated = false;
+      currentSessionId = null;
+    });
+  } else {
+    closePanel();
+  }
+});
 
     sendBtn.addEventListener('click', function () {
       sendMessage(inputEl.value);

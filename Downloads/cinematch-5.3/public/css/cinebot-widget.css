@@ -234,3 +234,50 @@
   }
   #cinebot-launcher { right: 16px; bottom: 16px; }
 }
+.cinebot-rating-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.cinebot-rating-card {
+  background: #1e1e1e;
+  color: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+  min-width: 220px;
+}
+.cinebot-stars {
+  display: flex !important;
+  flex-direction: row-reverse !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 4px;
+  margin: 12px 0;
+}
+.cinebot-star {
+  display: inline-flex !important;
+  width: auto !important;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 28px;
+  cursor: pointer;
+  color: #555;
+  transition: color .15s;
+}
+.cinebot-star:hover, .cinebot-star:hover ~ .cinebot-star { color: #0a8f27; }
+.cinebot-rating-skip {
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
