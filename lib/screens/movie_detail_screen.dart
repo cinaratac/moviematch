@@ -1,0 +1,597 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:fluttergirdi/screens/actors_screen.dart';
+import 'package:fluttergirdi/screens/director_screen.dart';
+import 'package:fluttergirdi/services/catalog_service.dart';
+import 'package:fluttergirdi/services/shelf_state_cache.dart';
+import 'package:fluttergirdi/widgets/movie_action_sheet.dart';
+import 'package:fluttergirdi/widgets/movie_review_section.dart';
+
+class MovieDetailScreen extends StatefulWidget {
+  final int tmdbId;
+  final String? title;
+  final String? posterUrl;
+
+  const MovieDetailScreen({
+    super.key,
+    required this.tmdbId,
+    this.title,
+    this.posterUrl,
+  });
+
+  @override
+  State<MovieDetailScreen> createState() => _MovieDetailScreenState();
+}
+
+class _MovieDetailScreenState extends State<MovieDetailScreen> {
+  Map<String, dynamic>? _movieData;
+  List<dynamic> _cast = [];
+  List<dynamic> _crew = [];
+  bool _loading = true;
+  bool _hasError = false;
+  String? _catalogDocId;
+  bool _isWatched = false;
+
+  StreamSubscription<DocumentSnapshot>? _userSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initWatchedState();
+    _fetchDetails();
+  }
+
+  @override
+  void dispose() {
+    _userSub?.cancel();
+    super.dispose();
+  }
+
+  void _initWatchedState() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final tmdbStr = widget.tmdbId.toString();
+    final cache = ShelfStateCache.instance;
+
+    if (cache.hasData(uid)) {
+      _isWatched = _checkWatched(cache, uid, tmdbStr);
+    }
+
+    _userSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((doc) {
+          if (!mounted) return;
+          cache.applyDoc(uid, doc);
+          final next = _checkWatched(cache, uid, tmdbStr);
+          if (next != _isWatched) {
+            setState(() => _isWatched = next);
+          }
+        }, onError: (_) {});
+  }
+
+  bool _checkWatched(ShelfStateCache cache, String uid, String tmdbStr) {
+    for (final field in const [
+      'watchedKeys',
+      'favoritesKeys',
+      'fiveStarKeys',
+      'dislikedKeys',
+    ]) {
+      if (cache.get(uid, field).contains(tmdbStr)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _fetchDetails() async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('callTMDB')
+          .call({
+            'endpoint': '/3/movie/${widget.tmdbId}',
+            'params': {
+              'language': 'tr-TR',
+              'append_to_response': 'credits,release_dates',
+            },
+          });
+
+      final data = Map<String, dynamic>.from(result.data as Map);
+      if (!mounted) return;
+
+      setState(() {
+        _movieData = data;
+        final credits = data['credits'] as Map? ?? {};
+        _cast = (credits['cast'] as List?) ?? [];
+        _crew = (credits['crew'] as List?) ?? [];
+        _loading = false;
+      });
+
+      unawaited(
+        CatalogService().upsertFromTmdb(data).then((docId) {
+          if (mounted) setState(() => _catalogDocId = docId);
+        }),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _hasError = true;
+      });
+    }
+  }
+
+  void _showAddSheet() {
+    if (_movieData == null) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      isScrollControlled: true,
+      builder: (_) => MovieActionSheet(
+        tmdbId: widget.tmdbId,
+        movieData: _movieData!,
+        posterUrl: _posterUrl,
+        catalogDocId: _catalogDocId,
+      ),
+    );
+  }
+
+  String get _director {
+    try {
+      final director = _crew.firstWhere((m) => m['job'] == 'Director');
+      return (director['name'] ?? 'Bilinmiyor').toString();
+    } catch (_) {
+      return 'Bilinmiyor';
+    }
+  }
+
+  Map<String, dynamic>? get _directorData {
+    if (_crew.isEmpty) return null;
+    try {
+      return Map<String, dynamic>.from(
+        _crew.firstWhere((m) => m['job'] == 'Director') as Map,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String get _rating {
+    final vote = _movieData?['vote_average'];
+    return vote is num ? vote.toStringAsFixed(1) : '-';
+  }
+
+  String get _runtime {
+    final mins = _movieData?['runtime'];
+    if (mins is! int || mins == 0) return '';
+    return '${mins ~/ 60}s ${mins % 60}dk';
+  }
+
+  String get _year {
+    final date = _movieData?['release_date'];
+    return date is String && date.length >= 4 ? date.substring(0, 4) : '';
+  }
+
+  String? get _posterUrl {
+    if (widget.posterUrl != null && widget.posterUrl!.isNotEmpty) {
+      return widget.posterUrl;
+    }
+
+    final posterPath = _movieData?['poster_path'];
+    if (posterPath is String && posterPath.isNotEmpty) {
+      return 'https://image.tmdb.org/t/p/w500$posterPath';
+    }
+
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final textColor = isDark ? Colors.white : Colors.black;
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: _circleIconButton(
+          icon: Icons.arrow_back,
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          if (_isWatched)
+            Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                color: Colors.black26,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle,
+                color: Colors.greenAccent,
+                size: 22,
+              ),
+            ),
+          _circleIconButton(
+            icon: Icons.playlist_add_rounded,
+            onPressed: _showAddSheet,
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(child: _buildBlurredBackground(bgColor)),
+          if (_loading)
+            const Center(child: CircularProgressIndicator())
+          else if (_hasError || _movieData == null)
+            Center(
+              child: Text(
+                'Detaylar yüklenemedi',
+                style: TextStyle(color: textColor),
+              ),
+            )
+          else
+            CustomScrollView(
+              cacheExtent: 800,
+              slivers: [
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                    0,
+                    MediaQuery.of(context).padding.top + 60,
+                    0,
+                    40,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate.fixed([
+                      _buildHeader(isDark, textColor),
+                      const SizedBox(height: 30),
+                      _buildOverview(textColor),
+                      const SizedBox(height: 30),
+                      _buildCastSection(textColor),
+                      const SizedBox(height: 30),
+                      MovieReviewSection(
+                        tmdbId: widget.tmdbId,
+                        movieData: _movieData!,
+                        posterUrl: _posterUrl,
+                      ),
+                    ]),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _circleIconButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(
+      onPressed: onPressed,
+      icon: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: const BoxDecoration(
+          color: Colors.black26,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildBlurredBackground(Color bgColor) {
+    final posterUrl = _posterUrl;
+    if (posterUrl == null) return ColoredBox(color: bgColor);
+
+    return RepaintBoundary(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: CachedNetworkImage(
+              imageUrl: posterUrl,
+              fit: BoxFit.cover,
+              memCacheWidth: 96,
+              fadeInDuration: Duration.zero,
+              fadeOutDuration: Duration.zero,
+            ),
+          ),
+          ColoredBox(color: bgColor.withOpacity(0.88)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(bool isDark, Color textColor) {
+    final posterUrl = _posterUrl;
+
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Hero(
+              tag: 'poster_${widget.tmdbId}',
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: posterUrl == null
+                    ? const SizedBox(width: 140, height: 210)
+                    : CachedNetworkImage(
+                        imageUrl: posterUrl,
+                        width: 140,
+                        height: 210,
+                        fit: BoxFit.cover,
+                        memCacheWidth: 280,
+                        memCacheHeight: 420,
+                        fadeInDuration: Duration.zero,
+                        fadeOutDuration: Duration.zero,
+                      ),
+              ),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    (_movieData?['title'] ?? widget.title ?? '').toString(),
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (_year.isNotEmpty) _buildTag(_year, isDark),
+                      if (_runtime.isNotEmpty) _buildTag(_runtime, isDark),
+                      if (_isWatched) _buildWatchedTag(),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.star_rounded,
+                        color: Colors.amber,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _rating,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  _buildDirectorLink(textColor),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWatchedTag() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.greenAccent.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.greenAccent.withOpacity(0.5)),
+      ),
+      child: const Text(
+        'İzledim',
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Colors.greenAccent,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDirectorLink(Color textColor) {
+    return GestureDetector(
+      onTap: () {
+        final director = _directorData;
+        if (director == null || director['id'] == null) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DirectorScreen(
+              directorId: director['id'] as int,
+              directorName: (director['name'] ?? '').toString(),
+            ),
+          ),
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Yönetmen',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: textColor.withOpacity(0.5),
+            ),
+          ),
+          Text(
+            _director,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+              decoration: TextDecoration.underline,
+              decorationColor: textColor.withOpacity(0.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverview(Color textColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Özet',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            (_movieData?['overview'] ?? 'Özet bulunamadı.').toString(),
+            style: TextStyle(
+              fontSize: 15,
+              color: textColor.withOpacity(0.8),
+              height: 1.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCastSection(Color textColor) {
+    final visibleCast = _cast.length > 10 ? _cast.take(10).toList() : _cast;
+
+    return RepaintBoundary(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              'Oyuncular',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 130,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: visibleCast.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder: (context, index) {
+                final actor = visibleCast[index];
+                return _ActorChip(actor: actor, textColor: textColor);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTag(String text, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white70 : Colors.black87,
+        ),
+      ),
+    );
+  }
+}
+
+class _ActorChip extends StatelessWidget {
+  final dynamic actor;
+  final Color textColor;
+
+  const _ActorChip({required this.actor, required this.textColor});
+
+  @override
+  Widget build(BuildContext context) {
+    final profilePath = actor['profile_path'];
+    final profileUrl = profilePath is String && profilePath.isNotEmpty
+        ? 'https://image.tmdb.org/t/p/w200$profilePath'
+        : null;
+    final name = (actor['name'] ?? '').toString();
+
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ActorScreen(actorId: actor['id'], actorName: name),
+        ),
+      ),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 35,
+            backgroundColor: Colors.grey.shade800,
+            backgroundImage: profileUrl == null
+                ? null
+                : CachedNetworkImageProvider(
+                    profileUrl,
+                    maxWidth: 140,
+                    maxHeight: 140,
+                  ),
+            child: profileUrl == null ? const Icon(Icons.person) : null,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: 80,
+            child: Text(
+              name,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.9)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
