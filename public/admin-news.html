@@ -4,13 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CineMatch Haber Paneli</title>
-    <link rel="apple-touch-icon" sizes="180x180" href="images/favicon/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" href="/images/app_logo.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="images/favicon/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="images/favicon/favicon-16x16.png" />
-    <link rel="stylesheet" href="css/admin-news.css" />
+    <link rel="stylesheet" href="css/admin-news.css?v=20260801-1" />
   </head>
   <body>
     <main class="admin-shell">
+      <section id="authLoadingPanel" class="auth-panel auth-loading" aria-live="polite">
+        <div class="brand-lockup">
+          <img src="images/app_logo.png" alt="CineMatch" />
+          <div><p>Yönetim Paneli</p><h1>Oturum kontrol ediliyor…</h1></div>
+        </div>
+        <div class="auth-spinner" aria-hidden="true"></div>
+      </section>
+
       <section id="loginPanel" class="auth-panel hidden">
         <div class="brand-lockup">
           <img src="images/app_logo.png" alt="CineMatch" />
@@ -44,10 +52,12 @@
             </div>
           </div>
           <nav class="panel-nav">
-            <a class="active" href="admin-news.html">Haber Paneli</a>
-            <a href="admin-trivia.html">Soru Yarışması</a>
-            <a href="admin-announcements.html">Duyurular</a>
-            <a href="admin-bot.html">Bot Paneli</a>
+            <a class="active" href="/admin-news">Haber Paneli</a>
+            <a href="/admin-blog">Blog</a>
+            <a href="/admin-trivia">Soru Yarışması</a>
+            <a href="/admin-announcements">Duyurular</a>
+            <a href="/admin-bot">Bot Paneli</a>
+            <a href="/admin-social">Sosyal Medya</a>
           </nav>
           <button id="newArticleButton" class="primary-action" type="button">Yeni Haber</button>
           <div class="article-toolbar">
@@ -158,6 +168,6 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-functions-compat.js"></script>
     <script src="js/admin-shared.js"></script>
-    <script src="js/admin-news.js"></script>
+    <script src="js/admin-news.js?v=20260722-1"></script>
   </body>
 </html>

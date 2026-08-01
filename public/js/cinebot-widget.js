@@ -60,7 +60,7 @@
   function buildWidget() {
     var launcher = document.createElement('button');
     launcher.id = 'cinebot-launcher';
-    launcher.setAttribute('aria-label', 'CineBot AI ile sohbet et');
+    launcher.setAttribute('aria-label', 'CineBot ile konuş');
     launcher.innerHTML =
       '<svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 0-5 5v1H6a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h1v-2H6a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-1v2h1a3 3 0 0 0 3-3v-6a3 3 0 0 0-3-3h-1V7a5 5 0 0 0-5-5Zm-2 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm4 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM9 15h6a3 3 0 0 1-6 0Z"/></svg>' +
       '<span class="cinebot-dot" id="cinebot-unread-dot" style="display:none"></span>';
@@ -71,8 +71,8 @@
       '<div id="cinebot-header">' +
       '  <div class="cinebot-avatar"><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 0-5 5v1H6a3 3 0 0 0-3 3v6a3 3 0 0 0 3 3h1v-2H6a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-1v2h1a3 3 0 0 0 3-3v-6a3 3 0 0 0-3-3h-1V7a5 5 0 0 0-5-5Zm-2 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm4 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM9 15h6a3 3 0 0 1-6 0Z"/></svg></div>' +
       '  <div>' +
-      '    <div class="cinebot-title">CineBot AI</div>' +
-      '    <div class="cinebot-subtitle">Film önerileri ve CineMatch hakkında sorular</div>' +
+      '    <div class="cinebot-title">CineBot</div>' +
+      '    <div class="cinebot-subtitle">Bir film tarif et; birlikte bakalım.</div>' +
       '  </div>' +
       '  <div id="cinebot-header-actions">' +
       '    <button id="cinebot-voice-toggle" title="Cevapları sesli oku" aria-label="Sesli okumayı aç/kapat">' +
@@ -88,7 +88,7 @@
       '  <button id="cinebot-mic-btn" title="Sesli mesaj" aria-label="Mikrofonla konuş">' +
       '    <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>' +
       '  </button>' +
-      '  <input id="cinebot-input" type="text" placeholder="CineBot\'a bir şey sor..." autocomplete="off" />' +
+      '  <input id="cinebot-input" type="text" placeholder="Aklındaki filmi tarif et..." autocomplete="off" />' +
       '  <button id="cinebot-send-btn" title="Gönder" aria-label="Gönder">' +
       '    <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg>' +
       '  </button>' +
@@ -264,7 +264,7 @@ function showRatingPrompt(onDone) {
   overlay.className = 'cinebot-rating-overlay';
   overlay.innerHTML =
     '<div class="cinebot-rating-card">' +
-    '  <p>Bu sohbeti nasıl değerlendirirsin?</p>' +
+    '  <p>Bu konuşma nasıldı?</p>' +
     '  <div class="cinebot-stars">' +
       [5, 4, 3, 2, 1]
       .map(function (n) {
@@ -298,7 +298,7 @@ function showRatingPrompt(onDone) {
       if (!hasGreeted) {
         hasGreeted = true;
         addMessage(
-          'Merhaba! Ben CineBot 🎬 Film önerisi isteyebilir ya da CineMatch uygulaması hakkında (örn. "kullanıcı adımı nasıl değiştiririm") soru sorabilirsin.',
+          'Merhaba. Aklındaki filmi, bir sahneyi ya da akşamın havasını anlat. CineMatch hesabıyla ilgili sorular da olur.',
           false
         );
       }

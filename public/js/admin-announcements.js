@@ -4,6 +4,7 @@ const { auth, functions } = CineAdmin;
 const authPersistenceReady = CineAdmin.persistenceReady;
 
 const els = {
+  authLoadingPanel: document.getElementById("authLoadingPanel"),
   loginPanel: document.getElementById("loginPanel"),
   adminPanel: document.getElementById("adminPanel"),
   loginForm: document.getElementById("loginForm"),
@@ -28,11 +29,13 @@ const els = {
 const { setMessage, escapeHtml, isPermissionError } = CineAdmin;
 
 function showLogin() {
+  els.authLoadingPanel.classList.add("hidden");
   els.loginPanel.classList.remove("hidden");
   els.adminPanel.classList.add("hidden");
 }
 
 function showAdmin(user) {
+  els.authLoadingPanel.classList.add("hidden");
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;

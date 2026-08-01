@@ -753,7 +753,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       icon: Icons.palette_rounded,
                       iconColor: Colors.blueAccent,
                       title: "Görünüm",
-                      trailingText: "Otomatik",
+                      trailingText:
+                          ThemeBridge.themeMode.value == ThemeMode.light
+                          ? "Aydınlık"
+                          : (ThemeBridge.themeMode.value == ThemeMode.dark
+                                ? "Karanlık"
+                                : "Sistem"),
                       onTap: _pickTheme,
                     ),
                   ],

@@ -29,11 +29,53 @@
   "hosting": {
     "site": "cinematchsocial",
     "public": "public",
+    "cleanUrls": true,
+    "trailingSlash": false,
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "index copy.html",
+      "images/preview.png"
+    ],
+    "redirects": [
+      {
+        "source": "/blog-detail",
+        "destination": "/blog/yazi",
+        "type": 301
+      },
+      {
+        "source": "/news",
+        "destination": "/haberler",
+        "type": 301
+      },
+      {
+        "source": "/news-detail",
+        "destination": "/haber",
+        "type": 301
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/blog/yazi",
+        "destination": "/blog-detail.html"
+      },
+      {
+        "source": "/haberler",
+        "destination": "/news.html"
+      },
+      {
+        "source": "/haber",
+        "destination": "/news-detail.html"
+      }
     ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
   },
   "functions": [
     {

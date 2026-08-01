@@ -12,7 +12,7 @@ import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
 import 'package:fluttergirdi/screens/news_list_page.dart';
 import '../screens/trivia_welcome_screen.dart';
-import 'package:flutter_cache_manager/flutter_cache_manager.dart'; 
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
 
 class CustomDrawer extends StatefulWidget {
@@ -64,30 +64,32 @@ class _CustomDrawerState extends State<CustomDrawer> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // Renkleri önceden belirle
-    final Color drawerBgColor = isDark 
-        ? const Color(0xFF1C1C1E).withOpacity(0.98) 
+    final Color drawerBgColor = isDark
+        ? const Color(0xFF1C1C1E).withOpacity(0.98)
         : const Color(0xFFF2F2F7).withOpacity(0.98);
 
-    final Color separatorColor = isDark 
-        ? Colors.white.withOpacity(0.1) 
+    final Color separatorColor = isDark
+        ? Colors.white.withOpacity(0.1)
         : Colors.black.withOpacity(0.05);
 
     return Drawer(
-      backgroundColor: Colors.transparent, 
+      backgroundColor: Colors.transparent,
       elevation: 0,
       width: MediaQuery.of(context).size.width * 0.80,
       child: Container(
         // Performans için ClipRRect'i kaldırdık, Container decoration ile köşe veriyoruz.
         decoration: BoxDecoration(
           color: drawerBgColor,
-          borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
+          borderRadius: const BorderRadius.horizontal(
+            right: Radius.circular(20),
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.2),
               blurRadius: 10, // Blur miktarını biraz düşürdük (Performans)
               offset: const Offset(5, 0),
-            )
-          ]
+            ),
+          ],
         ),
         child: SafeArea(
           child: Column(
@@ -108,48 +110,85 @@ class _CustomDrawerState extends State<CustomDrawer> {
                       icon: CupertinoIcons.chart_bar_alt_fill,
                       title: 'Liderlik Tablosu',
                       color: Colors.orange,
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LeaderboardScreen())),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const LeaderboardScreen(),
+                        ),
+                      ),
                     ),
                     _buildIOSMenuItem(
                       context,
                       icon: CupertinoIcons.person_3_fill,
                       title: 'Kulüpler',
                       color: Colors.blue,
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: const Text("Kulüpler")), body: const ClubsTab()))),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => Scaffold(
+                            appBar: AppBar(title: const Text("Kulüpler")),
+                            body: const ClubsTab(),
+                          ),
+                        ),
+                      ),
                     ),
                     _buildIOSMenuItem(
                       context,
                       icon: CupertinoIcons.star_fill,
                       title: 'Rozetler',
                       color: Colors.purple,
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BadgesProgressScreen())),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const BadgesProgressScreen(),
+                        ),
+                      ),
                     ),
-                    
+
                     const SizedBox(height: 8),
 
                     // --- YARIŞMA BUTONU ---
                     Material(
                       color: Colors.transparent,
                       child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         leading: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
                             color: Colors.amber.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: const Icon(Icons.quiz_rounded, color: Colors.amber, size: 20),
+                          child: const Icon(
+                            Icons.quiz_rounded,
+                            color: Colors.amber,
+                            size: 20,
+                          ),
                         ),
                         title: const Text(
                           'Sinema Yarışması',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
                         ),
                         subtitle: Text(
                           'Bilgini test et, rozet kazan!',
-                          style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white54 : Colors.black54,
+                          ),
                         ),
-                        trailing: Icon(Icons.arrow_forward_ios_rounded, size: 14, color: isDark ? Colors.white24 : Colors.black12),
+                        trailing: Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 14,
+                          color: isDark ? Colors.white24 : Colors.black12,
+                        ),
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(
@@ -161,23 +200,33 @@ class _CustomDrawerState extends State<CustomDrawer> {
                         },
                       ),
                     ),
-                    
+
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Divider(indent: 16, endIndent: 16, height: 1, color: separatorColor),
+                      child: Divider(
+                        indent: 16,
+                        endIndent: 16,
+                        height: 1,
+                        color: separatorColor,
+                      ),
                     ),
-                    
+
                     // YENİLİKLER
                     StreamBuilder<DocumentSnapshot>(
-                      stream: FirebaseFirestore.instance.collection('system').doc('announcement').snapshots(),
+                      stream: FirebaseFirestore.instance
+                          .collection('system')
+                          .doc('announcement')
+                          .snapshots(),
                       builder: (context, snapshot) {
                         bool hasNew = false;
                         String? currentId;
                         if (snapshot.hasData && snapshot.data!.exists) {
-                          final data = snapshot.data!.data() as Map<String, dynamic>;
+                          final data =
+                              snapshot.data!.data() as Map<String, dynamic>;
                           if (data['isActive'] == true) {
                             currentId = data['id'];
-                            if (currentId != null && currentId != _lastSeenAnnouncementId) {
+                            if (currentId != null &&
+                                currentId != _lastSeenAnnouncementId) {
                               hasNew = true;
                             }
                           }
@@ -189,8 +238,14 @@ class _CustomDrawerState extends State<CustomDrawer> {
                           color: Colors.redAccent,
                           hasBadge: hasNew,
                           onTap: () {
-                            if (currentId != null) _markAnnouncementAsSeen(currentId);
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
+                            if (currentId != null)
+                              _markAnnouncementAsSeen(currentId);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const AnnouncementsScreen(),
+                              ),
+                            );
                           },
                         );
                       },
@@ -204,7 +259,9 @@ class _CustomDrawerState extends State<CustomDrawer> {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const NewsListPage()),
+                          MaterialPageRoute(
+                            builder: (_) => const NewsListPage(),
+                          ),
                         );
                       },
                     ),
@@ -212,26 +269,30 @@ class _CustomDrawerState extends State<CustomDrawer> {
                     const SizedBox(height: 16),
                     Divider(height: 1, color: separatorColor),
                     const SizedBox(height: 16),
-                    
-                     _buildSectionTitle("UYGULAMA"),
-                      _buildIOSMenuItem(
+
+                    _buildSectionTitle("UYGULAMA"),
+                    _buildIOSMenuItem(
                       context,
                       icon: CupertinoIcons.settings_solid,
                       title: 'Ayarlar',
                       color: Colors.grey,
-                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsPage())),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SettingsPage()),
                       ),
-                      _buildIOSMenuItem(
+                    ),
+                    _buildIOSMenuItem(
                       context,
                       icon: CupertinoIcons.share_solid,
                       title: 'Davet Et',
                       color: Colors.green,
-                        onTap: () => Share.share('CineMatch ile film zevkini keşfet! https://Cinematch.app'),
+                      onTap: () => Share.share(
+                        'CineMatch ile film zevkini keşfet! https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch',
                       ),
-                    
+                    ),
 
-                     const SizedBox(height: 30),
-                    
+                    const SizedBox(height: 30),
+
                     // ÇIKIŞ BUTONU
                     Center(
                       child: TextButton(
@@ -241,12 +302,18 @@ class _CustomDrawerState extends State<CustomDrawer> {
                           // 2. Shared Preferences temizliği
                           final prefs = await SharedPreferences.getInstance();
                           await prefs.clear();
-                          
+
                           // 3. KRİTİK ADIM: Önce tüm sayfaları (ve Stream'leri) yok edip Login'e git!
                           if (context.mounted) {
-                            Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-                              MaterialPageRoute(builder: (_) => const LoginPage()),
-                              (route) => false, // Arkada açık kalan ne kadar sayfa varsa hepsini siler
+                            Navigator.of(
+                              context,
+                              rootNavigator: true,
+                            ).pushAndRemoveUntil(
+                              MaterialPageRoute(
+                                builder: (_) => const LoginPage(),
+                              ),
+                              (route) =>
+                                  false, // Arkada açık kalan ne kadar sayfa varsa hepsini siler
                             );
                           }
 
@@ -281,10 +348,13 @@ class _CustomDrawerState extends State<CustomDrawer> {
     // StreamBuilder yerine FutureBuilder kullanmak Drawer açılışını hızlandırabilir
     // Ancak verilerin canlı kalması için Stream'i koruduk, sadece Container'ı sadeleştirdik.
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .snapshots(),
       builder: (context, snapshot) {
         // Data yokken boş container dön, layout kaymasını önle
-        if (!snapshot.hasData) return const SizedBox(height: 100); 
+        if (!snapshot.hasData) return const SizedBox(height: 100);
 
         final data = snapshot.data?.data() as Map<String, dynamic>?;
         final name = data?['displayName'] ?? data?['username'] ?? 'Kullanıcı';
@@ -294,7 +364,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
         return GestureDetector(
           onTap: () {
             Navigator.pop(context);
-            TabService.instance.changeTab(3); 
+            TabService.instance.changeTab(3);
           },
           child: Container(
             color: Colors.transparent, // Tıklama alanı için
@@ -306,41 +376,63 @@ class _CustomDrawerState extends State<CustomDrawer> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 5, offset: const Offset(0, 2)),
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 5,
+                        offset: const Offset(0, 2),
+                      ),
                     ],
                   ),
                   child: CircleAvatar(
-                    radius: 30, 
-                    backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                    radius: 30,
+                    backgroundColor: isDark
+                        ? Colors.grey[800]
+                        : Colors.grey[200],
                     backgroundImage: photo != null ? NetworkImage(photo) : null,
-                    child: photo == null 
-                      ? Icon(CupertinoIcons.person_fill, size: 30, color: isDark ? Colors.white54 : Colors.grey) 
-                      : null,
+                    child: photo == null
+                        ? Icon(
+                            CupertinoIcons.person_fill,
+                            size: 30,
+                            color: isDark ? Colors.white54 : Colors.grey,
+                          )
+                        : null,
                   ),
                 ),
                 const SizedBox(width: 16),
-                
+
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        name, 
-                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black, letterSpacing: -0.5), 
-                        maxLines: 1, 
-                        overflow: TextOverflow.ellipsis
+                        name,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black,
+                          letterSpacing: -0.5,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        email, 
-                        style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54), 
-                        maxLines: 1, 
-                        overflow: TextOverflow.ellipsis
+                        email,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white54 : Colors.black54,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
-                Icon(CupertinoIcons.chevron_right, color: isDark ? Colors.white24 : Colors.black12, size: 16),
+                Icon(
+                  CupertinoIcons.chevron_right,
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  size: 16,
+                ),
               ],
             ),
           ),
@@ -371,18 +463,20 @@ class _CustomDrawerState extends State<CustomDrawer> {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
-    required Color color, 
+    required Color color,
     bool hasBadge = false,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         splashColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
-        highlightColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+        highlightColor: isDark
+            ? Colors.white10
+            : Colors.black.withOpacity(0.05),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -401,15 +495,15 @@ class _CustomDrawerState extends State<CustomDrawer> {
                     ),
                   ],
                 ),
-                child: Icon(icon, size: 16, color: Colors.white), 
+                child: Icon(icon, size: 16, color: Colors.white),
               ),
               const SizedBox(width: 16),
-              
+
               Expanded(
                 child: Text(
                   title,
                   style: TextStyle(
-                    fontSize: 15, 
+                    fontSize: 15,
                     fontWeight: FontWeight.w500,
                     color: isDark ? Colors.white : Colors.black87,
                     letterSpacing: -0.3,
@@ -428,7 +522,11 @@ class _CustomDrawerState extends State<CustomDrawer> {
                   ),
                 ),
 
-              Icon(CupertinoIcons.chevron_right, size: 14, color: isDark ? Colors.white24 : Colors.black12),
+              Icon(
+                CupertinoIcons.chevron_right,
+                size: 14,
+                color: isDark ? Colors.white24 : Colors.black12,
+              ),
             ],
           ),
         ),
@@ -455,18 +553,27 @@ class AnnouncementsScreen extends StatelessWidget {
         centerTitle: true,
       ),
       body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('system').doc('announcement').snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('system')
+            .doc('announcement')
+            .snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          
+          if (!snapshot.hasData)
+            return const Center(child: CircularProgressIndicator());
+
           final data = snapshot.data!.data() as Map<String, dynamic>?;
           if (data == null) return const Center(child: Text("Duyuru yok"));
 
           final items = data['items'] as List? ?? [];
           if (items.isEmpty) {
-             final title = data['title'] as String?;
-             final message = data['message'] as String?;
-             if (title != null) items.add({'title': title, 'message': message, 'date': Timestamp.now()});
+            final title = data['title'] as String?;
+            final message = data['message'] as String?;
+            if (title != null)
+              items.add({
+                'title': title,
+                'message': message,
+                'date': Timestamp.now(),
+              });
           }
 
           return ListView.separated(
@@ -476,14 +583,18 @@ class AnnouncementsScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final item = items[index];
               final date = (item['date'] as Timestamp?)?.toDate();
-              
+
               return Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -491,15 +602,38 @@ class AnnouncementsScreen extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        const Icon(CupertinoIcons.sparkles, color: Colors.orange, size: 20),
+                        const Icon(
+                          CupertinoIcons.sparkles,
+                          color: Colors.orange,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
-                        Text(item['title'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text(
+                          item['title'] ?? '',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
                         const Spacer(),
-                        if(date != null) Text("${date.day}.${date.month}", style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                        if (date != null)
+                          Text(
+                            "${date.day}.${date.month}",
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Text(item['message'] ?? '', style: TextStyle(color: isDark ? Colors.grey[300] : Colors.black87, height: 1.4)),
+                    Text(
+                      item['message'] ?? '',
+                      style: TextStyle(
+                        color: isDark ? Colors.grey[300] : Colors.black87,
+                        height: 1.4,
+                      ),
+                    ),
                   ],
                 ),
               );

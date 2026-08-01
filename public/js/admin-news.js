@@ -9,6 +9,7 @@ const ARTICLE_PAGE_SIZE = 30;
 let articlePageSize = ARTICLE_PAGE_SIZE;
 
 const els = {
+  authLoadingPanel: document.getElementById("authLoadingPanel"),
   loginPanel: document.getElementById("loginPanel"),
   adminPanel: document.getElementById("adminPanel"),
   loginForm: document.getElementById("loginForm"),
@@ -71,11 +72,13 @@ function parseTags(value) {
 }
 
 function showLogin() {
+  els.authLoadingPanel.classList.add("hidden");
   els.loginPanel.classList.remove("hidden");
   els.adminPanel.classList.add("hidden");
 }
 
 function showAdmin(user) {
+  els.authLoadingPanel.classList.add("hidden");
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;

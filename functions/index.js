@@ -3,6 +3,8 @@ const functions = require("firebase-functions/v1"); // v1 Triggerlar için
 const { onCall, HttpsError } = require("firebase-functions/v2/https"); // v2 Callable fonksiyonlar için
 const admin = require("firebase-admin");
 const axios = require("axios");
+const crypto = require("crypto");
+const sanitizeHtml = require("sanitize-html");
 
 // Firebase Admin'i başlat
 if (admin.apps.length === 0) {
@@ -81,6 +83,128 @@ async function assertBotAdmin(uid) {
   throw new HttpsError("permission-denied", "Bu panel için yetkiniz yok.");
 }
 
+async function assertBlogEditor(uid, authToken = {}) {
+  if (!uid) throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
+
+  const db = admin.firestore();
+  const [editorDoc, userDoc] = await Promise.all([
+    db.collection("blog_editors").doc(uid).get(),
+    db.collection("users").doc(uid).get(),
+  ]);
+  const editor = editorDoc.exists ? editorDoc.data() || {} : {};
+  const user = userDoc.exists ? userDoc.data() || {} : {};
+  const role = cleanText(user.role, 40);
+  const isManager = NEWS_ADMIN_UIDS.has(uid) ||
+    role === "admin" || (editor.canManageAll === true && editor.active !== false);
+  const isEditor = isManager ||
+    (editorDoc.exists && editor.active !== false) ||
+    (!editorDoc.exists && ["blogger", "blogEditor"].includes(role));
+
+  if (!isEditor) {
+    throw new HttpsError("permission-denied", "Bu hesap blogger olarak yetkilendirilmemiş.");
+  }
+
+  const tokenName = cleanText(authToken.name, 100);
+  const tokenEmail = cleanText(authToken.email, 180);
+  const username = cleanText(user.username || user.handle, 80).replace(/^@/, "");
+  const displayName = cleanText(
+    user.displayName || user.name || tokenName || username || tokenEmail.split("@")[0],
+    100
+  ) || "CineMatch Blogger";
+  const photoUrl = cleanHttpsUrl(
+    user.photoUrl || user.photoURL || user.profileImageUrl || authToken.picture,
+    1400
+  );
+
+  return {
+    canManageAll: isManager,
+    profile: { uid, displayName, username, photoUrl },
+  };
+}
+
+function cleanHttpsUrl(value, maxLength = 1400) {
+  const candidate = cleanText(value, maxLength);
+  if (!candidate) return "";
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function sanitizeBlogContent(value) {
+  const source = typeof value === "string" ? value.slice(0, 180000) : "";
+  return sanitizeHtml(source, {
+    allowedTags: [
+      "p", "br", "h2", "h3", "strong", "b", "em", "i", "u", "s",
+      "blockquote", "ul", "ol", "li", "a", "figure", "img", "figcaption", "hr",
+    ],
+    allowedAttributes: {
+      a: ["href", "target", "rel"],
+      img: ["src", "alt", "data-storage-path"],
+    },
+    allowedSchemes: ["https"],
+    allowedSchemesByTag: { img: ["https"], a: ["https", "http"] },
+    allowProtocolRelative: false,
+    transformTags: {
+      a: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          href: cleanHttpsUrl(attribs.href, 1400),
+          target: "_blank",
+          rel: "noopener noreferrer nofollow",
+        },
+      }),
+    },
+    exclusiveFilter: (frame) => {
+      if (frame.tag !== "img") return false;
+      const src = cleanHttpsUrl(frame.attribs.src, 1800);
+      return !src || ![
+        "firebasestorage.googleapis.com",
+        "storage.googleapis.com",
+      ].includes(new URL(src).hostname);
+    },
+  }).trim();
+}
+
+function normalizeBlogMovies(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.reduce((movies, raw) => {
+    if (movies.length >= 10 || !raw || typeof raw !== "object") return movies;
+    const tmdbId = Number(raw.tmdbId || raw.id);
+    if (!Number.isInteger(tmdbId) || tmdbId <= 0 || seen.has(tmdbId)) return movies;
+    seen.add(tmdbId);
+    movies.push({
+      tmdbId,
+      title: cleanText(raw.title, 180) || `TMDB ${tmdbId}`,
+      originalTitle: cleanText(raw.originalTitle, 180),
+      year: Number.isInteger(Number(raw.year)) ? Number(raw.year) : null,
+      posterPath: /^\/[A-Za-z0-9._/-]+$/.test(String(raw.posterPath || ""))
+        ? String(raw.posterPath)
+        : "",
+      posterUrl: cleanHttpsUrl(raw.posterUrl, 1400),
+    });
+    return movies;
+  }, []);
+}
+
+function normalizeBlogImages(value, postId) {
+  if (!Array.isArray(value)) return [];
+  return value.reduce((images, raw) => {
+    if (images.length >= 30 || !raw || typeof raw !== "object") return images;
+    const url = cleanHttpsUrl(raw.url, 1800);
+    const path = cleanText(raw.path, 600);
+    if (!url || !/^blog_images\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(path)) {
+      return images;
+    }
+    if (path.split("/")[2] !== postId) return images;
+    images.push({ url, path, alt: cleanText(raw.alt, 180) });
+    return images;
+  }, []);
+}
+
 function normalizeTriviaQuestion(data) {
   const question = cleanText(data.question, 500);
   if (!question) throw new HttpsError("invalid-argument", "Soru metni gerekli.");
@@ -141,6 +265,227 @@ exports.isBotAdmin = onCall(async (request) => {
   return { ok: true };
 });
 
+exports.isBlogEditor = onCall(async (request) => {
+  const access = await assertBlogEditor(
+    request.auth && request.auth.uid,
+    request.auth && request.auth.token
+  );
+  return { ok: true, ...access };
+});
+
+// Kullanıcıların profil kataloglarına eklediği filmleri zaman damgalı olaylara
+// dönüştürür. Watchlist bilinçli olarak kapsam dışıdır; henüz izlenmemiş filmdir.
+// Bu tetikleyici sayesinde haftalık rapor bütün users dokümanlarını taramaz.
+exports.trackProfileMovieCatalogAdditions = functions.firestore
+  .document("users/{uid}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const fields = {
+      watchedKeys: "watched",
+    };
+    const writes = [];
+    Object.entries(fields).forEach(([field, catalogType]) => {
+      const previous = new Set(
+        (Array.isArray(before[field]) ? before[field] : [])
+          .map((value) => String(value).trim())
+          .filter(Boolean)
+      );
+      const current = (Array.isArray(after[field]) ? after[field] : [])
+        .map((value) => String(value).trim())
+        .filter(Boolean);
+      current.forEach((movieKey) => {
+        if (previous.has(movieKey)) return;
+        const fingerprint = crypto
+          .createHash("sha1")
+          .update(`${context.eventId}|${field}|${movieKey}`)
+          .digest("hex");
+        const ref = admin.firestore()
+          .collection("profile_movie_events")
+          .doc(fingerprint);
+        writes.push(ref.set({
+          userId: context.params.uid,
+          movieKey,
+          tmdbId: Number(movieKey) || null,
+          catalogType,
+          addedAt: admin.firestore.FieldValue.serverTimestamp(),
+          sourceEventId: context.eventId,
+        }));
+      });
+    });
+    await Promise.all(writes);
+    return null;
+  });
+
+// Admin tarafından elle üretilen haftalık Instagram raporu. Haftalar pazartesi
+// 00:00 (Europe/Istanbul) başlangıçlıdır. İstemci yalnızca hazır veriyi çizer;
+// sıralama ve yetki kontrolü güvenilir sunucu tarafında yapılır.
+exports.generateWeeklySocialReport = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  await assertNewsEditor(uid);
+
+  const rawEnd = request.data && request.data.weekEnd;
+  const end = rawEnd ? new Date(rawEnd) : new Date();
+  if (Number.isNaN(end.getTime())) {
+    throw new HttpsError("invalid-argument", "Hafta tarihi geçersiz.");
+  }
+
+  // JS Date UTC çalışır. İstanbul pazartesi başlangıcını UTC'ye çeviriyoruz.
+  const istanbulNow = new Date(end.getTime() + (3 * 60 * 60 * 1000));
+  const day = istanbulNow.getUTCDay() || 7;
+  istanbulNow.setUTCDate(istanbulNow.getUTCDate() - day + 1);
+  istanbulNow.setUTCHours(0, 0, 0, 0);
+  const start = new Date(istanbulNow.getTime() - (3 * 60 * 60 * 1000));
+  const finish = new Date(start.getTime() + (7 * 24 * 60 * 60 * 1000));
+
+  const db = admin.firestore();
+  const additions = await db
+    .collection("profile_movie_events")
+    .where("addedAt", ">=", admin.firestore.Timestamp.fromDate(start))
+    .where("addedAt", "<", admin.firestore.Timestamp.fromDate(finish))
+    .get();
+  const additionDocs = additions.docs;
+
+  // Yalnızca gerçekten izlenen filmleri say. Uygulama aynı filmi hem katalog
+  // anahtarı hem TMDB anahtarıyla watchedKeys'e ekleyebildiği için önce merkezi
+  // katalog üzerinden tek bir kimliğe indirgeriz. Aynı kullanıcı/film çifti
+  // haftada yalnızca bir kez sayılır.
+  const watchedItems = additionDocs
+    .map((doc) => doc.data() || {})
+    .filter((item) => item.catalogType === "watched");
+  const catalogCache = new Map();
+  async function resolveCatalog(rawKey, rawTmdbId) {
+    const key = String(rawKey || "").trim();
+    const embeddedTmdb = /^tmdb:(\d+)$/.exec(key);
+    const numericTmdb = Number(rawTmdbId) ||
+      (embeddedTmdb ? Number(embeddedTmdb[1]) : Number(key)) || null;
+    const cacheKey = `${key}|${numericTmdb || ""}`;
+    if (catalogCache.has(cacheKey)) return catalogCache.get(cacheKey);
+
+    let catalogDoc = key
+      ? await db.collection("catalog_films").doc(key).get()
+      : null;
+    if ((!catalogDoc || !catalogDoc.exists) && numericTmdb) {
+      const snap = await db.collection("catalog_films")
+        .where("tmdbId", "==", numericTmdb).limit(1).get();
+      catalogDoc = snap.empty ? null : snap.docs[0];
+    }
+    const data = catalogDoc && catalogDoc.exists ? catalogDoc.data() || {} : {};
+    const tmdbId = Number(data.tmdbId) || numericTmdb;
+    const resolved = {
+      id: tmdbId ? `tmdb:${tmdbId}` : (catalogDoc && catalogDoc.exists ? catalogDoc.id : key),
+      tmdbId: tmdbId || null,
+      title: cleanText(data.title, 140) || key,
+      year: Number(data.year) || null,
+      posterUrl: cleanText(data.posterUrl, 1200),
+    };
+    catalogCache.set(cacheKey, resolved);
+    return resolved;
+  }
+
+  const resolvedItems = await Promise.all(watchedItems.map(async (item) => ({
+    userId: String(item.userId || ""),
+    movie: await resolveCatalog(item.movieKey, item.tmdbId),
+  })));
+  const counts = new Map();
+  resolvedItems.forEach(({ userId, movie }) => {
+    if (!movie.id) return;
+    const current = counts.get(movie.id) || {
+      ...movie,
+      viewers: new Set(),
+    };
+    current.viewers.add(userId || `anonymous:${current.viewers.size}`);
+    counts.set(movie.id, current);
+  });
+
+  const movies = [...counts.values()]
+    .map(({ viewers, ...movie }) => ({ ...movie, additions: viewers.size }))
+    .sort((a, b) => b.additions - a.additions || a.title.localeCompare(b.title, "tr"))
+    .slice(0, 10);
+
+  const weekId = start.toISOString().slice(0, 10);
+  const payload = {
+    weekId,
+    startAt: admin.firestore.Timestamp.fromDate(start),
+    endAt: admin.firestore.Timestamp.fromDate(finish),
+    totalAdditions: movies.reduce((sum, movie) => sum + movie.additions, 0),
+    movies,
+    generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    generatedBy: uid,
+  };
+  await db.collection("weekly_social_reports").doc(weekId).set(payload, { merge: true });
+
+  return {
+    ok: true,
+    weekId,
+    startAt: start.toISOString(),
+    endAt: finish.toISOString(),
+    totalAdditions: movies.reduce((sum, movie) => sum + movie.additions, 0),
+    movies,
+  };
+});
+
+// Admin sosyal medya stüdyosundaki film ızgarası ve puan sıralaması için TMDB
+// detaylarını tek istekte hazırlar. İstemci ayrı ayrı TMDB çağrısı yapmaz.
+exports.getSocialGridMovies = onCall(
+  { secrets: ["TMDB_ACCESS_TOKEN"] },
+  async (request) => {
+    await assertNewsEditor(request.auth && request.auth.uid);
+    const rawIds = Array.isArray(request.data && request.data.ids)
+      ? request.data.ids
+      : [];
+    const ids = [...new Set(
+      rawIds
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )];
+    if (!ids.length) {
+      throw new HttpsError("invalid-argument", "En az bir geçerli TMDB film linki gerekli.");
+    }
+    if (ids.length > 36) {
+      throw new HttpsError("invalid-argument", "Tek görselde en fazla 36 film kullanılabilir.");
+    }
+
+    const token = process.env.TMDB_ACCESS_TOKEN;
+    const results = await Promise.all(ids.map(async (id) => {
+      try {
+        const response = await axios.get(`https://api.themoviedb.org/3/movie/${id}`, {
+          params: { language: "en-US" },
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        });
+        const movie = response.data || {};
+        const displayTitle = movie.original_language === "tr"
+          ? movie.original_title
+          : movie.title;
+        return {
+          id,
+          title: cleanText(displayTitle || movie.original_title, 160) || `TMDB ${id}`,
+          year: /^\d{4}/.test(String(movie.release_date || ""))
+            ? Number(String(movie.release_date).slice(0, 4))
+            : null,
+          posterUrl: movie.poster_path
+            ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+            : "",
+          heroPosterUrl: movie.poster_path
+            ? `https://image.tmdb.org/t/p/w780${movie.poster_path}`
+            : "",
+          voteAverage: Number.isFinite(Number(movie.vote_average))
+            ? Number(Number(movie.vote_average).toFixed(1))
+            : 0,
+        };
+      } catch (error) {
+        console.error("Sosyal grid TMDB hatası:", id, error.message);
+        return null;
+      }
+    }));
+
+    return {
+      movies: results.filter(Boolean),
+      missingIds: ids.filter((id, index) => !results[index]),
+    };
+  }
+);
+
 // ==================================================================
 // BOT ADMIN PANELİ ERİŞİMİ
 // CineBot AI (cinematchbotai) backend'i Firebase dışında (Render'da
@@ -169,6 +514,422 @@ exports.getBotAdminAccess = onCall(
     return { baseUrl, key };
   }
 );
+
+function blogTimestampMillis(value) {
+  return value && typeof value.toMillis === "function" ? value.toMillis() : null;
+}
+
+function serializeBlogPost(id, data, includeContent = false) {
+  const serialized = {
+    id,
+    title: cleanText(data.title, 180),
+    slug: cleanText(data.slug, 120),
+    excerpt: cleanText(data.excerpt, 360),
+    category: cleanText(data.category, 40),
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    movies: Array.isArray(data.movies) ? data.movies : [],
+    coverImageUrl: cleanHttpsUrl(data.coverImageUrl, 1800),
+    status: ["draft", "published", "archived"].includes(data.status)
+      ? data.status
+      : "draft",
+    authorId: cleanText(data.authorId, 128),
+    authorName: cleanText(data.authorName, 100),
+    authorUsername: cleanText(data.authorUsername, 80),
+    authorPhotoUrl: cleanHttpsUrl(data.authorPhotoUrl, 1400),
+    readingMinutes: Number(data.readingMinutes) || 0,
+    revision: Number(data.revision) || 0,
+    createdAtMs: blogTimestampMillis(data.createdAt),
+    updatedAtMs: blogTimestampMillis(data.updatedAt),
+    publishedAtMs: blogTimestampMillis(data.publishedAt),
+  };
+  if (includeContent) {
+    serialized.contentHtml = typeof data.contentHtml === "string" ? data.contentHtml : "";
+    serialized.images = Array.isArray(data.images) ? data.images : [];
+  }
+  return serialized;
+}
+
+exports.listBlogPosts = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  const access = await assertBlogEditor(uid, request.auth && request.auth.token);
+  const requestedLimit = Number(request.data && request.data.limit);
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.min(100, Math.max(10, requestedLimit))
+    : 30;
+  const db = admin.firestore();
+  let docs;
+  let hasMore;
+  if (access.canManageAll) {
+    const snapshot = await db.collection("blog_posts")
+      .orderBy("updatedAt", "desc")
+      .limit(limit + 1)
+      .get();
+    hasMore = snapshot.docs.length > limit;
+    docs = snapshot.docs.slice(0, limit);
+  } else {
+    const snapshot = await db.collection("blog_posts")
+      .where("authorId", "==", uid)
+      .get();
+    const sortedDocs = snapshot.docs
+      .sort((left, right) => {
+        const leftMs = blogTimestampMillis(left.data().updatedAt) || 0;
+        const rightMs = blogTimestampMillis(right.data().updatedAt) || 0;
+        return rightMs - leftMs;
+      });
+    hasMore = sortedDocs.length > limit;
+    docs = sortedDocs.slice(0, limit);
+  }
+  return {
+    posts: docs.map((doc) => serializeBlogPost(doc.id, doc.data() || {})),
+    hasMore,
+  };
+});
+
+exports.getBlogPost = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  const access = await assertBlogEditor(uid, request.auth && request.auth.token);
+  const id = cleanText(request.data && request.data.id, 120);
+  if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) {
+    throw new HttpsError("invalid-argument", "Blog yazısı kimliği geçersiz.");
+  }
+  const snap = await admin.firestore().collection("blog_posts").doc(id).get();
+  if (!snap.exists) throw new HttpsError("not-found", "Blog yazısı bulunamadı.");
+  const post = snap.data() || {};
+  if (post.authorId !== uid && !access.canManageAll) {
+    throw new HttpsError("permission-denied", "Bu blog yazısını görüntüleyemezsiniz.");
+  }
+  return { post: serializeBlogPost(snap.id, post, true) };
+});
+
+async function assertBlogManager(request) {
+  const access = await assertBlogEditor(
+    request.auth && request.auth.uid,
+    request.auth && request.auth.token
+  );
+  if (!access.canManageAll) {
+    throw new HttpsError("permission-denied", "Blogger yetkilerini yalnızca yöneticiler değiştirebilir.");
+  }
+  return access;
+}
+
+function serializeBloggerCandidate(doc, activeEditorIds = new Set(), blockedEditorIds = new Set()) {
+  const data = doc.data() || {};
+  const username = cleanText(data.username || data.handle, 80).replace(/^@/, "");
+  return {
+    uid: doc.id,
+    displayName: cleanText(data.displayName || data.name || username, 100) || "CineMatch Kullanıcısı",
+    username,
+    photoUrl: cleanHttpsUrl(data.photoUrl || data.photoURL || data.profileImageUrl, 1400),
+    isBlogEditor: activeEditorIds.has(doc.id) ||
+      (!blockedEditorIds.has(doc.id) && ["admin", "blogger", "blogEditor"].includes(data.role)),
+  };
+}
+
+exports.searchBlogUsers = onCall(async (request) => {
+  await assertBlogManager(request);
+  const rawQuery = cleanText(request.data && request.data.query, 100).replace(/^@/, "");
+  const query = rawQuery.toLocaleLowerCase("tr-TR");
+  if (query.length < 2) {
+    throw new HttpsError("invalid-argument", "Kullanıcı araması en az 2 karakter olmalı.");
+  }
+
+  const db = admin.firestore();
+  const lookups = ["username_lc", "displayName_lc"].map((field) =>
+    db.collection("users")
+      .orderBy(field)
+      .startAt(query)
+      .endAt(`${query}\uf8ff`)
+      .limit(8)
+      .get()
+  );
+  if (/^[A-Za-z0-9_-]{20,128}$/.test(rawQuery)) {
+    lookups.push(db.collection("users").where(admin.firestore.FieldPath.documentId(), "==", rawQuery).get());
+  }
+  const snapshots = await Promise.all(lookups);
+  const usersById = new Map();
+  snapshots.forEach((snapshot) => snapshot.docs.forEach((doc) => usersById.set(doc.id, doc)));
+  const userDocs = [...usersById.values()].slice(0, 12);
+  const editorDocs = await Promise.all(
+    userDocs.map((doc) => db.collection("blog_editors").doc(doc.id).get())
+  );
+  const activeIds = new Set(
+    editorDocs.filter((doc) => doc.exists && doc.data().active !== false).map((doc) => doc.id)
+  );
+  const blockedIds = new Set(
+    editorDocs.filter((doc) => doc.exists && doc.data().active === false).map((doc) => doc.id)
+  );
+  return {
+    users: userDocs.map((doc) => serializeBloggerCandidate(doc, activeIds, blockedIds)),
+  };
+});
+
+exports.listBlogEditors = onCall(async (request) => {
+  await assertBlogManager(request);
+  const db = admin.firestore();
+  const [editorSnapshot, roleSnapshot] = await Promise.all([
+    db.collection("blog_editors").limit(100).get(),
+    db.collection("users").where("role", "in", ["blogger", "blogEditor"]).limit(100).get(),
+  ]);
+  const activeDocs = editorSnapshot.docs.filter((doc) => doc.data().active !== false);
+  const blockedIds = new Set(
+    editorSnapshot.docs.filter((doc) => doc.data().active === false).map((doc) => doc.id)
+  );
+  const userIds = new Set(activeDocs.map((doc) => doc.id));
+  roleSnapshot.docs.forEach((doc) => {
+    if (!blockedIds.has(doc.id)) userIds.add(doc.id);
+  });
+  const userDocs = await Promise.all(
+    [...userIds].map((uid) => db.collection("users").doc(uid).get())
+  );
+  const users = userDocs
+    .filter((doc) => doc.exists)
+    .map((doc) => serializeBloggerCandidate(doc, userIds))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName, "tr"));
+  return { users };
+});
+
+exports.setBlogEditor = onCall(async (request) => {
+  await assertBlogManager(request);
+  const uid = cleanText(request.data && request.data.uid, 128);
+  const active = request.data && request.data.active === true;
+  if (!/^[A-Za-z0-9_-]{20,128}$/.test(uid)) {
+    throw new HttpsError("invalid-argument", "Kullanıcı kimliği geçersiz.");
+  }
+  const db = admin.firestore();
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) throw new HttpsError("not-found", "CineMatch kullanıcısı bulunamadı.");
+  await db.collection("blog_editors").doc(uid).set({
+    active,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: request.auth.uid,
+  }, { merge: true });
+  return { ok: true, uid, active };
+});
+
+exports.searchBlogMovies = onCall(
+  { secrets: ["TMDB_ACCESS_TOKEN"] },
+  async (request) => {
+    await assertBlogEditor(
+      request.auth && request.auth.uid,
+      request.auth && request.auth.token
+    );
+    const query = cleanText(request.data && request.data.query, 120);
+    if (query.length < 2) {
+      throw new HttpsError("invalid-argument", "Film araması en az 2 karakter olmalı.");
+    }
+
+    try {
+      const response = await axios.get("https://api.themoviedb.org/3/search/movie", {
+        params: {
+          query,
+          language: "tr-TR",
+          page: "1",
+          include_adult: "false",
+        },
+        headers: {
+          Authorization: `Bearer ${process.env.TMDB_ACCESS_TOKEN}`,
+          Accept: "application/json",
+        },
+      });
+      const results = Array.isArray(response.data && response.data.results)
+        ? response.data.results
+        : [];
+      return {
+        movies: results.slice(0, 12).map((movie) => ({
+          tmdbId: Number(movie.id),
+          title: cleanText(movie.title || movie.original_title, 180),
+          originalTitle: cleanText(movie.original_title, 180),
+          year: /^\d{4}/.test(String(movie.release_date || ""))
+            ? Number(String(movie.release_date).slice(0, 4))
+            : null,
+          posterPath: /^\/[A-Za-z0-9._/-]+$/.test(String(movie.poster_path || ""))
+            ? String(movie.poster_path)
+            : "",
+          posterUrl: movie.poster_path
+            ? `https://image.tmdb.org/t/p/w342${movie.poster_path}`
+            : "",
+        })).filter((movie) => Number.isInteger(movie.tmdbId) && movie.tmdbId > 0),
+      };
+    } catch (error) {
+      console.error("Blog TMDB arama hatası:", error.message);
+      throw new HttpsError("internal", "TMDB film araması şu anda tamamlanamadı.");
+    }
+  }
+);
+
+exports.saveBlogPost = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  const access = await assertBlogEditor(uid, request.auth && request.auth.token);
+  const data = request.data || {};
+  const title = cleanText(data.title, 180);
+  const status = ["draft", "published", "archived"].includes(data.status)
+    ? data.status
+    : "draft";
+  const postId = cleanText(data.id, 120);
+  if (!title) throw new HttpsError("invalid-argument", "Yazı başlığı gerekli.");
+  if (!/^[A-Za-z0-9_-]{1,120}$/.test(postId)) {
+    throw new HttpsError("invalid-argument", "Blog yazısı kimliği geçersiz.");
+  }
+
+  const contentHtml = sanitizeBlogContent(data.contentHtml);
+  const contentText = sanitizeHtml(contentHtml, {
+    allowedTags: [],
+    allowedAttributes: {},
+  }).replace(/\s+/g, " ").trim().slice(0, 120000);
+  if (status === "published" && contentText.length < 20) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Yayınlamak için en az 20 karakterlik bir yazı içeriği gerekli."
+    );
+  }
+
+  const db = admin.firestore();
+  const ref = db.collection("blog_posts").doc(postId);
+  const existingSnap = await ref.get();
+  const existing = existingSnap.exists ? existingSnap.data() || {} : {};
+  if (existingSnap.exists && existing.authorId !== uid && !access.canManageAll) {
+    throw new HttpsError("permission-denied", "Yalnızca kendi blog yazılarınızı düzenleyebilirsiniz.");
+  }
+
+  const editingAnotherAuthor = existingSnap.exists && existing.authorId !== uid;
+  const author = editingAnotherAuthor
+    ? {
+        uid: existing.authorId,
+        displayName: cleanText(existing.authorName, 100) || "CineMatch Blogger",
+        username: cleanText(existing.authorUsername, 80),
+        photoUrl: cleanHttpsUrl(existing.authorPhotoUrl, 1400),
+      }
+    : access.profile;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const slug = makeSlug(data.slug || title) || postId;
+  const tags = Array.isArray(data.tags)
+    ? [...new Set(data.tags.map((tag) => cleanText(tag, 40)).filter(Boolean))].slice(0, 12)
+    : [];
+  const movies = normalizeBlogMovies(data.movies);
+  const images = normalizeBlogImages(data.images, postId);
+  const activeImagePaths = new Set(images.map((image) => image.path));
+  const removedImagePaths = Array.isArray(existing.images)
+    ? existing.images
+      .map((image) => cleanText(image && image.path, 600))
+      .filter((path) => (
+        /^blog_images\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(path) &&
+        path.split("/")[2] === postId &&
+        !activeImagePaths.has(path)
+      ))
+    : [];
+  const excerpt = cleanText(data.excerpt, 360) || contentText.slice(0, 220);
+  const coverImageUrl = cleanHttpsUrl(data.coverImageUrl, 1800) ||
+    (images[0] ? images[0].url : "");
+  const category = cleanText(data.category, 40) || "İnceleme";
+  const readingMinutes = contentText
+    ? Math.max(1, Math.ceil(contentText.split(/\s+/).length / 220))
+    : 0;
+
+  const payload = {
+    schemaVersion: 1,
+    title,
+    slug,
+    excerpt,
+    contentHtml,
+    contentText,
+    category,
+    tags,
+    movies,
+    tmdbIds: movies.map((movie) => movie.tmdbId),
+    images,
+    coverImageUrl,
+    status,
+    readingMinutes,
+    authorId: author.uid,
+    authorName: author.displayName,
+    authorUsername: author.username,
+    authorPhotoUrl: author.photoUrl,
+    updatedAt: now,
+    updatedBy: uid,
+    updatedByName: access.profile.displayName,
+    revision: admin.firestore.FieldValue.increment(1),
+  };
+  if (!existingSnap.exists) payload.createdAt = now;
+  if (status === "published" && !existing.publishedAt) payload.publishedAt = now;
+
+  const publicPayload = {
+    schemaVersion: 1,
+    title,
+    slug,
+    excerpt,
+    contentHtml,
+    contentText,
+    category,
+    tags,
+    movies,
+    tmdbIds: payload.tmdbIds,
+    images,
+    coverImageUrl,
+    readingMinutes,
+    authorId: author.uid,
+    authorName: author.displayName,
+    authorUsername: author.username,
+    authorPhotoUrl: author.photoUrl,
+    publishedAt: existing.publishedAt || now,
+    updatedAt: now,
+  };
+
+  const batch = db.batch();
+  batch.set(ref, payload, { merge: true });
+  const publicRef = db.collection("public_blog_posts").doc(postId);
+  if (status === "published") {
+    batch.set(publicRef, publicPayload, { merge: true });
+  } else {
+    batch.delete(publicRef);
+  }
+  await batch.commit();
+  if (removedImagePaths.length) {
+    const bucket = admin.storage().bucket();
+    const cleanupResults = await Promise.allSettled(
+      removedImagePaths.map((path) => bucket.file(path).delete({ ignoreNotFound: true }))
+    );
+    cleanupResults.forEach((result, index) => {
+      if (result.status === "rejected") {
+        console.error("Kullanılmayan blog görseli silinemedi:", removedImagePaths[index], result.reason);
+      }
+    });
+  }
+  return { ok: true, id: postId, slug, status };
+});
+
+exports.deleteBlogPost = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  const access = await assertBlogEditor(uid, request.auth && request.auth.token);
+  const id = cleanText(request.data && request.data.id, 120);
+  if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) {
+    throw new HttpsError("invalid-argument", "Blog yazısı kimliği geçersiz.");
+  }
+
+  const db = admin.firestore();
+  const ref = db.collection("blog_posts").doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return { ok: true };
+  const post = snap.data() || {};
+  if (post.authorId !== uid && !access.canManageAll) {
+    throw new HttpsError("permission-denied", "Yalnızca kendi blog yazılarınızı silebilirsiniz.");
+  }
+
+  const batch = db.batch();
+  batch.delete(ref);
+  batch.delete(db.collection("public_blog_posts").doc(id));
+  await batch.commit();
+
+  const bucket = admin.storage().bucket();
+  const storedPaths = Array.isArray(post.images)
+    ? post.images.map((image) => cleanText(image && image.path, 600))
+      .filter((path) => path.startsWith("blog_images/") && path.split("/").includes(id))
+    : [];
+  await Promise.allSettled([
+    bucket.deleteFiles({ prefix: `blog_images/${post.authorId}/${id}/` }),
+    ...storedPaths.map((path) => bucket.file(path).delete({ ignoreNotFound: true })),
+  ]);
+  return { ok: true };
+});
 
 exports.saveNewsArticle = onCall(async (request) => {
   const uid = request.auth && request.auth.uid;

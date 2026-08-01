@@ -1,62 +1,45 @@
-//Get the button:
-mybutton = document.getElementById("scrollUp");
+(function () {
+  const header = document.getElementById("siteHeader");
+  const menuButton = document.getElementById("menuButton");
+  const siteNav = document.getElementById("siteNav");
+  const currentYear = document.getElementById("currentYear");
 
-function scrollFunction() {
-  // Eğer buton bu sayfada yoksa (null ise) fonksiyonu burada durdur
-  if (!mybutton) {
-    return; 
+  if (window.location.search.includes("id=")) {
+    window.location.replace(
+      "https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch&hl=tr"
+    );
+    return;
   }
 
-  if (
-    document.body.scrollTop > sticky ||
-    document.documentElement.scrollTop > sticky
-  ) {
-    mybutton.style.display = "block";
-  } else {
-    mybutton.style.display = "none";
+  function syncHeader() {
+    if (header) header.classList.toggle("scrolled", window.scrollY > 24);
   }
-}
-// When the user clicks on the button, scroll to the top of the document
-function topFunction() {
-  document.body.scrollTop = 0; // For Safari
-  document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
-}
 
-// Functional Sticky Navbar
-window.onscroll = function () {
-  myFunction();
-  scrollFunction();
-};
-
-var navbar = document.querySelector("nav");
-var services = document.querySelector("#features");
-var sticky = services.offsetTop;
-
-function myFunction() {
-  if (window.pageYOffset > sticky) {
-    navbar.classList.add("sticky");
-  } else {
-    navbar.classList.remove("sticky");
+  function closeMenu() {
+    if (!menuButton || !siteNav) return;
+    menuButton.setAttribute("aria-expanded", "false");
+    menuButton.setAttribute("aria-label", "Menüyü aç");
+    siteNav.classList.remove("open");
+    document.body.classList.remove("menu-open");
   }
-}
 
-$(document).ready(function () {
-  // Preloader
-  document.querySelector(".preloader").classList.add("opacity-0");
-  setTimeout(function () {
-    document.querySelector(".preloader").style.display = "none";
-  }, 1000);
+  if (menuButton && siteNav) {
+    menuButton.addEventListener("click", () => {
+      const isOpen = menuButton.getAttribute("aria-expanded") === "true";
+      menuButton.setAttribute("aria-expanded", String(!isOpen));
+      menuButton.setAttribute("aria-label", isOpen ? "Menüyü aç" : "Menüyü kapat");
+      siteNav.classList.toggle("open", !isOpen);
+      document.body.classList.toggle("menu-open", !isOpen);
+    });
 
-  //   Nice Select Initialization
-  $("select").niceSelect();
-});
+    siteNav.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", closeMenu);
+    });
+  }
 
-// Navbar Open Function on Mobile Menu
-function openNav() {
-  $("#myNav").css("width", "100%");
-}
+  window.addEventListener("scroll", syncHeader, { passive: true });
+  syncHeader();
 
-// Navbar Close Function on Mobile Menu
-function closeNav() {
-  $("#myNav").css("width", "0");
-}
+  if (currentYear) currentYear.textContent = String(new Date().getFullYear());
+
+})();
