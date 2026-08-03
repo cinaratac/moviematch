@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
+import 'package:fluttergirdi/services/push_token_service.dart';
+import 'package:fluttergirdi/services/watched_movies_service.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/controllers/feed_controller.dart';
 
@@ -48,6 +52,11 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
   }
 
   Future<void> _preloadAndGo() async {
+    // Bu ekran yalnızca AuthGate kayıt durumunu sunucudan doğruladıktan sonra
+    // açılır. Kullanıcıya özel servisleri yarım kayıtlar için başlatma.
+    unawaited(_startNotificationServices());
+    unawaited(WatchedMoviesService.instance.initWatchedHistory());
+
     // Preloading zaten main.dart'ta başladı ama shell'de de çağrılıyor.
     // Burada tekrar çağırmak zararlı değil — ??= guard var içeride.
     GlobalDataService.instance.startPreloading();
@@ -78,6 +87,12 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen>
         ),
       );
     }
+  }
+
+  Future<void> _startNotificationServices() async {
+    await NotificationService.I.start();
+    await NotificationService.I.requestPermissions();
+    await PushTokenService.I.start();
   }
 
   Future<void> _waitForCriticalData() async {

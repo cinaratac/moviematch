@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/recommendation_engine.dart';
+import '../services/catalog_service.dart';
 import '../widgets/poster_image.dart';
 import '../models/shelf_target.dart';
 import '../screens/profilescreen.dart'; // UserShelfCache için gerekli
@@ -11,10 +12,14 @@ import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 extension ShelfTargetXLocal on ShelfTarget {
   String get userArrayField {
     switch (this) {
-      case ShelfTarget.fiveStar: return 'fiveStarKeys';
-      case ShelfTarget.disliked: return 'dislikedKeys';
-      case ShelfTarget.favorites: return 'favoritesKeys';
-      case ShelfTarget.watchlist: return 'watchlistKeys';
+      case ShelfTarget.fiveStar:
+        return 'fiveStarKeys';
+      case ShelfTarget.disliked:
+        return 'dislikedKeys';
+      case ShelfTarget.favorites:
+        return 'favoritesKeys';
+      case ShelfTarget.watchlist:
+        return 'watchlistKeys';
     }
   }
 }
@@ -26,7 +31,8 @@ class RecommendationCard extends StatefulWidget {
   State<RecommendationCard> createState() => _RecommendationCardState();
 }
 
-class _RecommendationCardState extends State<RecommendationCard> with AutomaticKeepAliveClientMixin {
+class _RecommendationCardState extends State<RecommendationCard>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
   List<MovieRecommendation>? _recommendations;
@@ -50,7 +56,9 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
       if (forceRefresh) {
         RecommendationEngine.instance.clearMemoryCache();
       }
-      final recs = await RecommendationEngine.instance.generateRecommendations(uid);
+      final recs = await RecommendationEngine.instance.generateRecommendations(
+        uid,
+      );
 
       if (mounted) {
         setState(() {
@@ -70,20 +78,17 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: Colors.transparent, 
-        insetPadding: const EdgeInsets.all(20), 
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(20),
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 360), 
+          constraints: const BoxConstraints(maxWidth: 360),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                cs.surfaceContainerHighest, 
-                cs.surface,                 
-              ],
+              colors: [cs.surfaceContainerHighest, cs.surface],
             ),
-            borderRadius: BorderRadius.circular(24), 
+            borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: cs.outlineVariant.withOpacity(0.2),
               width: 1,
@@ -115,7 +120,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                 ),
                 child: Icon(Icons.auto_awesome, color: cs.primary, size: 32),
               ),
-              
+
               const SizedBox(height: 20),
 
               Text(
@@ -126,21 +131,23 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                 ),
                 textAlign: TextAlign.center,
               ),
-              
+
               const SizedBox(height: 24),
 
               _buildFancyInfoItem(
                 context,
                 icon: Icons.person_search_rounded,
                 title: 'Sana Özel Analiz',
-                desc: 'Sevdiğin türler, yönetmenler ve izleme geçmişin yapay zeka ile analiz edilir.',
+                desc:
+                    'Sevdiğin türler, yönetmenler ve izleme geçmişin yapay zeka ile analiz edilir.',
               ),
               const SizedBox(height: 16),
               _buildFancyInfoItem(
                 context,
                 icon: Icons.calendar_month_rounded,
                 title: 'Haftalık Yenilenme',
-                desc: 'Her hafta listen sıfırlanır ve keşfetmen için yepyeni, taze öneriler getirilir.',
+                desc:
+                    'Her hafta listen sıfırlanır ve keşfetmen için yepyeni, taze öneriler getirilir.',
               ),
 
               const SizedBox(height: 28),
@@ -169,7 +176,12 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     );
   }
 
-  Widget _buildFancyInfoItem(BuildContext context, {required IconData icon, required String title, required String desc}) {
+  Widget _buildFancyInfoItem(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String desc,
+  }) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     return Row(
@@ -209,6 +221,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
       ],
     );
   }
+
   void _nextRecommendation() {
     if (_recommendations == null || _recommendations!.isEmpty) return;
     setState(() {
@@ -219,35 +232,10 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
   void _previousRecommendation() {
     if (_recommendations == null || _recommendations!.isEmpty) return;
     setState(() {
-      _currentIndex = (_currentIndex - 1 + _recommendations!.length) % _recommendations!.length;
+      _currentIndex =
+          (_currentIndex - 1 + _recommendations!.length) %
+          _recommendations!.length;
     });
-  }
-
-  String _slugify(String s) {
-    var t = s.toLowerCase();
-    t = t.replaceAll(RegExp(r'[çÇ]'), 'c')
-         .replaceAll(RegExp(r'[ğĞ]'), 'g')
-         .replaceAll(RegExp(r'[ıİ]'), 'i')
-         .replaceAll(RegExp(r'[öÖ]'), 'o')
-         .replaceAll(RegExp(r'[şŞ]'), 's')
-         .replaceAll(RegExp(r'[üÜ]'), 'u');
-    t = t.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
-    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
-    t = t.replaceAll(' ', '-');
-    return t;
-  }
-
-  String _normTitle(String s) {
-    var t = s.toLowerCase();
-    t = t.replaceAll(RegExp(r'[çÇ]'), 'c')
-         .replaceAll(RegExp(r'[ğĞ]'), 'g')
-         .replaceAll(RegExp(r'[ıİ]'), 'i')
-         .replaceAll(RegExp(r'[öÖ]'), 'o')
-         .replaceAll(RegExp(r'[şŞ]'), 's')
-         .replaceAll(RegExp(r'[üÜ]'), 'u');
-    t = t.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
-    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return t;
   }
 
   Future<void> _addToShelf(ShelfTarget target) async {
@@ -260,44 +248,19 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
 
     try {
       final db = FirebaseFirestore.instance;
-      
+
       final tmdbId = rec.tmdbId;
       final title = rec.title;
       final posterUrl = rec.posterUrl;
-      
-      int yearInt = 0;
-      if (rec.releaseDate.length >= 4) {
-        yearInt = int.tryParse(rec.releaseDate.substring(0, 4)) ?? 0;
+
+      final primaryKey = await CatalogService().upsertFromTmdb({
+        'id': tmdbId,
+        'title': title,
+        'release_date': rec.releaseDate,
+      });
+      if (primaryKey == null) {
+        throw StateError('Film güvenli kataloğa kaydedilemedi.');
       }
-
-      final titleLc = _normTitle(title);
-      final guessLbSlug = _slugify(title);
-      
-      String? primaryKey;
-
-      final byTmdb = await db.collection('catalog_films')
-          .where('tmdbId', isEqualTo: tmdbId).limit(1).get();
-
-      if (byTmdb.docs.isNotEmpty) {
-        primaryKey = byTmdb.docs.first.id;
-      } else {
-        final slugId = 'film:$guessLbSlug';
-        
-        primaryKey = slugId; 
-      }
-
-      final docRef = db.collection('catalog_films').doc(primaryKey);
-      await docRef.set({
-        'title': title.isNotEmpty ? title : 'Başlık yok',
-        'posterUrl': posterUrl,
-        'tmdbId': tmdbId,
-        'year': yearInt,
-        'titleLc': titleLc,
-        'lbSlugGuess': guessLbSlug,
-        'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']),
-        'source': 'tmdb',
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
 
       final String userArrayField = target.userArrayField;
       await db.collection('users').doc(uid).set({
@@ -308,12 +271,16 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
       // DÜZELTME: Alan isimleri 'loved' ve 'disliked' olarak güncellendi (UserProfileService ile uyumlu olması için)
       if (target == ShelfTarget.fiveStar) {
         await db.collection('userTasteProfiles').doc(uid).set({
-          'loved': FieldValue.arrayUnion([primaryKey]), // 'fiveStars' -> 'loved'
+          'loved': FieldValue.arrayUnion([
+            primaryKey,
+          ]), // 'fiveStars' -> 'loved'
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       } else if (target == ShelfTarget.disliked) {
         await db.collection('userTasteProfiles').doc(uid).set({
-          'disliked': FieldValue.arrayUnion([primaryKey]), // 'lowRatings' -> 'disliked'
+          'disliked': FieldValue.arrayUnion([
+            primaryKey,
+          ]), // 'lowRatings' -> 'disliked'
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
       }
@@ -326,16 +293,20 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
         };
         switch (target) {
           case ShelfTarget.fiveStar:
-            UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)..add(newLocalItem);
+            UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)
+              ..add(newLocalItem);
             break;
           case ShelfTarget.favorites:
-            UserShelfCache.favorites = List.from(UserShelfCache.favorites)..add(newLocalItem);
+            UserShelfCache.favorites = List.from(UserShelfCache.favorites)
+              ..add(newLocalItem);
             break;
           case ShelfTarget.watchlist:
-            UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)..add(newLocalItem);
+            UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)
+              ..add(newLocalItem);
             break;
           case ShelfTarget.disliked:
-            UserShelfCache.disliked = List.from(UserShelfCache.disliked)..add(newLocalItem);
+            UserShelfCache.disliked = List.from(UserShelfCache.disliked)
+              ..add(newLocalItem);
             break;
         }
       } catch (e) {
@@ -358,7 +329,9 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     } finally {
       if (mounted) setState(() => _actionInProgress = false);
@@ -371,10 +344,9 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-  
     if (_loading) {
       return Container(
-        height: 200, 
+        height: 200,
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -383,7 +355,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(16), 
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Center(
           child: Column(
@@ -414,20 +386,20 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
     }
 
     if (_recommendations == null || _recommendations!.isEmpty) {
-       return const SizedBox.shrink();
+      return const SizedBox.shrink();
     }
 
     final recommendation = _recommendations![_currentIndex];
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), 
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [cs.primaryContainer, cs.secondaryContainer],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16), 
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
@@ -437,11 +409,11 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min, 
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8), 
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
               children: [
                 Icon(Icons.auto_awesome, color: cs.primary, size: 20),
@@ -453,17 +425,20 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                     color: cs.onPrimaryContainer,
                   ),
                 ),
-                const Spacer(), 
-                
+                const Spacer(),
+
                 SizedBox(
                   height: 32,
                   width: 32,
                   child: IconButton(
                     padding: EdgeInsets.zero,
                     iconSize: 20,
-                    icon: Icon(Icons.info_outline, color: cs.onSurfaceVariant.withOpacity(0.7)),
+                    icon: Icon(
+                      Icons.info_outline,
+                      color: cs.onSurfaceVariant.withOpacity(0.7),
+                    ),
                     tooltip: 'Bu liste nasıl oluşuyor?',
-                    onPressed: _showInfoDialog, 
+                    onPressed: _showInfoDialog,
                   ),
                 ),
               ],
@@ -478,13 +453,13 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: SizedBox(
-                    width: 100, 
-                    height: 150, 
+                    width: 100,
+                    height: 150,
                     // Tıklama özelliği eklendi:
-                    child: GestureDetector( 
+                    child: GestureDetector(
                       onTap: () {
-                         if (recommendation.tmdbId != 0) {
-                           Navigator.push(
+                        if (recommendation.tmdbId != 0) {
+                          Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => MovieDetailScreen(
@@ -494,7 +469,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                               ),
                             ),
                           );
-                         }
+                        }
                       },
                       child: PosterImage(
                         posterUrl: recommendation.posterUrl,
@@ -506,7 +481,7 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                   ),
                 ),
                 const SizedBox(width: 12),
-                
+
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -515,13 +490,13 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                         recommendation.title,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
-                          fontSize: 16, 
+                          fontSize: 16,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 6), 
-                      
+                      const SizedBox(height: 6),
+
                       Row(
                         children: [
                           Icon(Icons.favorite, size: 14, color: Colors.red),
@@ -536,22 +511,27 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                         ],
                       ),
                       const SizedBox(height: 4),
-                      
+
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: cs.surface.withOpacity(0.5),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           recommendation.matchReason,
-                          style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 11,
+                          ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(height: 6),
-                      
+
                       Row(
                         children: [
                           const Icon(Icons.star, size: 14, color: Colors.amber),
@@ -563,25 +543,30 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                         ],
                       ),
                       const SizedBox(height: 4),
-                      
+
                       if (recommendation.genres.isNotEmpty)
                         SizedBox(
                           height: 20,
                           child: ListView.separated(
                             scrollDirection: Axis.horizontal,
                             itemCount: recommendation.genres.take(3).length,
-                            separatorBuilder: (_, __) => const SizedBox(width: 4),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(width: 4),
                             itemBuilder: (ctx, i) {
                               return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
                                   color: cs.surface.withOpacity(0.3),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
-                                  recommendation.genres[i], 
-                                  style: theme.textTheme.bodySmall?.copyWith(fontSize: 10)
+                                  recommendation.genres[i],
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 10,
+                                  ),
                                 ),
                               );
                             },
@@ -594,10 +579,10 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
             ),
           ),
 
-          const SizedBox(height: 12), 
+          const SizedBox(height: 12),
 
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), 
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -629,8 +614,6 @@ class _RecommendationCardState extends State<RecommendationCard> with AutomaticK
                     ],
                   ),
                 ),
-
-               
               ],
             ),
           ),

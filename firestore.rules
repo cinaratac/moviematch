@@ -58,6 +58,22 @@ service cloud.firestore {
       return request.auth.uid;
     }
 
+    function keepsRegistrationStateProtected() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny([
+        'registrationStatus',
+        'onboardingCompleted',
+        'onboardingCompletedAt',
+        'registrationVersion'
+      ]) ||
+      (
+        request.resource.data.registrationStatus == 'onboarding' &&
+        (!('onboardingCompleted' in request.resource.data) ||
+          request.resource.data.onboardingCompleted != true) &&
+        !('onboardingCompletedAt' in request.resource.data)
+      );
+    }
+
     // Kullanıcının iki kişilik kaydın katılımcısı olup olmadığını kontrol eder.
     function isParticipant(data) {
       return ('users' in data && data.users.hasAny([me()])) ||
@@ -76,7 +92,12 @@ service cloud.firestore {
     /* ------ users ------ */
     match /users/{uid} {
       allow read: if true;
-      allow write: if isAuthed() && me() == uid;
+      allow create: if false;
+      allow update: if isAuthed() && me() == uid &&
+        keepsRegistrationStateProtected();
+      // Hesap silme yalnızca OTP/provider doğrulamalı Cloud Function üzerinden
+      // yapılır; istemci ana profil belgesini doğrudan silemez.
+      allow delete: if false;
 
       allow update: if isAuthed() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['totalUnreadCount']);
@@ -136,6 +157,36 @@ service cloud.firestore {
       }
     }
 
+    // Tamamlanmamış üyelik bilgileri genel users profilinden ayrı ve özeldir.
+    // active durumuna geçiş yalnızca completeOnboarding Cloud Function'ında olur.
+    match /registration_drafts/{uid} {
+      allow read, delete: if isAuthed() && me() == uid;
+      allow create: if isAuthed() && me() == uid &&
+        !request.resource.data.keys().hasAny([
+          'emailVerified',
+          'emailVerifiedAt'
+        ]);
+      allow update: if isAuthed() && me() == uid &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'emailVerified',
+          'emailVerifiedAt'
+        ]);
+    }
+
+    // Kod hash'i, deneme sayacı ve mail kuyruğu yalnızca Admin SDK tarafından
+    // yönetilir. İstemci doğrulama durumunu kendi başına değiştiremez.
+    match /email_verifications/{uid} {
+      allow read, write: if false;
+    }
+
+    match /mail/{mailId} {
+      allow read, write: if false;
+    }
+
+    match /usernames/{username} {
+      allow read, write: if false;
+    }
+
     match /system/announcement {
       allow read: if true;
     }
@@ -157,7 +208,15 @@ service cloud.firestore {
     /* ------ catalog_films ------ */
     match /catalog_films/{document=**} {
       allow read: if true;
-      allow write: if isAuthed();
+      // Poster ve film kimlikleri yalnızca doğrulama yapan Cloud Functions
+      // tarafından Admin SDK ile yazılır. İstemciden URL enjeksiyonunu engeller.
+      allow write: if false;
+    }
+
+    /* ------ login_posters ------ */
+    match /login_posters/{posterId} {
+      allow read: if true;
+      allow write: if false;
     }
 
     /* ------ userAddedFilms ------ */
@@ -313,8 +372,17 @@ service cloud.firestore {
     }
 
     match /account_delete_requests/{uid} {
-      allow create, update: if request.auth != null && request.auth.uid == uid;
-      allow read, delete: if false;
+      allow read, write: if false;
+    }
+
+    // Kod hash'i ve kısa süreli silme yetkisi yalnızca Admin SDK tarafından
+    // yönetilir. Ayrılma nedenleri kimliksiz olarak ayrı koleksiyonda tutulur.
+    match /account_deletion_verifications/{uid} {
+      allow read, write: if false;
+    }
+
+    match /account_deletion_feedback/{feedbackId} {
+      allow read, write: if false;
     }
 
     /* ------ reports ------ */

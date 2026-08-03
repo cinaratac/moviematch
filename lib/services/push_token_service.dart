@@ -10,7 +10,7 @@ class PushTokenService {
 
   // DÜZELTME: 'String?' yerine 'String' yaptık. Token refresh stream'i null dönmez.
   Stream<String>? _tokenStream;
-  bool _isInitializing = false; 
+  bool _isInitializing = false;
 
   Future<void> start() async {
     // Eğer zaten işlem yapılıyorsa tekrar başlatma
@@ -20,17 +20,6 @@ class PushTokenService {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
-
-      // Request permission (iOS + Android13+)
-      await FirebaseMessaging.instance.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        announcement: false,
-        carPlay: false,
-        criticalAlert: false,
-        provisional: false,
-      );
 
       // Initial token save
       final token = await FirebaseMessaging.instance.getToken();
@@ -49,7 +38,6 @@ class PushTokenService {
       }
     } catch (e) {
       // Hata olsa bile devam et
-    
     } finally {
       _isInitializing = false; // Kilidi aç
     }

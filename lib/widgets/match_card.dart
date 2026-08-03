@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:fluttergirdi/services/match_service.dart' as global_match;
+import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
@@ -251,20 +252,18 @@ class _MatchCardState extends State<MatchCard>
         final results = data['results'] as List?;
 
         if (results != null && results.isNotEmpty) {
-          id = results[0]['id'];
-          final fetchedPosterPath = results[0]['poster_path'];
+          final firstResult = Map<String, dynamic>.from(results[0] as Map);
+          id = firstResult['id'];
+          final fetchedPosterPath = firstResult['poster_path'];
           if (fetchedPosterPath != null) {
-            currentPoster = 'https://image.tmdb.org/t/p/w500$fetchedPosterPath';
+            currentPoster = 'https://image.tmdb.org/t/p/w342$fetchedPosterPath';
           }
 
           if (film.id.isNotEmpty && id != null) {
-            FirebaseFirestore.instance
-                .collection('catalog_films')
-                .doc(film.id)
-                .set({
-                  'tmdbId': id,
-                  if (fetchedPosterPath != null) 'posterUrl': currentPoster,
-                }, SetOptions(merge: true));
+            await CatalogService().upsertFromTmdb(
+              firstResult,
+              catalogKey: film.id,
+            );
           }
         } else {
           if (!context.mounted) return;
@@ -284,7 +283,7 @@ class _MatchCardState extends State<MatchCard>
     }
 
     if (currentPoster.startsWith('/')) {
-      currentPoster = 'https://image.tmdb.org/t/p/w500$currentPoster';
+      currentPoster = 'https://image.tmdb.org/t/p/w342$currentPoster';
     } else if (currentPoster.contains('ltrbxd.com')) {
       currentPoster = '';
     }

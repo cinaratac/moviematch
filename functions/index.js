@@ -38,6 +38,1264 @@ function makeSlug(value) {
     .slice(0, 120);
 }
 
+function normalizeOnboardingPeople(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.slice(0, 20).reduce((items, raw) => {
+    if (!raw || typeof raw !== "object") return items;
+    const id = Number(raw.id);
+    const name = cleanText(raw.name, 100);
+    if (!Number.isInteger(id) || id <= 0 || !name || seen.has(id)) return items;
+    seen.add(id);
+    const profilePath = cleanText(raw.profile_path, 200);
+    items.push({
+      id,
+      name,
+      profile_path: /^\/[A-Za-z0-9._-]+$/.test(profilePath) ? profilePath : null,
+    });
+    return items;
+  }, []);
+}
+
+function onboardingProfilePhotoPath(uid) {
+  return `profile_images/${uid}/avatar.jpg`;
+}
+
+function onboardingProfileBucket() {
+  const projectId = cleanText(
+    process.env.GCLOUD_PROJECT || admin.app().options.projectId,
+    120
+  );
+  if (!/^[a-z0-9][a-z0-9-]{3,118}[a-z0-9]$/.test(projectId)) {
+    throw new Error("firebase-project-id-unavailable");
+  }
+  return admin.storage().bucket(`${projectId}.firebasestorage.app`);
+}
+
+async function validateOnboardingProfilePhoto(uid, rawPath, rawUrl) {
+  const expectedPath = onboardingProfilePhotoPath(uid);
+  const profilePhotoPath = cleanText(rawPath, 240);
+  const photoUrl = cleanText(rawUrl, 1600);
+  if (profilePhotoPath !== expectedPath || !photoUrl) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Profil fotoğrafı yüklemeniz gerekiyor."
+    );
+  }
+
+  try {
+    const bucket = onboardingProfileBucket();
+    const parsed = new URL(photoUrl);
+    const match = parsed.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
+    const objectPath = match ? decodeURIComponent(match[2]) : "";
+    if (parsed.protocol !== "https:" ||
+        parsed.hostname !== "firebasestorage.googleapis.com" ||
+        !match ||
+        decodeURIComponent(match[1]) !== bucket.name ||
+        objectPath !== expectedPath ||
+        parsed.searchParams.get("alt") !== "media" ||
+        !parsed.searchParams.get("token")) {
+      throw new Error("invalid-download-url");
+    }
+
+    const [metadata] = await bucket.file(expectedPath).getMetadata();
+    const size = Number(metadata.size);
+    const customMetadata = metadata.metadata || {};
+    if (metadata.contentType !== "image/jpeg" ||
+        !Number.isFinite(size) ||
+        size <= 0 ||
+        size > 5 * 1024 * 1024 ||
+        customMetadata.ownerUid !== uid ||
+        customMetadata.purpose !== "onboarding_profile") {
+      throw new Error("invalid-image-metadata");
+    }
+  } catch (error) {
+    console.error("Onboarding profil fotoğrafı doğrulanamadı:", uid, error.message);
+    throw new HttpsError(
+      "failed-precondition",
+      "Profil fotoğrafı doğrulanamadı. Lütfen yeniden yükleyin."
+    );
+  }
+  return { profilePhotoPath, photoURL: photoUrl };
+}
+
+const EMAIL_VERIFICATION_TTL_MS = 10 * 60 * 1000;
+const EMAIL_VERIFICATION_RESEND_MS = 60 * 1000;
+const EMAIL_VERIFICATION_WINDOW_MS = 60 * 60 * 1000;
+const EMAIL_VERIFICATION_MAX_SENDS = 5;
+const EMAIL_VERIFICATION_MAX_ATTEMPTS = 5;
+
+function normalizedEmail(value) {
+  return cleanText(value, 254).toLowerCase();
+}
+
+function timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (Number.isFinite(Number(value._seconds))) return Number(value._seconds) * 1000;
+  return 0;
+}
+
+function authProviderIds(userRecord) {
+  return new Set((userRecord.providerData || [])
+    .map((provider) => cleanText(provider.providerId, 80))
+    .filter(Boolean));
+}
+
+function hasTrustedFederatedEmail(userRecord) {
+  const providers = authProviderIds(userRecord);
+  if (providers.has("apple.com")) return true;
+  return providers.has("google.com") && userRecord.emailVerified === true;
+}
+
+function emailOtpSecret() {
+  const secret = process.env.EMAIL_OTP_HMAC_SECRET || "";
+  if (secret.length < 32) {
+    throw new HttpsError(
+      "failed-precondition",
+      "E-posta doğrulama servisi henüz yapılandırılmamış."
+    );
+  }
+  return secret;
+}
+
+function hashEmailOtp(uid, email, code) {
+  return crypto
+    .createHmac("sha256", emailOtpSecret())
+    .update(`${uid}:${email}:${code}`)
+    .digest("hex");
+}
+
+function safeHashEquals(left, right) {
+  if (!/^[a-f0-9]{64}$/.test(left) || !/^[a-f0-9]{64}$/.test(right)) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+}
+
+exports.requestEmailVerificationCode = onCall(
+  { secrets: ["EMAIL_OTP_HMAC_SECRET"] },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+
+    const authUser = await admin.auth().getUser(uid);
+    const email = normalizedEmail(authUser.email);
+    if (!email) {
+      throw new HttpsError("failed-precondition", "Hesapta doğrulanacak e-posta yok.");
+    }
+
+    const db = admin.firestore();
+    const draftRef = db.collection("registration_drafts").doc(uid);
+    const verificationRef = db.collection("email_verifications").doc(uid);
+    const initialDraftDoc = await draftRef.get();
+    const initialDraft = initialDraftDoc.exists ? initialDraftDoc.data() || {} : {};
+    if (!initialDraftDoc.exists ||
+        initialDraft.termsAccepted !== true ||
+        cleanText(initialDraft.authProvider, 30) !== "email" ||
+        normalizedEmail(initialDraft.email) !== email) {
+      throw new HttpsError(
+        "failed-precondition",
+        "E-posta kayıt taslağı bulunamadı."
+      );
+    }
+    if (hasTrustedFederatedEmail(authUser) || authUser.emailVerified === true) {
+      await Promise.all([
+        draftRef.set({
+          emailVerified: true,
+          emailVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }),
+        verificationRef.set({
+          email,
+          verified: true,
+          verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true }),
+      ]);
+      return { ok: true, alreadyVerified: true };
+    }
+
+    if (!authProviderIds(authUser).has("password")) {
+      throw new HttpsError(
+        "permission-denied",
+        "Bu hesap e-posta/şifre doğrulama akışını kullanamaz."
+      );
+    }
+
+    const code = crypto.randomInt(0, 1000000).toString().padStart(6, "0");
+    const codeHash = hashEmailOtp(uid, email, code);
+    const mailRef = db.collection("mail").doc();
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const expiresAt = admin.firestore.Timestamp.fromMillis(
+      nowMs + EMAIL_VERIFICATION_TTL_MS
+    );
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [draftDoc, verificationDoc] = await Promise.all([
+        transaction.get(draftRef),
+        transaction.get(verificationRef),
+      ]);
+      const draft = draftDoc.exists ? draftDoc.data() || {} : {};
+      if (!draftDoc.exists ||
+          draft.termsAccepted !== true ||
+          cleanText(draft.authProvider, 30) !== "email" ||
+          normalizedEmail(draft.email) !== email) {
+        throw new HttpsError(
+          "failed-precondition",
+          "E-posta kayıt taslağı bulunamadı."
+        );
+      }
+
+      const previous = verificationDoc.exists ? verificationDoc.data() || {} : {};
+      if (previous.verified === true && normalizedEmail(previous.email) === email) {
+        transaction.set(draftRef, {
+          emailVerified: true,
+          emailVerifiedAt: previous.verifiedAt || now,
+          updatedAt: now,
+        }, { merge: true });
+        return { sent: false, alreadyVerified: true, retryAfterSeconds: 0 };
+      }
+
+      const previousSentAt = timestampMillis(previous.lastSentAt);
+      const retryAfterMs = EMAIL_VERIFICATION_RESEND_MS - (nowMs - previousSentAt);
+      if (previousSentAt > 0 && retryAfterMs > 0) {
+        return {
+          sent: false,
+          alreadyVerified: false,
+          retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+        };
+      }
+
+      let windowStartedAtMs = timestampMillis(previous.windowStartedAt);
+      let sentCount = Number(previous.sentCount) || 0;
+      if (!windowStartedAtMs || nowMs - windowStartedAtMs >= EMAIL_VERIFICATION_WINDOW_MS) {
+        windowStartedAtMs = nowMs;
+        sentCount = 0;
+      }
+      if (sentCount >= EMAIL_VERIFICATION_MAX_SENDS) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Saatlik kod gönderme sınırına ulaştın. Lütfen daha sonra tekrar dene."
+        );
+      }
+
+      transaction.set(verificationRef, {
+        email,
+        verified: false,
+        codeHash,
+        expiresAt,
+        attempts: 0,
+        lastSentAt: now,
+        windowStartedAt: admin.firestore.Timestamp.fromMillis(windowStartedAtMs),
+        sentCount: sentCount + 1,
+        updatedAt: now,
+      }, { merge: true });
+      transaction.set(mailRef, {
+        to: email,
+        category: "email_verification",
+        ownerUid: uid,
+        expireAt: admin.firestore.Timestamp.fromMillis(
+          nowMs + 24 * 60 * 60 * 1000
+        ),
+        message: {
+          subject: "CineMatch e-posta doğrulama kodun",
+          text: `CineMatch doğrulama kodun: ${code}. Kod 10 dakika geçerlidir.`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#1f2937">
+              <h2 style="color:#2E7D32">CineMatch</h2>
+              <p>E-posta adresini doğrulamak için aşağıdaki kodu uygulamaya gir:</p>
+              <div style="font-size:34px;font-weight:700;letter-spacing:10px;padding:18px 0;color:#2E7D32">${code}</div>
+              <p>Bu kod 10 dakika geçerlidir. Bu kaydı sen başlatmadıysan e-postayı yok sayabilirsin.</p>
+            </div>
+          `,
+        },
+        createdAt: now,
+      });
+      return { sent: true, alreadyVerified: false, retryAfterSeconds: 60 };
+    });
+
+    return { ok: true, ...result };
+  }
+);
+
+exports.verifyEmailVerificationCode = onCall(
+  { secrets: ["EMAIL_OTP_HMAC_SECRET"] },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+    const code = cleanText(request.data && request.data.code, 6);
+    if (!/^\d{6}$/.test(code)) {
+      throw new HttpsError("invalid-argument", "6 haneli doğrulama kodu gerekli.");
+    }
+
+    const authUser = await admin.auth().getUser(uid);
+    const email = normalizedEmail(authUser.email);
+    if (!email) {
+      throw new HttpsError("failed-precondition", "Hesapta doğrulanacak e-posta yok.");
+    }
+    const submittedHash = hashEmailOtp(uid, email, code);
+    const db = admin.firestore();
+    const draftRef = db.collection("registration_drafts").doc(uid);
+    const verificationRef = db.collection("email_verifications").doc(uid);
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [draftDoc, verificationDoc] = await Promise.all([
+        transaction.get(draftRef),
+        transaction.get(verificationRef),
+      ]);
+      if (!draftDoc.exists || !verificationDoc.exists) {
+        return { ok: false, reason: "not-started" };
+      }
+      const draft = draftDoc.data() || {};
+      const verification = verificationDoc.data() || {};
+      if (normalizedEmail(draft.email) !== email ||
+          normalizedEmail(verification.email) !== email) {
+        return { ok: false, reason: "email-mismatch" };
+      }
+      if (verification.verified === true) {
+        transaction.set(draftRef, {
+          emailVerified: true,
+          emailVerifiedAt: verification.verifiedAt || now,
+          updatedAt: now,
+        }, { merge: true });
+        return { ok: true, alreadyVerified: true };
+      }
+
+      const expiresAtMs = timestampMillis(verification.expiresAt);
+      if (!expiresAtMs || expiresAtMs < nowMs) {
+        return { ok: false, reason: "expired" };
+      }
+      const attempts = Math.max(0, Number(verification.attempts) || 0);
+      if (attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS) {
+        return { ok: false, reason: "locked" };
+      }
+      if (!safeHashEquals(cleanText(verification.codeHash, 64), submittedHash)) {
+        const nextAttempts = attempts + 1;
+        transaction.set(verificationRef, {
+          attempts: nextAttempts,
+          lastAttemptAt: now,
+          updatedAt: now,
+        }, { merge: true });
+        return {
+          ok: false,
+          reason: nextAttempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS
+            ? "locked"
+            : "invalid",
+        };
+      }
+
+      transaction.set(verificationRef, {
+        verified: true,
+        verifiedAt: now,
+        codeHash: admin.firestore.FieldValue.delete(),
+        expiresAt: admin.firestore.FieldValue.delete(),
+        attempts: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+      transaction.set(draftRef, {
+        emailVerified: true,
+        emailVerifiedAt: now,
+        updatedAt: now,
+      }, { merge: true });
+      return { ok: true, alreadyVerified: false };
+    });
+
+    if (!result.ok) {
+      if (result.reason === "expired") {
+        throw new HttpsError("deadline-exceeded", "Kodun süresi dolmuş.");
+      }
+      if (result.reason === "locked") {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Çok fazla hatalı deneme yaptın. Yeni kod iste."
+        );
+      }
+      if (result.reason === "invalid") {
+        throw new HttpsError("invalid-argument", "Doğrulama kodu hatalı.");
+      }
+      throw new HttpsError(
+        "failed-precondition",
+        "Önce yeni bir doğrulama kodu istemelisin."
+      );
+    }
+
+    await admin.auth().updateUser(uid, { emailVerified: true });
+    return { ok: true, verified: true };
+  }
+);
+
+const ACCOUNT_DELETION_OTP_TTL_MS = 10 * 60 * 1000;
+const ACCOUNT_DELETION_AUTH_TTL_MS = 15 * 60 * 1000;
+const ACCOUNT_DELETION_RECENT_AUTH_MS = 5 * 60 * 1000;
+const ACCOUNT_DELETION_REASON_CODES = new Set([
+  "privacy",
+  "too_many_notifications",
+  "not_useful",
+  "technical_problems",
+  "found_alternative",
+  "taking_break",
+  "other",
+]);
+
+function hashAccountDeletionOtp(uid, email, code) {
+  return crypto
+    .createHmac("sha256", emailOtpSecret())
+    .update(`account-deletion:otp:${uid}:${email}:${code}`)
+    .digest("hex");
+}
+
+function hashAccountDeletionAuthorization(uid, token) {
+  return crypto
+    .createHmac("sha256", emailOtpSecret())
+    .update(`account-deletion:authorization:${uid}:${token}`)
+    .digest("hex");
+}
+
+function assertRecentFederatedAuthentication(request, authUser) {
+  const providers = authProviderIds(authUser);
+  const federated = providers.has("google.com") || providers.has("apple.com");
+  if (!federated) return;
+
+  const authTimeSeconds = Number(request.auth && request.auth.token.auth_time);
+  const authTimeMs = Number.isFinite(authTimeSeconds)
+    ? authTimeSeconds * 1000
+    : 0;
+  if (!authTimeMs || Date.now() - authTimeMs > ACCOUNT_DELETION_RECENT_AUTH_MS) {
+    throw new HttpsError(
+      "unauthenticated",
+      "Hesabı silmeden önce Google veya Apple hesabınla yeniden doğrulanmalısın."
+    );
+  }
+}
+
+function accountProviderTypes(authUser) {
+  const providers = authProviderIds(authUser);
+  const values = [];
+  if (providers.has("google.com")) values.push("google");
+  if (providers.has("apple.com")) values.push("apple");
+  if (providers.has("password")) values.push("email");
+  return values.length ? values : ["unknown"];
+}
+
+exports.requestAccountDeletionCode = onCall(
+  { secrets: ["EMAIL_OTP_HMAC_SECRET"] },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+
+    const authUser = await admin.auth().getUser(uid);
+    const email = normalizedEmail(authUser.email);
+    if (!email) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Hesabına bağlı bir e-posta adresi bulunamadı."
+      );
+    }
+    assertRecentFederatedAuthentication(request, authUser);
+
+    const db = admin.firestore();
+    const verificationRef = db.collection("account_deletion_verifications").doc(uid);
+    const mailRef = db.collection("mail").doc();
+    const code = crypto.randomInt(0, 1000000).toString().padStart(6, "0");
+    const codeHash = hashAccountDeletionOtp(uid, email, code);
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const expiresAt = admin.firestore.Timestamp.fromMillis(
+      nowMs + ACCOUNT_DELETION_OTP_TTL_MS
+    );
+
+    const result = await db.runTransaction(async (transaction) => {
+      const verificationDoc = await transaction.get(verificationRef);
+      const previous = verificationDoc.exists ? verificationDoc.data() || {} : {};
+      const previousSentAt = timestampMillis(previous.lastSentAt);
+      const retryAfterMs = EMAIL_VERIFICATION_RESEND_MS - (nowMs - previousSentAt);
+      if (previousSentAt > 0 && retryAfterMs > 0) {
+        return {
+          sent: false,
+          retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+        };
+      }
+
+      let windowStartedAtMs = timestampMillis(previous.windowStartedAt);
+      let sentCount = Number(previous.sentCount) || 0;
+      if (!windowStartedAtMs ||
+          nowMs - windowStartedAtMs >= EMAIL_VERIFICATION_WINDOW_MS) {
+        windowStartedAtMs = nowMs;
+        sentCount = 0;
+      }
+      if (sentCount >= EMAIL_VERIFICATION_MAX_SENDS) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Saatlik kod gönderme sınırına ulaştın. Lütfen daha sonra tekrar dene."
+        );
+      }
+
+      transaction.set(verificationRef, {
+        email,
+        codeHash,
+        expiresAt,
+        attempts: 0,
+        lastSentAt: now,
+        windowStartedAt: admin.firestore.Timestamp.fromMillis(windowStartedAtMs),
+        sentCount: sentCount + 1,
+        sessionId: crypto.randomBytes(16).toString("hex"),
+        providerTypes: accountProviderTypes(authUser),
+        authorizedHash: admin.firestore.FieldValue.delete(),
+        authorizedAt: admin.firestore.FieldValue.delete(),
+        authorizedUntil: admin.firestore.FieldValue.delete(),
+        processingStartedAt: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+      transaction.set(mailRef, {
+        to: email,
+        category: "account_deletion_verification",
+        ownerUid: uid,
+        expireAt: admin.firestore.Timestamp.fromMillis(
+          nowMs + 24 * 60 * 60 * 1000
+        ),
+        message: {
+          subject: "CineMatch hesap silme doğrulama kodun",
+          text: `CineMatch hesap silme kodun: ${code}. Kod 10 dakika geçerlidir. Bu işlemi sen başlatmadıysan kodu kimseyle paylaşma.`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#1f2937">
+              <h2 style="color:#c62828">CineMatch</h2>
+              <p>Hesabını kalıcı olarak silme isteğini doğrulamak için aşağıdaki kodu uygulamaya gir:</p>
+              <div style="font-size:34px;font-weight:700;letter-spacing:10px;padding:18px 0;color:#c62828">${code}</div>
+              <p>Kod 10 dakika geçerlidir. Bu işlemi sen başlatmadıysan kodu kimseyle paylaşma; hesabın silinmeyecektir.</p>
+            </div>
+          `,
+        },
+        createdAt: now,
+      });
+      return { sent: true, retryAfterSeconds: 60 };
+    });
+
+    return {
+      ok: true,
+      email,
+      providerTypes: accountProviderTypes(authUser),
+      ...result,
+    };
+  }
+);
+
+exports.verifyAccountDeletionCode = onCall(
+  { secrets: ["EMAIL_OTP_HMAC_SECRET"] },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+    const code = cleanText(request.data && request.data.code, 6);
+    if (!/^\d{6}$/.test(code)) {
+      throw new HttpsError("invalid-argument", "6 haneli doğrulama kodu gerekli.");
+    }
+
+    const authUser = await admin.auth().getUser(uid);
+    const email = normalizedEmail(authUser.email);
+    if (!email) {
+      throw new HttpsError("failed-precondition", "Hesap e-postası bulunamadı.");
+    }
+
+    const db = admin.firestore();
+    const verificationRef = db.collection("account_deletion_verifications").doc(uid);
+    const submittedHash = hashAccountDeletionOtp(uid, email, code);
+    const authorizationToken = crypto.randomBytes(32).toString("hex");
+    const authorizationHash = hashAccountDeletionAuthorization(
+      uid,
+      authorizationToken
+    );
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const result = await db.runTransaction(async (transaction) => {
+      const verificationDoc = await transaction.get(verificationRef);
+      if (!verificationDoc.exists) return { ok: false, reason: "not-started" };
+      const verification = verificationDoc.data() || {};
+      if (normalizedEmail(verification.email) !== email) {
+        return { ok: false, reason: "email-mismatch" };
+      }
+      const expiresAtMs = timestampMillis(verification.expiresAt);
+      if (!expiresAtMs || expiresAtMs < nowMs) {
+        return { ok: false, reason: "expired" };
+      }
+      const attempts = Math.max(0, Number(verification.attempts) || 0);
+      if (attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS) {
+        return { ok: false, reason: "locked" };
+      }
+      if (!safeHashEquals(cleanText(verification.codeHash, 64), submittedHash)) {
+        const nextAttempts = attempts + 1;
+        transaction.set(verificationRef, {
+          attempts: nextAttempts,
+          lastAttemptAt: now,
+          updatedAt: now,
+        }, { merge: true });
+        return {
+          ok: false,
+          reason: nextAttempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS
+            ? "locked"
+            : "invalid",
+        };
+      }
+
+      transaction.set(verificationRef, {
+        authorizedHash: authorizationHash,
+        authorizedAt: now,
+        authorizedUntil: admin.firestore.Timestamp.fromMillis(
+          nowMs + ACCOUNT_DELETION_AUTH_TTL_MS
+        ),
+        attempts: admin.firestore.FieldValue.delete(),
+        processingStartedAt: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+      return { ok: true };
+    });
+
+    if (!result.ok) {
+      if (result.reason === "expired") {
+        throw new HttpsError("deadline-exceeded", "Kodun süresi dolmuş.");
+      }
+      if (result.reason === "locked") {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Çok fazla hatalı deneme yaptın. Yeni kod iste."
+        );
+      }
+      if (result.reason === "invalid") {
+        throw new HttpsError("invalid-argument", "Doğrulama kodu hatalı.");
+      }
+      throw new HttpsError(
+        "failed-precondition",
+        "Önce yeni bir hesap silme kodu istemelisin."
+      );
+    }
+    return { ok: true, authorizationToken };
+  }
+);
+
+async function deleteReferences(refs) {
+  const unique = [...new Map(refs.map((ref) => [ref.path, ref])).values()];
+  for (let index = 0; index < unique.length; index += 400) {
+    const batch = admin.firestore().batch();
+    unique.slice(index, index + 400).forEach((ref) => batch.delete(ref));
+    await batch.commit();
+  }
+}
+
+async function deleteQueryTrees(query) {
+  const db = admin.firestore();
+  while (true) {
+    const snapshot = await query.limit(100).get();
+    if (snapshot.empty) return;
+    for (let index = 0; index < snapshot.docs.length; index += 10) {
+      await Promise.all(
+        snapshot.docs.slice(index, index + 10)
+          .map((doc) => db.recursiveDelete(doc.ref))
+      );
+    }
+  }
+}
+
+async function runChunked(items, chunkSize, action) {
+  for (let index = 0; index < items.length; index += chunkSize) {
+    await Promise.all(items.slice(index, index + chunkSize).map(action));
+  }
+}
+
+// Collection-group indekslerine bağımlı olmadan eski ve yeni alt koleksiyon
+// şemalarındaki kullanıcı izlerini temizler. listDocuments, ana belgesi olmayan
+// fakat alt koleksiyonu bulunan Firestore yollarını da döndürür.
+async function deleteNestedAccountData(uid) {
+  const db = admin.firestore();
+  const userRefs = await db.collection("users").listDocuments();
+  await runChunked(userRefs, 10, async (userRef) => {
+    await Promise.all([
+      deleteQueryTrees(
+        userRef.collection("notifications").where("actorId", "==", uid)
+      ),
+      deleteQueryTrees(
+        userRef.collection("saved_lists").where("ownerId", "==", uid)
+      ),
+    ]);
+  });
+
+  const feedRefs = await db.collection("feeds").listDocuments();
+  await runChunked(feedRefs, 10, (feedRef) =>
+    deleteQueryTrees(
+      feedRef.collection("user_feed").where("authorId", "==", uid)
+    )
+  );
+
+  const weekRefs = await db.collection("weekly_leaderboard").listDocuments();
+  await deleteReferences(
+    weekRefs.map((weekRef) => weekRef.collection("scores").doc(uid))
+  );
+
+  const postRefs = await db.collection("posts").listDocuments();
+  await runChunked(postRefs, 5, async (postRef) => {
+    const likeRefs = [postRef.collection("likes").doc(uid)];
+    const replies = await postRef.collection("replies").get();
+    for (const reply of replies.docs) {
+      if (cleanText(reply.data().authorId, 128) === uid) {
+        await db.recursiveDelete(reply.ref);
+        continue;
+      }
+      likeRefs.push(reply.ref.collection("likes").doc(uid));
+      const subReplies = await reply.ref.collection("subReplies").get();
+      for (const subReply of subReplies.docs) {
+        if (cleanText(subReply.data().authorId, 128) === uid) {
+          await db.recursiveDelete(subReply.ref);
+        } else {
+          likeRefs.push(subReply.ref.collection("likes").doc(uid));
+        }
+      }
+    }
+    await deleteReferences(likeRefs);
+  });
+}
+
+async function cleanupAccountCrossLinks(uid) {
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const [followers, following, blocked, blockedBy] = await Promise.all([
+    userRef.collection("followers").get(),
+    userRef.collection("following").get(),
+    userRef.collection("blocked").get(),
+    userRef.collection("blockedBy").get(),
+  ]);
+  const refs = [];
+  followers.docs.forEach((doc) => {
+    refs.push(db.collection("users").doc(doc.id).collection("following").doc(uid));
+  });
+  following.docs.forEach((doc) => {
+    refs.push(db.collection("users").doc(doc.id).collection("followers").doc(uid));
+  });
+  blocked.docs.forEach((doc) => {
+    refs.push(db.collection("users").doc(doc.id).collection("blockedBy").doc(uid));
+  });
+  blockedBy.docs.forEach((doc) => {
+    refs.push(db.collection("users").doc(doc.id).collection("blocked").doc(uid));
+  });
+  await deleteReferences(refs);
+}
+
+async function removeAccountFromClubs(uid) {
+  const db = admin.firestore();
+  const clubs = await db.collection("clubs").where("members", "array-contains", uid).get();
+  for (const clubDoc of clubs.docs) {
+    const data = clubDoc.data() || {};
+    const members = (Array.isArray(data.members) ? data.members : [])
+      .map(String).filter((memberUid) => memberUid && memberUid !== uid);
+    const admins = (Array.isArray(data.admins) ? data.admins : [])
+      .map(String).filter((adminUid) => adminUid && adminUid !== uid);
+    const chatRef = db.collection("chats").doc(clubDoc.id);
+    if (!members.length) {
+      await Promise.all([
+        db.recursiveDelete(clubDoc.ref),
+        db.recursiveDelete(chatRef),
+      ]);
+      continue;
+    }
+    const currentOwner = cleanText(data.ownerId, 128);
+    const nextOwner = currentOwner && currentOwner !== uid
+      ? currentOwner
+      : (admins[0] || members[0]);
+    if (!admins.includes(nextOwner)) admins.push(nextOwner);
+    await Promise.all([
+      clubDoc.ref.update({
+        ownerId: nextOwner,
+        members,
+        admins,
+        pendingRequests: admin.firestore.FieldValue.arrayRemove(uid),
+        memberCount: members.length,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }),
+      chatRef.set({
+        ownerId: nextOwner,
+        participants: admin.firestore.FieldValue.arrayRemove(uid),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }),
+    ]);
+
+    const [events, polls] = await Promise.all([
+      clubDoc.ref.collection("events").get(),
+      clubDoc.ref.collection("polls").get(),
+    ]);
+    const batch = db.batch();
+    events.docs.forEach((doc) => batch.update(doc.ref, {
+      participants: admin.firestore.FieldValue.arrayRemove(uid),
+    }));
+    polls.docs.forEach((doc) => batch.update(doc.ref, {
+      [`voters.${uid}`]: admin.firestore.FieldValue.delete(),
+    }));
+    if (events.size || polls.size) await batch.commit();
+  }
+}
+
+async function removeAccountFromChats(uid) {
+  const db = admin.firestore();
+  const chats = await db.collection("chats")
+    .where("participants", "array-contains", uid).get();
+  for (const chatDoc of chats.docs) {
+    const data = chatDoc.data() || {};
+    const participants = (Array.isArray(data.participants) ? data.participants : [])
+      .map(String).filter((participantUid) => participantUid && participantUid !== uid);
+    const updates = {
+      participants,
+      [`titles.${uid}`]: admin.firestore.FieldValue.delete(),
+      [`photos.${uid}`]: admin.firestore.FieldValue.delete(),
+      [`unreadCounts.${uid}`]: admin.firestore.FieldValue.delete(),
+      [`hiddenFor.${uid}`]: admin.firestore.FieldValue.delete(),
+      [`deliveredUpTo.${uid}`]: admin.firestore.FieldValue.delete(),
+      [`typing.${uid}`]: admin.firestore.FieldValue.delete(),
+      [`typingUpdatedAt.${uid}`]: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (data.lastMessageAuthorId === uid) {
+      updates.lastMessage = "Silinen kullanıcıdan mesaj";
+      updates.lastMessageAuthorId = admin.firestore.FieldValue.delete();
+    }
+    participants.forEach((participantUid) => {
+      updates[`titles.${participantUid}`] = "Silinen kullanıcı";
+      updates[`photos.${participantUid}`] = "";
+    });
+    await chatDoc.ref.update(updates);
+    await deleteReferences([chatDoc.ref.collection("reads").doc(uid)]);
+    await deleteQueryTrees(
+      chatDoc.ref.collection("messages").where("authorId", "==", uid)
+    );
+    await deleteQueryTrees(
+      chatDoc.ref.collection("messages").where("from", "==", uid)
+    );
+  }
+}
+
+async function deleteAccountStorage(uid) {
+  const bucket = onboardingProfileBucket();
+  const prefixes = [
+    `profile_images/${uid}/`,
+    `user_avatars/${uid}_`,
+    `post_images/${uid}_`,
+  ];
+  for (const prefix of prefixes) {
+    const [files] = await bucket.getFiles({ prefix });
+    for (let index = 0; index < files.length; index += 20) {
+      await Promise.all(files.slice(index, index + 20).map((file) =>
+        file.delete({ ignoreNotFound: true })
+      ));
+    }
+  }
+}
+
+async function deleteAccountFirestoreData(uid) {
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const userDoc = await userRef.get();
+  const userData = userDoc.exists ? userDoc.data() || {} : {};
+
+  await cleanupAccountCrossLinks(uid);
+  await removeAccountFromChats(uid);
+  await removeAccountFromClubs(uid);
+
+  const treeQueries = [
+    db.collection("posts").where("authorId", "==", uid),
+    db.collection("custom_lists").where("ownerId", "==", uid),
+    db.collection("userAddedFilms").where("authorId", "==", uid),
+    db.collection("likes").where("uids", "array-contains", uid),
+    db.collection("matches").where("uids", "array-contains", uid),
+  ];
+  for (const query of treeQueries) await deleteQueryTrees(query);
+  await deleteNestedAccountData(uid);
+
+  const plainQueries = [
+    db.collection("profile_movie_events").where("userId", "==", uid),
+    db.collection("likeLogs").where("from", "==", uid),
+    db.collection("likeLogs").where("to", "==", uid),
+    db.collection("reports").where("reporterId", "==", uid),
+    db.collection("reports").where("by", "==", uid),
+    db.collection("reports").where("reportedUserId", "==", uid),
+    db.collection("reports").where("reportedId", "==", uid),
+    db.collection("usernames").where("uid", "==", uid),
+  ];
+  for (const query of plainQueries) await deleteQueryTrees(query);
+
+  const usernameKeys = new Set([
+    cleanText(userData.username_lc, 80),
+    cleanText(userData.displayName_lc, 80),
+    cleanText(userData.username, 80).toLowerCase(),
+    cleanText(userData.displayName, 80).toLowerCase(),
+  ].filter(Boolean));
+  await deleteReferences(
+    [...usernameKeys].map((username) => db.collection("usernames").doc(username))
+  );
+
+  const directTrees = [
+    userRef,
+    db.collection("feeds").doc(uid),
+    db.collection("userTasteProfiles").doc(uid),
+    db.collection("registration_drafts").doc(uid),
+    db.collection("email_verifications").doc(uid),
+    db.collection("marketing_emails").doc(uid),
+    db.collection("account_delete_requests").doc(uid),
+  ];
+  for (const ref of directTrees) await db.recursiveDelete(ref);
+}
+
+exports.completeAccountDeletion = onCall(
+  {
+    secrets: ["EMAIL_OTP_HMAC_SECRET"],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+    const token = cleanText(request.data && request.data.authorizationToken, 128);
+    const reasonCode = cleanText(request.data && request.data.reasonCode, 40);
+    const note = cleanText(request.data && request.data.note, 500);
+    if (!/^[a-f0-9]{64}$/.test(token)) {
+      throw new HttpsError("permission-denied", "Hesap silme yetkisi geçersiz.");
+    }
+    if (!ACCOUNT_DELETION_REASON_CODES.has(reasonCode)) {
+      throw new HttpsError("invalid-argument", "Bir ayrılma nedeni seçmelisin.");
+    }
+    if (reasonCode === "other" && note.length < 3) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Diğer seçeneği için kısa bir açıklama yazmalısın."
+      );
+    }
+
+    const db = admin.firestore();
+    const authUser = await admin.auth().getUser(uid);
+    const email = normalizedEmail(authUser.email);
+    const verificationRef = db.collection("account_deletion_verifications").doc(uid);
+    const suppliedHash = hashAccountDeletionAuthorization(uid, token);
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const claimed = await db.runTransaction(async (transaction) => {
+      const verificationDoc = await transaction.get(verificationRef);
+      if (!verificationDoc.exists) return null;
+      const verification = verificationDoc.data() || {};
+      const expectedHash = cleanText(verification.authorizedHash, 64);
+      const authorizedUntilMs = timestampMillis(verification.authorizedUntil);
+      const alreadyProcessing = timestampMillis(verification.processingStartedAt) > 0;
+      if (normalizedEmail(verification.email) !== email ||
+          !safeHashEquals(expectedHash, suppliedHash) ||
+          (!alreadyProcessing && authorizedUntilMs < nowMs)) {
+        return null;
+      }
+      transaction.set(verificationRef, {
+        processingStartedAt: verification.processingStartedAt || now,
+        updatedAt: now,
+      }, { merge: true });
+      return {
+        sessionId: cleanText(verification.sessionId, 64),
+        providerTypes: Array.isArray(verification.providerTypes)
+          ? verification.providerTypes.map(String).slice(0, 4)
+          : accountProviderTypes(authUser),
+      };
+    });
+    if (!claimed || !/^[a-f0-9]{32}$/.test(claimed.sessionId)) {
+      throw new HttpsError(
+        "permission-denied",
+        "Hesap silme doğrulamasının süresi dolmuş. Lütfen yeniden başlat."
+      );
+    }
+
+    const feedbackRef = db.collection("account_deletion_feedback")
+      .doc(claimed.sessionId);
+    await feedbackRef.set({
+      reasonCode,
+      note: note || null,
+      providerTypes: claimed.providerTypes,
+      status: "processing",
+      submittedAt: now,
+    }, { merge: true });
+
+    try {
+      await deleteAccountFirestoreData(uid);
+      await deleteAccountStorage(uid);
+      await admin.auth().deleteUser(uid);
+      await verificationRef.delete().catch(() => null);
+      await feedbackRef.set({
+        status: "completed",
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return { ok: true };
+    } catch (error) {
+      console.error("Hesap silme tamamlanamadı:", uid, error);
+      await feedbackRef.set({
+        status: "failed",
+        failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true }).catch(() => null);
+      throw new HttpsError(
+        "internal",
+        "Hesap silme işlemi tamamlanamadı. Lütfen tekrar dene."
+      );
+    }
+  }
+);
+
+// Kimlik doğrulama, tamamlanmış üyelik anlamına gelmez. Bu callable zorunlu
+// onboarding alanlarını doğrular, kullanıcı adını transaction ile ayırır ve
+// profili tek atomik işlemde active durumuna geçirir.
+exports.completeOnboarding = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+
+  const payload = request.data || {};
+  const age = Number(payload.age);
+  if (!Number.isInteger(age) || age < 13 || age > 120) {
+    throw new HttpsError("invalid-argument", "Geçerli bir yaş girmeniz gerekiyor.");
+  }
+
+  const letterboxdUsername = cleanText(payload.letterboxdUsername, 40);
+  if (letterboxdUsername && !/^[A-Za-z0-9_.-]{2,40}$/.test(letterboxdUsername)) {
+    throw new HttpsError("invalid-argument", "Letterboxd kullanıcı adı geçersiz.");
+  }
+
+  const favGenres = Array.isArray(payload.favGenres)
+    ? [...new Set(payload.favGenres.map((item) => cleanText(item, 60)).filter(Boolean))]
+      .slice(0, 60)
+    : [];
+  const favDirectors = normalizeOnboardingPeople(payload.favDirectors);
+  const favActors = normalizeOnboardingPeople(payload.favActors);
+  if (!favDirectors.length || !favActors.length) {
+    throw new HttpsError(
+      "invalid-argument",
+      "En az bir favori yönetmen ve bir favori oyuncu seçmeniz gerekiyor."
+    );
+  }
+
+  const favoriteMovieKey = validCatalogKey(payload.favoriteMovieKey);
+  if (!favoriteMovieKey) {
+    throw new HttpsError(
+      "invalid-argument",
+      "En az bir geçerli favori film seçmeniz gerekiyor."
+    );
+  }
+  const profilePhoto = await validateOnboardingProfilePhoto(
+    uid,
+    payload.profilePhotoPath,
+    payload.photoURL
+  );
+  const authUser = await admin.auth().getUser(uid);
+  const verifiedAuthEmail = normalizedEmail(authUser.email);
+  if (!verifiedAuthEmail) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Doğrulanmış bir e-posta adresi olmadan kayıt tamamlanamaz."
+    );
+  }
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const draftRef = db.collection("registration_drafts").doc(uid);
+  const catalogRef = db.collection("catalog_films").doc(favoriteMovieKey);
+  const verificationRef = db.collection("email_verifications").doc(uid);
+  const watchedHistoryRef = userRef.collection("watched").doc("history");
+
+  await db.runTransaction(async (transaction) => {
+    const [userDoc, draftDoc, catalogDoc, verificationDoc] = await Promise.all([
+      transaction.get(userRef),
+      transaction.get(draftRef),
+      transaction.get(catalogRef),
+      transaction.get(verificationRef),
+    ]);
+    const existing = userDoc.exists ? userDoc.data() || {} : {};
+    const draft = draftDoc.exists ? draftDoc.data() || {} : {};
+    const catalogMovie = catalogDoc.exists ? catalogDoc.data() || {} : {};
+    const verification = verificationDoc.exists ? verificationDoc.data() || {} : {};
+
+    if (existing.registrationStatus === "active" &&
+        existing.onboardingCompleted === true) {
+      if (draftDoc.exists) transaction.delete(draftRef);
+      if (verificationDoc.exists) transaction.delete(verificationRef);
+      return;
+    }
+
+    const verifiedByOtp = verification.verified === true &&
+      normalizedEmail(verification.email) === verifiedAuthEmail;
+    if (!hasTrustedFederatedEmail(authUser) &&
+        authUser.emailVerified !== true &&
+        !verifiedByOtp) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Onboarding'den önce e-posta adresini doğrulaman gerekiyor."
+      );
+    }
+
+    const favoriteTmdbId = positiveInteger(catalogMovie.tmdbId);
+    const favoriteTitle = cleanText(catalogMovie.title, 180);
+    if (!catalogDoc.exists || !favoriteTmdbId || !favoriteTitle) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Seçilen film güvenli katalogda doğrulanamadı."
+      );
+    }
+    const favoritePosterPath = validPosterPath(catalogMovie.posterPath) ||
+      posterPathFromTmdbUrl(catalogMovie.posterUrl);
+    const favoritePosterUrl = tmdbPosterUrl(favoritePosterPath);
+    const favoriteLite = {
+      key: favoriteMovieKey,
+      title: favoriteTitle,
+      tmdbId: favoriteTmdbId,
+      posterUrl: favoritePosterUrl,
+      source: "manual",
+    };
+
+    const base = draftDoc.exists ? draft : existing;
+    const displayName = cleanText(base.displayName, 20);
+    const displayNameLc = displayName.toLowerCase();
+    if (base.termsAccepted !== true ||
+        !/^[A-Za-z0-9._-]{3,20}$/.test(displayName)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Kullanıcı adı ve sözleşme onayı tamamlanmamış."
+      );
+    }
+
+    const duplicateQuery = db
+      .collection("users")
+      .where("displayName_lc", "==", displayNameLc)
+      .limit(2);
+    const duplicateDocs = await transaction.get(duplicateQuery);
+    if (duplicateDocs.docs.some((doc) => doc.id !== uid)) {
+      throw new HttpsError("already-exists", "Bu kullanıcı adı artık kullanımda.");
+    }
+
+    const usernameRef = db.collection("usernames").doc(displayNameLc);
+    const usernameDoc = await transaction.get(usernameRef);
+    if (usernameDoc.exists && usernameDoc.data().uid !== uid) {
+      throw new HttpsError("already-exists", "Bu kullanıcı adı artık kullanımda.");
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const email = verifiedAuthEmail;
+    const marketingConsent = base.marketingConsent === true;
+    const authProvider = cleanText(base.authProvider, 30) || "unknown";
+
+    transaction.set(usernameRef, { uid, updatedAt: now });
+    transaction.set(userRef, {
+      displayName,
+      displayName_lc: displayNameLc,
+      username: displayName,
+      username_lc: displayNameLc,
+      email,
+      photoURL: profilePhoto.photoURL,
+      photoUrl: admin.firestore.FieldValue.delete(),
+      photoStoragePath: profilePhoto.profilePhotoPath,
+      termsAccepted: true,
+      marketingConsent,
+      termsAcceptedAt: base.termsAcceptedAt || now,
+      authProvider,
+      age,
+      favGenres,
+      favDirectors,
+      favActors,
+      favoritesKeys: admin.firestore.FieldValue.arrayUnion(favoriteMovieKey),
+      favorites: admin.firestore.FieldValue.arrayUnion(favoriteLite),
+      watchedKeys: admin.firestore.FieldValue.arrayUnion(favoriteMovieKey),
+      recentWatchedIds: admin.firestore.FieldValue.arrayUnion(favoriteMovieKey),
+      filmSources: { [favoriteMovieKey]: "manual" },
+      letterboxdUsername,
+      letterboxdUsername_lc: letterboxdUsername.toLowerCase(),
+      registrationStatus: "active",
+      onboardingCompleted: true,
+      onboardingCompletedAt: now,
+      registrationVersion: 3,
+      createdAt: existing.createdAt || base.createdAt || now,
+      updatedAt: now,
+    }, { merge: true });
+
+    transaction.set(watchedHistoryRef, {
+      ids: { [favoriteMovieKey]: true },
+      recentIds: admin.firestore.FieldValue.arrayUnion(favoriteMovieKey),
+      updatedAt: now,
+    }, { merge: true });
+
+    const marketingRef = db.collection("marketing_emails").doc(uid);
+    if (marketingConsent && email) {
+      transaction.set(marketingRef, {
+        email,
+        displayName,
+        consentedAt: base.termsAcceptedAt || now,
+        source: `${authProvider}_register`,
+      }, { merge: true });
+    } else {
+      transaction.delete(marketingRef);
+    }
+    if (draftDoc.exists) transaction.delete(draftRef);
+    if (verificationDoc.exists) transaction.delete(verificationRef);
+  });
+
+  try {
+    await admin.auth().updateUser(uid, { photoURL: profilePhoto.photoURL });
+  } catch (error) {
+    console.error("Firebase Auth profil fotoğrafı güncellenemedi:", uid, error.message);
+  }
+
+  return { ok: true, registrationStatus: "active" };
+});
+
+exports.cancelRegistration = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const draftRef = db.collection("registration_drafts").doc(uid);
+  const verificationRef = db.collection("email_verifications").doc(uid);
+  await db.runTransaction(async (transaction) => {
+    const userDoc = await transaction.get(userRef);
+    const userData = userDoc.exists ? userDoc.data() || {} : {};
+    if (userData.registrationStatus === "active" &&
+        userData.onboardingCompleted === true) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Tamamlanmış hesap bu akıştan silinemez."
+      );
+    }
+    transaction.delete(draftRef);
+    transaction.delete(verificationRef);
+    if (userDoc.exists) transaction.delete(userRef);
+    transaction.delete(db.collection("userTasteProfiles").doc(uid));
+    transaction.delete(db.collection("marketing_emails").doc(uid));
+  });
+
+  try {
+    await onboardingProfileBucket().file(onboardingProfilePhotoPath(uid)).delete();
+  } catch (error) {
+    if (Number(error.code) !== 404) {
+      console.error("Onboarding profil fotoğrafı silinemedi:", uid, error.message);
+    }
+  }
+
+  try {
+    await admin.auth().deleteUser(uid);
+  } catch (error) {
+    if (error.code !== "auth/user-not-found") throw error;
+  }
+  return { ok: true };
+});
+
+// Trigger Email uzantısı teslimatı bitirdiğinde doğrulama kodunu içeren kuyruk
+// belgesini kaldırır. Böylece düz metin kod mail koleksiyonunda tutulmaz.
+exports.cleanupEmailVerificationMail = functions.firestore
+  .document("mail/{mailId}")
+  .onUpdate(async (change) => {
+    const data = change.after.data() || {};
+    const deliveryState = cleanText(data.delivery && data.delivery.state, 30);
+    if (!["email_verification", "account_deletion_verification"]
+      .includes(data.category) ||
+        !["SUCCESS", "ERROR"].includes(deliveryState)) {
+      return null;
+    }
+    await change.after.ref.delete();
+    return null;
+  });
+
 async function assertNewsEditor(uid) {
   if (!uid) throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
   if (NEWS_ADMIN_UIDS.has(uid)) return true;
@@ -112,7 +1370,7 @@ async function assertBlogEditor(uid, authToken = {}) {
     100
   ) || "CineMatch Blogger";
   const photoUrl = cleanHttpsUrl(
-    user.photoUrl || user.photoURL || user.profileImageUrl || authToken.picture,
+    user.photoURL || user.photoUrl || user.profileImageUrl || authToken.picture,
     1400
   );
 
@@ -619,7 +1877,7 @@ function serializeBloggerCandidate(doc, activeEditorIds = new Set(), blockedEdit
     uid: doc.id,
     displayName: cleanText(data.displayName || data.name || username, 100) || "CineMatch Kullanıcısı",
     username,
-    photoUrl: cleanHttpsUrl(data.photoUrl || data.photoURL || data.profileImageUrl, 1400),
+    photoUrl: cleanHttpsUrl(data.photoURL || data.photoUrl || data.profileImageUrl, 1400),
     isBlogEditor: activeEditorIds.has(doc.id) ||
       (!blockedEditorIds.has(doc.id) && ["admin", "blogger", "blogEditor"].includes(data.role)),
   };
@@ -1168,6 +2426,518 @@ exports.bulkSaveTriviaQuestions = onCall(async (request) => {
 // ==================================================================
 // 1. GENEL TMDB PROXY (V2)
 // ==================================================================
+const TMDB_POSTER_BASE_URL = "https://image.tmdb.org/t/p";
+const TMDB_LOGIN_POSTER_SIZE = "w342";
+
+function positiveInteger(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function validPosterPath(value) {
+  const path = cleanText(value, 500);
+  return /^\/[A-Za-z0-9._-]+$/.test(path) ? path : "";
+}
+
+function posterPathFromTmdbUrl(value) {
+  const candidate = cleanHttpsUrl(value, 1400);
+  if (!candidate) return "";
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.hostname !== "image.tmdb.org") return "";
+    const match = parsed.pathname.match(
+      /^\/t\/p\/(?:w\d+|original)(\/[A-Za-z0-9._-]+)$/
+    );
+    return match ? match[1] : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function tmdbPosterUrl(path, size = TMDB_LOGIN_POSTER_SIZE) {
+  const safePath = validPosterPath(path);
+  if (!safePath || !/^w\d+$/.test(size)) return "";
+  return `${TMDB_POSTER_BASE_URL}/${size}${safePath}`;
+}
+
+function validCatalogKey(value) {
+  const key = cleanText(value, 180).toLowerCase();
+  if (/^film:[a-z0-9][a-z0-9-]{0,159}$/.test(key)) return key;
+  if (/^tmdb:\d{1,12}$/.test(key)) return key;
+  return "";
+}
+
+function validDocumentId(value) {
+  const id = cleanText(value, 1500);
+  return id && id !== "." && id !== ".." && !id.includes("/") ? id : "";
+}
+
+function catalogTitleKey(value) {
+  return cleanText(value, 180)
+    .normalize("NFKD")
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function movieYear(movie) {
+  const releaseDate = cleanText(movie && movie.release_date, 20);
+  return /^\d{4}/.test(releaseDate) ? Number(releaseDate.slice(0, 4)) : null;
+}
+
+function catalogDataMatchesMovie(existing, movie) {
+  const tmdbId = positiveInteger(movie && movie.id);
+  const existingTmdbId = positiveInteger(existing && existing.tmdbId);
+  if (existingTmdbId && existingTmdbId !== tmdbId) return false;
+  const existingTitle = catalogTitleKey(existing && existing.title);
+  if (!existingTitle) return true;
+  const trustedTitles = new Set([
+    catalogTitleKey(movie && movie.title),
+    catalogTitleKey(movie && movie.original_title),
+  ].filter(Boolean));
+  return trustedTitles.has(existingTitle);
+}
+
+function catalogKeyMatchesMovie(key, movie, requestedTitle) {
+  const safeKey = validCatalogKey(key);
+  const tmdbId = positiveInteger(movie && movie.id);
+  if (!safeKey || !tmdbId) return false;
+  if (safeKey === `tmdb:${tmdbId}`) return true;
+  const year = movieYear(movie);
+  const slugs = new Set([
+    makeSlug(requestedTitle),
+    makeSlug(movie && movie.title),
+    makeSlug(movie && movie.original_title),
+  ].filter(Boolean));
+  for (const slug of slugs) {
+    if (safeKey === `film:${slug}` ||
+        safeKey === `film:${slug}-${tmdbId}` ||
+        (year && safeKey === `film:${slug}-${year}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function tmdbRequest(endpoint, params = {}) {
+  const response = await axios.get(`https://api.themoviedb.org${endpoint}`, {
+    params,
+    headers: {
+      Authorization: `Bearer ${process.env.TMDB_ACCESS_TOKEN}`,
+      Accept: "application/json",
+    },
+  });
+  return response.data || {};
+}
+
+async function resolveTmdbMovie({ tmdbId, imdbId, title, year }) {
+  const id = positiveInteger(tmdbId);
+  if (id) {
+    try {
+      return await tmdbRequest(`/3/movie/${id}`, { language: "tr-TR" });
+    } catch (error) {
+      console.error("TMDB film detayı alınamadı:", id, error.message);
+      return null;
+    }
+  }
+
+  const safeImdbId = cleanText(imdbId, 30);
+  if (/^tt\d+$/.test(safeImdbId)) {
+    try {
+      const data = await tmdbRequest(`/3/find/${safeImdbId}`, {
+        external_source: "imdb_id",
+        language: "en-US",
+      });
+      const results = Array.isArray(data.movie_results) ? data.movie_results : [];
+      if (results.length) return results[0];
+    } catch (error) {
+      console.error("TMDB IMDb araması başarısız:", safeImdbId, error.message);
+    }
+  }
+
+  const query = cleanText(title, 180);
+  if (!query) return null;
+  try {
+    const data = await tmdbRequest("/3/search/movie", {
+      query,
+      language: "en-US",
+      include_adult: "false",
+      page: "1",
+      ...(positiveInteger(year) ? { primary_release_year: String(year) } : {}),
+    });
+    const results = Array.isArray(data.results) ? data.results : [];
+    return results.find((movie) => positiveInteger(movie.id)) || null;
+  } catch (error) {
+    console.error("TMDB film araması başarısız:", query, error.message);
+    return null;
+  }
+}
+
+async function catalogRefForMovie(db, movie, requestedKey, requestedTitle) {
+  const tmdbId = positiveInteger(movie.id);
+  if (!tmdbId) return null;
+
+  const byTmdb = await db.collection("catalog_films")
+    .where("tmdbId", "==", tmdbId).limit(1).get();
+  if (!byTmdb.empty) return byTmdb.docs[0].ref;
+
+  const safeRequestedKey = validCatalogKey(requestedKey);
+  if (safeRequestedKey) {
+    const requestedRef = db.collection("catalog_films").doc(safeRequestedKey);
+    const requestedDoc = await requestedRef.get();
+    if (!requestedDoc.exists &&
+        catalogKeyMatchesMovie(safeRequestedKey, movie, requestedTitle)) {
+      return requestedRef;
+    }
+    if (requestedDoc.exists) {
+      const existing = requestedDoc.data() || {};
+      if (catalogDataMatchesMovie(existing, movie)) {
+        return requestedRef;
+      }
+    }
+  }
+
+  const title = cleanText(movie.original_title || movie.title, 180);
+  const slug = makeSlug(title) || `tmdb-${tmdbId}`;
+  const year = movieYear(movie);
+  const candidates = [
+    `film:${slug}`,
+    year ? `film:${slug}-${year}` : "",
+    `film:${slug}-${tmdbId}`,
+    `tmdb:${tmdbId}`,
+  ].filter(Boolean);
+
+  for (const key of candidates) {
+    const ref = db.collection("catalog_films").doc(key);
+    const doc = await ref.get();
+    if (!doc.exists || positiveInteger(doc.data().tmdbId) === tmdbId) return ref;
+  }
+  return db.collection("catalog_films").doc(`tmdb:${tmdbId}`);
+}
+
+async function upsertResolvedTmdbMovie({
+  db,
+  movie,
+  catalogKey,
+  requestedTitle,
+  source = "tmdb",
+}) {
+  const tmdbId = positiveInteger(movie && movie.id);
+  if (!tmdbId) return null;
+  const ref = await catalogRefForMovie(db, movie, catalogKey, requestedTitle);
+  if (!ref) return null;
+
+  const posterPath = validPosterPath(movie.poster_path);
+  const title = cleanText(movie.title || requestedTitle || movie.original_title, 180);
+  const originalTitle = cleanText(movie.original_title, 180);
+  const year = movieYear(movie);
+  const imdbId = /^tt\d+$/.test(cleanText(movie.imdb_id, 30))
+    ? cleanText(movie.imdb_id, 30)
+    : "";
+  const posterUrl = tmdbPosterUrl(posterPath);
+  const popularity = Number(movie.popularity);
+  const voteAverage = Number(movie.vote_average);
+
+  const payload = {
+    tmdbId,
+    title: title || `TMDB ${tmdbId}`,
+    titleLc: catalogTitleKey(title || originalTitle),
+    canonicalKey: ref.id,
+    source: "tmdb",
+    importSource: source,
+    aliases: admin.firestore.FieldValue.arrayUnion(
+      `tmdb:${tmdbId}`,
+      ...(imdbId ? [`imdb:${imdbId}`] : []),
+    ),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...(originalTitle ? { originalTitle } : {}),
+    ...(year ? { year } : {}),
+    ...(imdbId ? { imdbId } : {}),
+    ...(Number.isFinite(popularity) ? { popularity } : {}),
+    ...(Number.isFinite(voteAverage) ? { voteAverage } : {}),
+    ...(posterPath ? {
+      posterPath,
+      posterUrl,
+      posterSource: "tmdb",
+    } : {
+      posterPath: admin.firestore.FieldValue.delete(),
+      posterUrl: admin.firestore.FieldValue.delete(),
+      posterSource: "missing",
+    }),
+  };
+
+  await ref.set(payload, { merge: true });
+
+  // Kullanıcı rafları eski Letterboxd anahtarını tutuyor olabilir. Aynı filme
+  // ait olduğu doğrulanırsa o belgeyi de güvenilir TMDB verisiyle zenginleştir;
+  // böylece anahtar göçü beklemeden eski profiller çalışmaya devam eder.
+  const legacyKey = validCatalogKey(catalogKey);
+  if (legacyKey && legacyKey !== ref.id) {
+    const legacyRef = db.collection("catalog_films").doc(legacyKey);
+    const legacyDoc = await legacyRef.get();
+    const requestedTitleKey = catalogTitleKey(requestedTitle);
+    const trustedMovieTitles = new Set([
+      catalogTitleKey(movie.title),
+      catalogTitleKey(movie.original_title),
+    ].filter(Boolean));
+    const canCreateLetterboxdAlias = source === "letterboxd" &&
+      requestedTitleKey.length > 0 &&
+      trustedMovieTitles.has(requestedTitleKey) &&
+      catalogKeyMatchesMovie(legacyKey, movie, requestedTitle);
+    const canUpdateExistingAlias = legacyDoc.exists &&
+      catalogDataMatchesMovie(legacyDoc.data() || {}, movie);
+    if (canCreateLetterboxdAlias || canUpdateExistingAlias) {
+      await legacyRef.set({
+        ...payload,
+        canonicalKey: ref.id,
+        duplicateOf: ref.id,
+      }, { merge: true });
+    }
+  }
+
+  return {
+    docId: ref.id,
+    tmdbId,
+    title: payload.title,
+    originalTitle,
+    year,
+    posterPath,
+    posterUrl,
+  };
+}
+
+async function resolveAndUpsertCatalogMovie({
+  db,
+  tmdbId,
+  imdbId,
+  title,
+  year,
+  catalogKey,
+  source,
+}) {
+  const movie = await resolveTmdbMovie({ tmdbId, imdbId, title, year });
+  if (!movie) return null;
+  return upsertResolvedTmdbMovie({
+    db,
+    movie,
+    catalogKey,
+    requestedTitle: title,
+    source,
+  });
+}
+
+async function removeUntrustedCatalogPoster(db, catalogKey, title, year) {
+  const safeKey = validCatalogKey(catalogKey);
+  if (!safeKey) return;
+  const ref = db.collection("catalog_films").doc(safeKey);
+  const doc = await ref.get();
+  const existing = doc.exists ? doc.data() || {} : {};
+  if (posterPathFromTmdbUrl(existing.posterUrl)) return;
+  await ref.set({
+    ...(cleanText(title, 180) ? { title: cleanText(title, 180) } : {}),
+    ...(positiveInteger(year) ? { year: positiveInteger(year) } : {}),
+    canonicalKey: safeKey,
+    source: cleanText(existing.source, 30) || "letterboxd",
+    posterUrl: admin.firestore.FieldValue.delete(),
+    posterPath: admin.firestore.FieldValue.delete(),
+    posterSource: "missing",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+}
+
+exports.resolveCatalogMovie = onCall(
+  { secrets: ["TMDB_ACCESS_TOKEN"], timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+    }
+    const data = request.data || {};
+    const tmdbId = positiveInteger(data.tmdbId);
+    const imdbId = /^tt\d+$/.test(cleanText(data.imdbId, 30))
+      ? cleanText(data.imdbId, 30)
+      : "";
+    const title = cleanText(data.title, 180);
+    const year = positiveInteger(data.year);
+    const catalogKey = validCatalogKey(data.catalogKey);
+    if (!tmdbId && !imdbId && !title) {
+      throw new HttpsError("invalid-argument", "TMDB kimliği veya film adı gerekli.");
+    }
+
+    const result = await resolveAndUpsertCatalogMovie({
+      db: admin.firestore(),
+      tmdbId,
+      imdbId,
+      title,
+      year,
+      catalogKey,
+      source: "client",
+    });
+    return result ? { ok: true, ...result } : { ok: false };
+  }
+);
+
+exports.importLetterboxdCatalog = onCall(
+  { secrets: ["TMDB_ACCESS_TOKEN"], timeoutSeconds: 300, memory: "512MiB" },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Oturum açmanız gerekiyor.");
+    }
+    const rawFilms = Array.isArray(request.data && request.data.films)
+      ? request.data.films.slice(0, 50)
+      : [];
+    const films = rawFilms.map((film) => ({
+      catalogKey: validCatalogKey(film && film.key),
+      title: cleanText(film && film.title, 180),
+      year: positiveInteger(film && film.year),
+    })).filter((film) => film.catalogKey && film.title);
+    if (!films.length) return { ok: true, resolved: 0, missing: 0 };
+
+    const db = admin.firestore();
+    let cursor = 0;
+    let resolved = 0;
+    let missing = 0;
+    async function worker() {
+      while (cursor < films.length) {
+        const index = cursor++;
+        const film = films[index];
+        const result = await resolveAndUpsertCatalogMovie({
+          db,
+          title: film.title,
+          year: film.year,
+          catalogKey: film.catalogKey,
+          source: "letterboxd",
+        });
+        if (result) {
+          resolved++;
+        } else {
+          missing++;
+          await removeUntrustedCatalogPoster(
+            db,
+            film.catalogKey,
+            film.title,
+            film.year
+          );
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(5, films.length) }, worker));
+    return { ok: true, resolved, missing };
+  }
+);
+
+exports.backfillCatalogPosters = onCall(
+  { secrets: ["TMDB_ACCESS_TOKEN"], timeoutSeconds: 540, memory: "512MiB" },
+  async (request) => {
+    await assertNewsEditor(request.auth && request.auth.uid);
+    const data = request.data || {};
+    const limit = Math.min(Math.max(positiveInteger(data.limit) || 40, 1), 100);
+    const cursor = validDocumentId(data.cursor);
+    const db = admin.firestore();
+    let query = db.collection("catalog_films")
+      .orderBy(admin.firestore.FieldPath.documentId()).limit(limit);
+    if (cursor) query = query.startAfter(cursor);
+    const snapshot = await query.get();
+
+    let normalized = 0;
+    let resolved = 0;
+    let missing = 0;
+    for (const doc of snapshot.docs) {
+      const film = doc.data() || {};
+      const trustedPath = validPosterPath(film.posterPath) ||
+        posterPathFromTmdbUrl(film.posterUrl);
+      if (trustedPath) {
+        await doc.ref.set({
+          posterPath: trustedPath,
+          posterUrl: tmdbPosterUrl(trustedPath),
+          posterSource: "tmdb",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        normalized++;
+        continue;
+      }
+
+      const result = await resolveAndUpsertCatalogMovie({
+        db,
+        tmdbId: film.tmdbId,
+        title: film.title,
+        year: film.year,
+        catalogKey: doc.id,
+        source: "backfill",
+      });
+      if (result) {
+        resolved++;
+      } else {
+        missing++;
+        await removeUntrustedCatalogPoster(db, doc.id, film.title, film.year);
+      }
+    }
+
+    return {
+      ok: true,
+      scanned: snapshot.size,
+      normalized,
+      resolved,
+      missing,
+      nextCursor: snapshot.empty ? null : snapshot.docs[snapshot.docs.length - 1].id,
+      hasMore: snapshot.size === limit,
+    };
+  }
+);
+
+exports.refreshLoginPosters = onCall(async (request) => {
+  await assertNewsEditor(request.auth && request.auth.uid);
+  const requestedLimit = positiveInteger(request.data && request.data.limit) || 30;
+  const limit = Math.min(Math.max(requestedLimit, 12), 40);
+  const db = admin.firestore();
+  const [posterSourceSnap, sourceSnap] = await Promise.all([
+    db.collection("catalog_films").where("posterSource", "==", "tmdb").limit(250).get(),
+    db.collection("catalog_films").where("source", "==", "tmdb").limit(250).get(),
+  ]);
+  const candidates = new Map();
+  [...posterSourceSnap.docs, ...sourceSnap.docs].forEach((doc) => {
+    const film = doc.data() || {};
+    const posterPath = validPosterPath(film.posterPath) ||
+      posterPathFromTmdbUrl(film.posterUrl);
+    const tmdbId = positiveInteger(film.tmdbId);
+    if (!posterPath || !tmdbId) return;
+    candidates.set(tmdbId, {
+      tmdbId,
+      title: cleanText(film.title, 180),
+      posterPath,
+      posterUrl: tmdbPosterUrl(posterPath),
+      popularity: Number.isFinite(Number(film.popularity))
+        ? Number(film.popularity)
+        : 0,
+    });
+  });
+  const selected = [...candidates.values()]
+    .sort((a, b) => b.popularity - a.popularity || a.tmdbId - b.tmdbId)
+    .slice(0, limit);
+  if (selected.length < 12) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Login arka planı için en az 12 doğrulanmış TMDB posteri gerekli."
+    );
+  }
+
+  const existing = await db.collection("login_posters").get();
+  const batch = db.batch();
+  existing.docs.forEach((doc) => batch.delete(doc.ref));
+  selected.forEach((poster, index) => {
+    batch.set(db.collection("login_posters").doc(String(poster.tmdbId)), {
+      ...poster,
+      enabled: true,
+      order: index,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: request.auth.uid,
+    });
+  });
+  await batch.commit();
+  return { ok: true, count: selected.length };
+});
+
 exports.callTMDB = onCall({ secrets: ["TMDB_ACCESS_TOKEN"] }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Oturum açmanız gerekiyor.');
   const { endpoint, params } = request.data;
@@ -1251,22 +3021,50 @@ async function sendPushToUser(uid, message) {
     data[key] = pushString(value);
   });
 
+  const type = data.type || "social";
+  const rawGroupTarget = type === "chat"
+    ? (data.chatId || data.actorId || uid)
+    : (["like", "comment"].includes(type)
+      ? (data.postId || data.notificationId || uid)
+      : (type === "follow" ? "follows" : (data.clubId || data.notificationId || uid)));
+  const groupDigest = crypto
+    .createHash("sha1")
+    .update(`${type}:${rawGroupTarget}`)
+    .digest("hex")
+    .slice(0, 20);
+  const groupKey = `cinematch_${type}_${groupDigest}`;
+  data.groupKey = groupKey;
+  const parsedCount = Number(data.unreadCount || data.count || 1);
+  const notificationCount = Number.isInteger(parsedCount) && parsedCount > 0
+    ? Math.min(parsedCount, 999)
+    : 1;
+
   const result = await admin.messaging().sendEachForMulticast({
     tokens,
     notification: message.notification,
     data,
     android: {
       priority: "high",
+      collapseKey: type === "chat" ? "cinematch_chat" : "cinematch_social",
       notification: {
-        channelId: data.type === "chat" ? "cinematch_chat" : "cinematch_social",
+        channelId: type === "chat" ? "cinematch_chat" : "cinematch_social",
         clickAction: "FLUTTER_NOTIFICATION_CLICK",
+        icon: "ic_stat_cinematch",
+        color: "#2E7D32",
+        tag: groupKey,
+        notificationCount,
       },
     },
     apns: {
+      headers: {
+        "apns-priority": "10",
+        "apns-collapse-id": groupKey,
+      },
       payload: {
         aps: {
           sound: "default",
           badge: 1,
+          threadId: groupKey,
         },
       },
     },
@@ -1286,12 +3084,15 @@ function buildSocialPush(uid, notificationId, data) {
   const type = pushString(data.type, "social");
   const actorName = pushString(data.actorName, "Bir kullanici") || "Bir kullanici";
   const preview = pushString(data.preview);
+  const count = Math.max(1, Number(data.count) || 1);
   let title = "CineMatch";
   let body = "Yeni bildirimin var.";
 
   if (type === "like") {
     title = "Yeni begeni";
-    body = `${actorName} gonderini begendi`;
+    body = count > 1
+      ? `${actorName} ve ${count - 1} kisi daha gonderini begendi`
+      : `${actorName} gonderini begendi`;
   } else if (type === "comment") {
     title = "Yeni yorum";
     body = preview ? `${actorName}: ${preview}` : `${actorName} gonderine yorum yapti`;
@@ -1315,6 +3116,7 @@ function buildSocialPush(uid, notificationId, data) {
       clubId: pushString(data.clubId),
       clubName: pushString(data.clubName),
       preview,
+      count,
       recipientId: uid,
       click_action: "FLUTTER_NOTIFICATION_CLICK",
     },
@@ -1465,9 +3267,14 @@ exports.sendChatNotification = functions.firestore
       // KONTROL: Kullanıcı bu sohbeti sessize almış mı?
       if (mutedChats.includes(chatId)) return null;
 
+      const unreadCounts = chatData.unreadCounts || {};
+      const unreadCount = Math.max(1, Number(unreadCounts[receiverId]) || 1);
+
       return sendPushToUser(receiverId, {
         notification: {
-          title: pushString(actorName, "Yeni mesaj"),
+          title: unreadCount > 1
+            ? `${pushString(actorName, "Yeni mesaj")} (${unreadCount} yeni mesaj)`
+            : pushString(actorName, "Yeni mesaj"),
           body,
         },
         data: {
@@ -1479,6 +3286,7 @@ exports.sendChatNotification = functions.firestore
           otherUid: authorId, // İstemci tarafında yönlendirme için
           actorName,
           preview,
+          unreadCount,
           isGroup: isGroup ? "true" : "false",
           groupName,
           recipientId: receiverId,

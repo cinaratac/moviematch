@@ -5,8 +5,10 @@ import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 
-import 'package:fluttergirdi/services/watched_movies_service.dart';
+import 'package:fluttergirdi/services/catalog_service.dart';
 
 // --- HTTP client & helpers ---------------------------------------------------
 const _kDefaultUa =
@@ -53,12 +55,14 @@ class LetterboxdFilm {
   final String url;
   final String posterUrl;
   final String key;
+  final int? year;
 
   LetterboxdFilm({
     required this.title,
     required this.url,
     required this.posterUrl,
     String? key,
+    this.year,
   }) : key = key ?? LetterboxdFilm._deriveKey(url, title);
 
   Map<String, dynamic> toMap() => {
@@ -66,6 +70,7 @@ class LetterboxdFilm {
     'url': url,
     'posterUrl': posterUrl,
     'key': key,
+    if (year != null) 'year': year,
   };
 
   Map<String, dynamic> toJson() => toMap();
@@ -73,8 +78,11 @@ class LetterboxdFilm {
   static LetterboxdFilm fromMap(Map<String, dynamic> json) => LetterboxdFilm(
     title: json['title'] ?? '',
     url: json['url'] ?? '',
-    posterUrl: json['posterUrl'] ?? '',
+    // Eski cihaz cache'lerinde Letterboxd CDN URL'leri bulunabilir. Bu URL'ler
+    // hotlink koruması nedeniyle yeniden kullanılmaz; TMDB fallback çözer.
+    posterUrl: '',
     key: json['key'],
+    year: int.tryParse('${json['year'] ?? ''}'),
   );
 
   static LetterboxdFilm fromJson(Map<String, dynamic> json) => fromMap(json);
@@ -103,11 +111,19 @@ class LetterboxdFilm {
   }
 }
 
+class LetterboxdSyncException implements Exception {
+  final String code;
+  final String message;
+
+  const LetterboxdSyncException(this.code, this.message);
+
+  @override
+  String toString() => message;
+}
+
 class LetterboxdService {
-  static const Map<String, String> imageHeaders = {
-    'Referer': 'https://letterboxd.com/',
-    'User-Agent': 'Mozilla/5.0',
-  };
+  static final Map<String, Future<void>> _activeSyncs = {};
+
   static String _cacheKeyFor(String username) =>
       'lb_cache_${username.toLowerCase()}';
 
@@ -177,57 +193,16 @@ class LetterboxdService {
       if (href.startsWith('/')) href = 'https://letterboxd.com$href';
       if (!seenHref.add(href)) continue;
 
-      String? filmId =
-          divPoster?.attributes['data-film-id'] ??
-          rc?.attributes['data-film-id'] ??
-          img?.attributes['data-film-id'] ??
-          li.attributes['data-film-id'];
+      final rawYear =
+          divPoster?.attributes['data-film-release-year'] ??
+          divPoster?.attributes['data-release-year'] ??
+          rc?.attributes['data-item-year'] ??
+          li.attributes['data-film-release-year'];
+      final year = int.tryParse(rawYear ?? '');
 
-      if (filmId == null) {
-        final pId = rc?.attributes['data-postered-identifier'];
-        if (pId != null) {
-          final match = RegExp(r'"uid":"film:(\d+)"').firstMatch(pId);
-          if (match != null) filmId = match.group(1);
-        }
-      }
-
-      String? slug =
-          divPoster?.attributes['data-film-slug'] ??
-          rc?.attributes['data-item-slug'] ??
-          img?.attributes['data-item-slug'] ??
-          li.attributes['data-film-slug'];
-
-      if (slug == null && href.contains('/film/')) {
-        final parts = Uri.parse(href).pathSegments;
-        final idx = parts.indexOf('film');
-        if (idx != -1 && idx + 1 < parts.length) slug = parts[idx + 1];
-      }
-
-      String? poster;
-
-      if (filmId != null && slug != null && slug.isNotEmpty) {
-        poster = _buildPosterFromIdSlug(filmId, slug, w: 300, h: 450);
-      } else {
-        poster = (img?.attributes['srcset'] ?? img?.attributes['data-srcset'])
-            ?.split(',')
-            .last
-            .trim()
-            .split(' ')
-            .first;
-        poster ??= img?.attributes['src'] ?? img?.attributes['data-src'];
-      }
-
-      if (poster != null && poster.startsWith('//')) poster = 'https:$poster';
-      if (poster != null && poster.startsWith('/'))
-        poster = 'https://a.ltrbxd.com$poster';
-
-      if (poster != null &&
-          (poster.contains('empty-poster') || !_looksLikeImageUrl(poster))) {
-        poster = '';
-      }
-      poster ??= '';
-
-      items.add(LetterboxdFilm(title: title, url: href, posterUrl: poster));
+      items.add(
+        LetterboxdFilm(title: title, url: href, posterUrl: '', year: year),
+      );
     }
     return items;
   }
@@ -302,14 +277,14 @@ class LetterboxdService {
   }
 
   static Future<List<LetterboxdFilm>> fetchDisliked(String username) async {
-    List<LetterboxdFilm> half = const [];
-    List<LetterboxdFilm> one = const [];
-    try {
-      half = await fetchHalfStar(username);
-    } catch (_) {}
-    try {
-      one = await fetchOneStar(username);
-    } catch (_) {}
+    // Bu iki sayfa tek bir "beğenmediklerim" kategorisini oluşturuyor. Birisi
+    // alınamazsa kısmi sonucu başarılı saymak eski Letterboxd verisini silebilir.
+    final results = await Future.wait([
+      fetchHalfStar(username),
+      fetchOneStar(username),
+    ]);
+    final half = results[0];
+    final one = results[1];
     final map = <String, LetterboxdFilm>{};
     for (final f in [...half, ...one]) map[f.url] = f;
     return map.values.toList();
@@ -360,7 +335,13 @@ class LetterboxdService {
             .map((e) => LetterboxdFilm.fromJson(e))
             .toList();
       }
-      return [];
+      if (e.toString().contains('HTTP 404')) {
+        throw LetterboxdSyncException(
+          'profile-not-found',
+          'Letterboxd kullanıcısı bulunamadı: $username',
+        );
+      }
+      rethrow;
     }
   }
 
@@ -375,7 +356,21 @@ class LetterboxdService {
           : Uri.parse('https://letterboxd.com/$username/watchlist/page/$page/');
 
       final res = await _Http.get(uri, headers: _reqHeaders);
-      if (res == null || res.statusCode != 200) break;
+      if (res == null || res.statusCode != 200) {
+        if (page == 1 && all.isEmpty) {
+          final cached = prefs.getString('${_cacheKeyFor(username)}_watchlist');
+          if (cached != null) {
+            return (jsonDecode(cached) as List)
+                .map((e) => LetterboxdFilm.fromJson(e))
+                .toList();
+          }
+          throw LetterboxdSyncException(
+            'watchlist-unavailable',
+            'Letterboxd izleme listesi şu anda alınamıyor.',
+          );
+        }
+        break;
+      }
 
       final doc = html.parse(res.body);
 
@@ -411,41 +406,19 @@ class LetterboxdService {
     return all;
   }
 
-  static bool _looksLikeImageUrl(String? u) {
-    if (u == null) return false;
-    if (u.contains('empty-poster')) return false;
-    final cleanUrl = u.split('?').first.toLowerCase();
-    return cleanUrl.endsWith('.jpg') ||
-        cleanUrl.endsWith('.png') ||
-        cleanUrl.endsWith('.webp');
-  }
-
-  static String _buildPosterFromIdSlug(
-    String id,
-    String slug, {
-    int w = 300,
-    int h = 450,
-  }) {
-    final shard = id.split('').join('/');
-    return 'https://a.ltrbxd.com/resized/film-poster/$shard/$id-$slug-0-$w-0-$h-crop.jpg';
-  }
-
   static Future<void> _upsertCatalog(List<LetterboxdFilm> films) async {
-    final db = FirebaseFirestore.instance;
-    await _retryFirestore(() async {
-      final batch = db.batch();
-      for (final f in films) {
-        if (f.key.isEmpty) continue;
-        final doc = db.collection('catalog_films').doc(f.key);
-        batch.set(doc, {
-          'title': f.title,
-          'url': f.url,
-          'posterUrl': f.posterUrl,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      }
-      await batch.commit();
-    });
+    await CatalogService().importLetterboxdFilms(
+      films
+          .where((film) => film.key.isNotEmpty && film.title.isNotEmpty)
+          .map(
+            (film) => {
+              'key': film.key,
+              'title': film.title,
+              if (film.year != null) 'year': film.year,
+            },
+          )
+          .toList(),
+    );
   }
 
   // =========================================================================
@@ -455,31 +428,137 @@ class LetterboxdService {
   static Future<void> fullSyncOnboarding({
     required String uid,
     required String lbUsername,
-  }) async {
-    Future<List<LetterboxdFilm>> safeFetch(
-      Future<List<LetterboxdFilm>> Function(String) f,
-    ) async {
-      try {
-        return await f(lbUsername);
-      } catch (_) {
-        return [];
-      }
-    }
+    String source = 'manual',
+  }) {
+    final normalizedUsername = lbUsername.trim();
+    final syncKey = '$uid:${normalizedUsername.toLowerCase()}';
+    final running = _activeSyncs[syncKey];
+    if (running != null) return running;
 
-    // 1. Verileri Çek
-    List<LetterboxdFilm> favs = [];
+    final sync = _runTrackedSync(
+      uid: uid,
+      lbUsername: normalizedUsername,
+      source: source,
+    );
+    _activeSyncs[syncKey] = sync;
+    return sync.whenComplete(() {
+      if (identical(_activeSyncs[syncKey], sync)) {
+        _activeSyncs.remove(syncKey);
+      }
+    });
+  }
+
+  static Future<void> _runTrackedSync({
+    required String uid,
+    required String lbUsername,
+    required String source,
+  }) async {
+    final statusRef = FirebaseFirestore.instance
+        .collection('userTasteProfiles')
+        .doc(uid);
+    await _writeSyncStatus(statusRef, {
+      'status': 'running',
+      'username': lbUsername,
+      'source': source,
+      'startedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
     try {
-      favs = await fetchFavorites(lbUsername);
-    } catch (e) {
-      if (e.toString().contains('HTTP 404')) {
-        throw Exception('Letterboxd kullanıcısı bulunamadı: $lbUsername');
+      await _performFullSync(uid: uid, lbUsername: lbUsername);
+      await _writeSyncStatus(statusRef, {
+        'status': 'success',
+        'username': lbUsername,
+        'source': source,
+        'completedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (error, stackTrace) {
+      final failure = _normalizeSyncError(error);
+      await _writeSyncStatus(statusRef, {
+        'status': 'failed',
+        'username': lbUsername,
+        'source': source,
+        'errorCode': failure.code,
+        'message': failure.message,
+        'failedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      Error.throwWithStackTrace(failure, stackTrace);
+    }
+  }
+
+  static Future<void> _writeSyncStatus(
+    DocumentReference<Map<String, dynamic>> ref,
+    Map<String, dynamic> status,
+  ) async {
+    try {
+      await ref.set({'letterboxdSync': status}, SetOptions(merge: true));
+    } catch (error) {
+      debugPrint('Letterboxd senkronizasyon durumu yazılamadı: $error');
+    }
+  }
+
+  static LetterboxdSyncException _normalizeSyncError(Object error) {
+    if (error is LetterboxdSyncException) return error;
+    if (error is FirebaseFunctionsException) {
+      switch (error.code) {
+        case 'unauthenticated':
+          return const LetterboxdSyncException(
+            'unauthenticated',
+            'Oturumun sona ermiş. Lütfen yeniden giriş yap.',
+          );
+        case 'unavailable':
+        case 'deadline-exceeded':
+          return const LetterboxdSyncException(
+            'unavailable',
+            'Senkronizasyon servisine şu anda ulaşılamıyor. Tekrar dene.',
+          );
+        case 'resource-exhausted':
+          return const LetterboxdSyncException(
+            'rate-limited',
+            'Çok fazla senkronizasyon isteği gönderildi. Biraz sonra tekrar dene.',
+          );
+        default:
+          return const LetterboxdSyncException(
+            'catalog-import-failed',
+            'Film kataloğu güncellenemedi. Lütfen tekrar dene.',
+          );
       }
     }
+    final text = error.toString().toLowerCase();
+    if (text.contains('404') || text.contains('kullanıcısı bulunamadı')) {
+      return const LetterboxdSyncException(
+        'profile-not-found',
+        'Letterboxd kullanıcısı bulunamadı. Kullanıcı adını kontrol et.',
+      );
+    }
+    if (text.contains('timeout') ||
+        text.contains('socket') ||
+        text.contains('network')) {
+      return const LetterboxdSyncException(
+        'network',
+        'Letterboxd bağlantısı kurulamadı. İnternetini kontrol edip tekrar dene.',
+      );
+    }
+    return const LetterboxdSyncException(
+      'unknown',
+      'Letterboxd verileri güncellenemedi. Lütfen tekrar dene.',
+    );
+  }
+
+  static Future<void> _performFullSync({
+    required String uid,
+    required String lbUsername,
+  }) async {
+    // Tüm bölümler yazma başlamadan önce alınır. Herhangi biri başarısızsa
+    // mevcut Letterboxd verileri korunur ve senkronizasyon tekrar denenebilir.
+    final favs = await fetchFavorites(lbUsername);
 
     final results = await Future.wait([
-      safeFetch(fetchFiveStar),
-      safeFetch(fetchDisliked),
-      safeFetch(fetchWatchlist),
+      fetchFiveStar(lbUsername),
+      fetchDisliked(lbUsername),
+      fetchWatchlist(lbUsername),
     ]);
 
     final fiveStar = results[0];
@@ -550,16 +629,11 @@ class LetterboxdService {
     final newWlKeys = LetterboxdFilm.keysOf(watchlist);
     final newFiveKeys = LetterboxdFilm.keysOf(fiveStar);
     final newDisKeys = LetterboxdFilm.keysOf(disliked);
-    final existingWatchedLikeKeys = {
-      ...existingFavKeys,
-      ...existingFiveKeys,
-      ...existingDisKeys,
-    };
-    final newWatchedKeys = {
+    final letterboxdWatchedKeys = {
       ...newFavKeys,
       ...newFiveKeys,
       ...newDisKeys,
-    }.where((key) => !existingWatchedLikeKeys.contains(key)).toList();
+    }.toList();
 
     List<String> mergeKeyList({
       required List<String> existingKeys,
@@ -641,6 +715,15 @@ class LetterboxdService {
           .where(
             (item) => item['source'] == 'manual' || !item.containsKey('source'),
           )
+          .map((item) {
+            final sanitized = Map<String, dynamic>.from(item);
+            for (final field in ['poster', 'posterUrl', 'image']) {
+              if ((sanitized[field] ?? '').toString().contains('ltrbxd.com')) {
+                sanitized[field] = '';
+              }
+            }
+            return sanitized;
+          })
           .toList();
 
       final Map<String, Map<String, dynamic>> uniqMap = {};
@@ -666,17 +749,46 @@ class LetterboxdService {
       newLbLite: newWLite,
     );
 
-    final tasteSnap = await tasteRef.get();
+    final watchedRef = userRef.collection('watched').doc('history');
+    final relatedSnapshots = await Future.wait([
+      tasteRef.get(),
+      watchedRef.get(),
+    ]);
+    final tasteSnap = relatedSnapshots[0];
+    final watchedSnap = relatedSnapshots[1];
     final dynamic rawPosters = (tasteSnap.data() ?? {})['posters'];
     final Map<String, String> existingPosters = rawPosters is Map
         ? Map<String, String>.from(rawPosters)
         : {};
+    existingPosters.removeWhere((_, url) => url.contains('ltrbxd.com'));
 
     final postersMap = <String, String>{}..addAll(existingPosters);
     for (var f in [...fiveStar, ...disliked]) {
       if (f.key.isNotEmpty && f.posterUrl.isNotEmpty) {
         postersMap[f.key] = f.posterUrl;
       }
+    }
+
+    final rawWatchedIds = (watchedSnap.data() ?? {})['ids'];
+    final watchedIds = rawWatchedIds is Map
+        ? Map<String, dynamic>.from(rawWatchedIds)
+        : <String, dynamic>{};
+    final rawRecentIds = (watchedSnap.data() ?? {})['recentIds'];
+    final recentIds = rawRecentIds is List
+        ? rawRecentIds.map((item) => item.toString()).toList()
+        : <String>[];
+    final newlyWatchedKeys = letterboxdWatchedKeys
+        .where((key) => watchedIds[key] != true)
+        .toList();
+    for (final key in newlyWatchedKeys) {
+      watchedIds[key] = true;
+    }
+    for (final key in newlyWatchedKeys.reversed) {
+      recentIds.removeWhere((item) => item == key);
+      recentIds.insert(0, key);
+    }
+    if (recentIds.length > 20) {
+      recentIds.removeRange(20, recentIds.length);
     }
 
     // 5. Veritabanına Güvenli Batch Yazma
@@ -693,6 +805,10 @@ class LetterboxdService {
         'watchlistUpdatedAt': FieldValue.serverTimestamp(),
         'fiveStarKeys': finalFiveKeys,
         'dislikedKeys': finalDisKeys,
+        if (newlyWatchedKeys.isNotEmpty) ...{
+          'recentWatchedIds': recentIds,
+          'recentWatchedUpdatedAt': FieldValue.serverTimestamp(),
+        },
         'updatedAt': FieldValue.serverTimestamp(),
         'lastSyncedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
@@ -706,14 +822,15 @@ class LetterboxdService {
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
+      if (newlyWatchedKeys.isNotEmpty) {
+        batch.set(watchedRef, {
+          'ids': watchedIds,
+          'recentIds': recentIds,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
       await batch.commit();
     });
-
-    if (newWatchedKeys.isNotEmpty) {
-      await WatchedMoviesService.instance.logMoviesAsWatchedForUser(
-        uid: uid,
-        movieIds: newWatchedKeys,
-      );
-    }
   }
 }

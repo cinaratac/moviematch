@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/services/catalog_service.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
@@ -118,10 +119,11 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         if (results != null && results.isNotEmpty) {
           id = results[0]['id'];
           if (docId != null && docId.isNotEmpty && id != null) {
-            FirebaseFirestore.instance
-                .collection('catalog_films')
-                .doc(docId)
-                .set({'tmdbId': id}, SetOptions(merge: true));
+            await CatalogService().resolveAndUpsert(
+              tmdbId: id,
+              title: title,
+              catalogKey: docId,
+            );
           }
         } else {
           ScaffoldMessenger.of(context).showSnackBar(

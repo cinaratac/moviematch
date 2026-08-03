@@ -1,9 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../services/user_profile_service.dart';
+import '../services/catalog_service.dart';
 import '../models/shelf_target.dart';
 import '../widgets/poster_image.dart';
 import '../screens/profilescreen.dart';
@@ -44,8 +44,14 @@ Future<List<dynamic>> _tmdbSearchMovies(String query, {int page = 1}) async {
 class SearchMoviePage extends StatefulWidget {
   final ShelfTarget? target;
   final bool isSelectionMode;
+  final String? selectionHint;
 
-  const SearchMoviePage({super.key, this.target, this.isSelectionMode = false});
+  const SearchMoviePage({
+    super.key,
+    this.target,
+    this.isSelectionMode = false,
+    this.selectionHint,
+  });
 
   @override
   State<SearchMoviePage> createState() => _SearchMoviePageState();
@@ -86,7 +92,9 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
   }
 
   String get _hintText {
-    if (widget.isSelectionMode) return 'Listeye eklemek için film ara...';
+    if (widget.isSelectionMode) {
+      return widget.selectionHint ?? 'Listeye eklemek için film ara...';
+    }
     if (widget.target == null) return 'Film ara...';
     switch (widget.target!) {
       case ShelfTarget.fiveStar:
@@ -162,25 +170,11 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
     }
   }
 
-  String _slugify(String s) {
-    var slug = s.toLowerCase();
-    slug = slug
-        .replaceAll('ı', 'i')
-        .replaceAll('ğ', 'g')
-        .replaceAll('ü', 'u')
-        .replaceAll('ş', 's')
-        .replaceAll('ö', 'o')
-        .replaceAll('ç', 'c');
-    slug = slug.replaceAll(RegExp(r'[^a-z0-9]+'), '-');
-    slug = slug.replaceAll(RegExp(r'^-+|-+$'), '');
-    return slug;
-  }
-
   Future<void> _showMovieDetails(dynamic movie) async {
     final theme = Theme.of(context);
     final posterPath = movie['poster_path'];
     final posterUrl = (posterPath is String && posterPath.isNotEmpty)
-        ? 'https://image.tmdb.org/t/p/w500$posterPath'
+        ? 'https://image.tmdb.org/t/p/w342$posterPath'
         : '';
     final String title = (movie['title'] ?? 'Başlık yok').toString();
     final String originalTitle = (movie['original_title'] ?? '').toString();
@@ -320,8 +314,12 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                                 final selectedMovie = {
                                   'id': movie['id'],
                                   'title': title,
+                                  'original_title': originalTitle,
                                   'poster': posterUrl,
+                                  'poster_path': movie['poster_path'],
+                                  'release_date': release,
                                   'releaseDate': release,
+                                  'overview': overview,
                                 };
                                 // Seçim modundaysa BottomSheet'i kapatırken veriyi de yolla
                                 Navigator.pop(contextInner, selectedMovie);
@@ -333,34 +331,27 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                               bool isSuccess = false;
 
                               try {
-                                final uid = FirebaseAuth.instance.currentUser?.uid;
+                                final uid =
+                                    FirebaseAuth.instance.currentUser?.uid;
                                 if (uid == null) {
                                   Navigator.pop(contextInner);
                                   return;
                                 }
 
-                                final int tmdbId = (movie['id'] as num).toInt();
-                                final int yearInt = int.tryParse(year) ?? 0;
-                                final db = FirebaseFirestore.instance;
-
-                                final sourceForSlug = originalTitle.isNotEmpty ? originalTitle : title;
-                                final String guessLbSlug = _slugify(sourceForSlug);
-                                final String primaryKey = 'film:$guessLbSlug';
-
-                                await db.collection('catalog_films').doc(primaryKey).set({
-                                      'title': title,
-                                      'originalTitle': originalTitle,
-                                      'posterUrl': posterUrl,
-                                      'tmdbId': tmdbId,
-                                      'year': yearInt,
-                                      'titleLc': title.toLowerCase(),
-                                      'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']),
-                                      'source': 'tmdb',
-                                      'updatedAt': FieldValue.serverTimestamp(),
-                                    }, SetOptions(merge: true));
+                                final primaryKey = await CatalogService()
+                                    .upsertFromTmdb(
+                                      Map<String, dynamic>.from(movie as Map),
+                                    );
+                                if (primaryKey == null) {
+                                  throw StateError(
+                                    'Film güvenli kataloğa kaydedilemedi.',
+                                  );
+                                }
 
                                 if (widget.target != null) {
-                                  final previousList = await UserProfileService.instance.moveMovieToTarget(
+                                  final previousList = await UserProfileService
+                                      .instance
+                                      .moveMovieToTarget(
                                         uid: uid,
                                         movieId: primaryKey,
                                         target: widget.target!,
@@ -374,16 +365,24 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                                   };
                                   switch (widget.target!) {
                                     case ShelfTarget.fiveStar:
-                                      UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)..add(newLocalItem);
+                                      UserShelfCache.fiveStar = List.from(
+                                        UserShelfCache.fiveStar,
+                                      )..add(newLocalItem);
                                       break;
                                     case ShelfTarget.favorites:
-                                      UserShelfCache.favorites = List.from(UserShelfCache.favorites)..add(newLocalItem);
+                                      UserShelfCache.favorites = List.from(
+                                        UserShelfCache.favorites,
+                                      )..add(newLocalItem);
                                       break;
                                     case ShelfTarget.watchlist:
-                                      UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)..add(newLocalItem);
+                                      UserShelfCache.watchlist = List.from(
+                                        UserShelfCache.watchlist,
+                                      )..add(newLocalItem);
                                       break;
                                     case ShelfTarget.disliked:
-                                      UserShelfCache.disliked = List.from(UserShelfCache.disliked)..add(newLocalItem);
+                                      UserShelfCache.disliked = List.from(
+                                        UserShelfCache.disliked,
+                                      )..add(newLocalItem);
                                       break;
                                   }
 
@@ -398,17 +397,21 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                                       ? "'$title', $previousList listesinden çıkarılıp $targetName listesine eklendi."
                                       : "'$title', $targetName listesine eklendi.";
 
-                                  messenger.showSnackBar(SnackBar(
+                                  messenger.showSnackBar(
+                                    SnackBar(
                                       content: Text(message),
                                       backgroundColor: Colors.green.shade700,
                                       behavior: SnackBarBehavior.floating,
                                       duration: const Duration(seconds: 2),
-                                  ));
+                                    ),
+                                  );
                                 }
 
                                 isSuccess = true;
                               } catch (e) {
-                                messenger.showSnackBar(SnackBar(content: Text('Hata: $e')));
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text('Hata: $e')),
+                                );
                               }
 
                               // KESİN ÇÖZÜM: Sadece BottomSheet'i kapat ve true döndür
@@ -430,10 +433,10 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
       },
     );
 
-    // ÇÖZÜMÜN DEVAMI: BottomSheet başarılı şekilde ("true" veya obje ile) 
+    // ÇÖZÜMÜN DEVAMI: BottomSheet başarılı şekilde ("true" veya obje ile)
     // kapandıysa arama sayfasını DA o sonuçla güvenle kapat.
     if (result != null && mounted) {
-       Navigator.pop(context, result);
+      Navigator.pop(context, result);
     }
   }
 
@@ -501,8 +504,9 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
   Widget _buildBody() {
     if (_isLoading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Text(_error!));
-    if (_movies.isEmpty)
+    if (_movies.isEmpty) {
       return const Center(child: Text('Aradığınız filmi yukarı yazın.'));
+    }
 
     return Column(
       children: [
@@ -532,7 +536,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
   Widget _buildGridItem(dynamic movie) {
     final posterPath = movie['poster_path'];
     final posterUrl = (posterPath is String && posterPath.isNotEmpty)
-        ? 'https://image.tmdb.org/t/p/w500$posterPath'
+        ? 'https://image.tmdb.org/t/p/w342$posterPath'
         : '';
     final title = movie['title'] ?? '';
     final tmdbId = (movie['id'] is int) ? movie['id'] as int : null;

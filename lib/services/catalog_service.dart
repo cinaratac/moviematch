@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'dart:developer';
 
 class CatalogService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   // Film verisi cache'i (docId → data)
   static final Map<String, Map<String, dynamic>> _filmCache = {};
@@ -18,24 +20,20 @@ class CatalogService {
 
   static String canonicalKeyFromTmdb(int tmdbId) => 'tmdb:$tmdbId';
 
-  static String _slugify(String input) {
-    return input
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^\w\s-]'), '')
-        .replaceAll(RegExp(r'[\s_]+'), '-')
-        .replaceAll(RegExp(r'-+'), '-')
-        .replaceAll(RegExp(r'^-+|-+$'), '');
-  }
-
-  static String _normTitle(String input) {
-    return input.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '').trim();
-  }
-
-  Future<String?> upsertFromTmdb(Map<String, dynamic> movie) async {
+  Future<String?> upsertFromTmdb(
+    Map<String, dynamic> movie, {
+    String? catalogKey,
+  }) async {
     final int? tmdbId = movie['id'] is int
         ? movie['id']
         : int.tryParse('${movie['id'] ?? ''}');
     if (tmdbId == null) return null;
+
+    // Belirli bir eski katalog kaydı zenginleştiriliyorsa genel TMDB cache'i
+    // o kaydın sunucuda eşleştirilmesini atlamamalı.
+    if (catalogKey != null && catalogKey.trim().isNotEmpty) {
+      return _doUpsert(movie, tmdbId, catalogKey: catalogKey);
+    }
 
     // 1. Bellekte varsa anında dön — Firestore'a gitme
     if (_upsertCache.containsKey(tmdbId)) {
@@ -48,7 +46,7 @@ class CatalogService {
     }
 
     // 3. Yoksa gerçek işlemi başlat ve kaydet
-    final future = _doUpsert(movie, tmdbId);
+    final future = _doUpsert(movie, tmdbId, catalogKey: catalogKey);
     _upsertInFlight[tmdbId] = future;
 
     try {
@@ -60,117 +58,24 @@ class CatalogService {
     }
   }
 
-  Future<String?> _doUpsert(Map<String, dynamic> movie, int tmdbId) async {
+  Future<String?> _doUpsert(
+    Map<String, dynamic> movie,
+    int tmdbId, {
+    String? catalogKey,
+  }) async {
     try {
-      final String? imdbId = movie['imdb_id'];
-      final String? title = movie['title'];
-      final String? posterPath = movie['poster_path'];
-      final String? releaseDate = movie['release_date'];
-      final int? year = releaseDate != null && releaseDate.length >= 4
+      final title = (movie['title'] ?? movie['original_title'])?.toString();
+      final releaseDate = movie['release_date']?.toString();
+      final year = releaseDate != null && releaseDate.length >= 4
           ? int.tryParse(releaseDate.substring(0, 4))
           : null;
-      final String? posterUrl =
-          posterPath != null ? 'https://image.tmdb.org/t/p/w500$posterPath' : null;
-      final String? titleLc = title != null ? _normTitle(title) : null;
-
-      String? primaryId;
-      DocumentSnapshot? foundDoc;
-
-      // a) tmdbId ile ara
-      final q1 = await _db
-          .collection('catalog_films')
-          .where('tmdbId', isEqualTo: tmdbId)
-          .limit(1)
-          .get();
-      if (q1.docs.isNotEmpty) foundDoc = q1.docs.first;
-
-      // b) imdbId ile ara (sadece bulunamadıysa)
-      if (foundDoc == null && imdbId != null) {
-        final q2 = await _db
-            .collection('catalog_films')
-            .where('imdbId', isEqualTo: imdbId)
-            .limit(1)
-            .get();
-        if (q2.docs.isNotEmpty) foundDoc = q2.docs.first;
-      }
-
-      // c) titleLc + year ile ara (sadece bulunamadıysa)
-      if (foundDoc == null && titleLc != null && year != null) {
-        final q3 = await _db
-            .collection('catalog_films')
-            .where('titleLc', isEqualTo: titleLc)
-            .where('year', isEqualTo: year)
-            .limit(1)
-            .get();
-        if (q3.docs.isNotEmpty) foundDoc = q3.docs.first;
-      }
-
-      if (foundDoc != null) {
-        primaryId = foundDoc.id;
-        // Zaten var — cache'e al ve sadece gerekli alanları güncelle
-        _filmCache[primaryId] = {
-          ...Map<String, dynamic>.from(foundDoc.data() as Map),
-          'docId': primaryId,
-        };
-
-        // Sadece eksik alanlar varsa yaz (tmdbId yoksa ekle)
-        final existingData = foundDoc.data() as Map<String, dynamic>;
-        if (existingData['tmdbId'] == null || existingData['posterUrl'] == null) {
-          _db.collection('catalog_films').doc(primaryId).set({
-            'tmdbId': tmdbId,
-            if (posterUrl != null) 'posterUrl': posterUrl,
-            'aliases': FieldValue.arrayUnion(['tmdb:$tmdbId']),
-          }, SetOptions(merge: true));
-        }
-
-        return primaryId;
-      }
-
-      // Bulunamadı — yeni doc oluştur
-      if (title != null) {
-        String slug = _slugify(title);
-        String candidateId = 'film:$slug';
-        final docSnap = await _db.collection('catalog_films').doc(candidateId).get();
-        if (docSnap.exists) {
-          final data = docSnap.data();
-          bool conflict = false;
-          if (data != null) {
-            if ((data['tmdbId'] != null && data['tmdbId'] != tmdbId) ||
-                (imdbId != null && data['imdbId'] != null && data['imdbId'] != imdbId) ||
-                (year != null && data['year'] != null && data['year'] != year)) {
-              conflict = true;
-            }
-          }
-          if (conflict && year != null && year > 0) {
-            candidateId = 'film:$slug-$year';
-          }
-        }
-        primaryId = candidateId;
-      } else {
-        primaryId = canonicalKeyFromTmdb(tmdbId);
-      }
-
-      final Map<String, dynamic> data = {
-        if (title != null) 'title': title,
-        if (year != null) 'year': year,
-        if (posterUrl != null) 'posterUrl': posterUrl,
-        'tmdbId': tmdbId,
-        if (imdbId != null) 'imdbId': imdbId,
-        if (titleLc != null) 'titleLc': titleLc,
-        'canonicalKey': primaryId,
-        'source': 'tmdb',
-        'aliases': FieldValue.arrayUnion([
-          'tmdb:$tmdbId',
-          if (imdbId != null) 'imdb:$imdbId',
-        ]),
-      };
-
-      await _db.collection('catalog_films').doc(primaryId).set(data, SetOptions(merge: true));
-
-      // Yeni oluşturulan dokümanı da cache'e al
-      _filmCache[primaryId!] = {...data, 'docId': primaryId};
-
-      return primaryId;
+      final result = await resolveAndUpsert(
+        tmdbId: tmdbId,
+        title: title,
+        year: year,
+        catalogKey: catalogKey,
+      );
+      return result?['docId']?.toString();
     } catch (e, st) {
       log('Error in upsertFromTmdb: $e', stackTrace: st);
       return null;
@@ -182,44 +87,80 @@ class CatalogService {
     int? tmdbId,
   }) async {
     try {
-      String? primaryId;
-      String? lbSlug = lbFilm['lbSlug'];
-      String? title = lbFilm['title'];
-      int? year = lbFilm['year'];
-      String? imdbId = lbFilm['imdbId'];
-      String? posterUrl = lbFilm['posterUrl'];
-      String? titleLc = title != null ? _normTitle(title) : null;
-
-      if (lbSlug != null && lbSlug.toString().isNotEmpty) {
-        primaryId = 'film:$lbSlug';
-      } else if (title != null) {
-        primaryId = 'film:${_slugify(title)}';
+      final title = lbFilm['title']?.toString().trim() ?? '';
+      final rawKey = lbFilm['key'] ?? lbFilm['lbSlug'];
+      final key = rawKey == null
+          ? ''
+          : rawKey.toString().startsWith('film:')
+          ? rawKey.toString()
+          : 'film:${rawKey.toString()}';
+      if (title.isEmpty || key == 'film:') return;
+      if (tmdbId != null && tmdbId > 0) {
+        await resolveAndUpsert(
+          tmdbId: tmdbId,
+          title: title,
+          year: _coercePositiveInt(lbFilm['year']),
+          catalogKey: key,
+        );
       } else {
-        log('Cannot upsert Letterboxd film without slug or title');
-        return;
+        await importLetterboxdFilms([
+          {...lbFilm, 'key': key, 'title': title},
+        ]);
       }
-
-      final aliases = <String>[
-        if (tmdbId != null) 'tmdb:$tmdbId',
-        if (imdbId != null) 'imdb:$imdbId',
-      ];
-
-      final data = <String, dynamic>{
-        if (tmdbId != null) 'tmdbId': tmdbId,
-        if (imdbId != null) 'imdbId': imdbId,
-        if (title != null) 'title': title,
-        if (year != null) 'year': year,
-        if (posterUrl != null) 'posterUrl': posterUrl,
-        if (titleLc != null) 'titleLc': titleLc,
-        'canonicalKey': primaryId,
-        'source': 'letterboxd',
-        'aliases': FieldValue.arrayUnion(aliases),
-      };
-
-      await _db.collection('catalog_films').doc(primaryId).set(data, SetOptions(merge: true));
     } catch (e, st) {
       log('Error in upsertFromLetterboxd: $e', stackTrace: st);
     }
+  }
+
+  Future<Map<String, dynamic>?> resolveAndUpsert({
+    int? tmdbId,
+    String? title,
+    int? year,
+    String? catalogKey,
+  }) async {
+    final callable = _functions.httpsCallable('resolveCatalogMovie');
+    final response = await callable.call({
+      if (tmdbId != null && tmdbId > 0) 'tmdbId': tmdbId,
+      if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
+      if (year != null && year > 0) 'year': year,
+      if (catalogKey != null && catalogKey.trim().isNotEmpty)
+        'catalogKey': catalogKey.trim(),
+    });
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (data['ok'] != true) return null;
+    final docId = data['docId']?.toString();
+    if (docId != null && docId.isNotEmpty) {
+      _filmCache[docId] = {...data, 'docId': docId};
+      final resolvedTmdbId = _coercePositiveInt(data['tmdbId']);
+      if (resolvedTmdbId != null) _upsertCache[resolvedTmdbId] = docId;
+    }
+    return data;
+  }
+
+  Future<void> importLetterboxdFilms(List<Map<String, dynamic>> films) async {
+    if (films.isEmpty) return;
+    const batchSize = 50;
+    for (var i = 0; i < films.length; i += batchSize) {
+      final end = (i + batchSize).clamp(0, films.length);
+      final chunk = films.sublist(i, end).map((film) {
+        return {
+          'key': film['key']?.toString() ?? '',
+          'title': film['title']?.toString() ?? '',
+          if (_coercePositiveInt(film['year']) != null)
+            'year': _coercePositiveInt(film['year']),
+        };
+      }).toList();
+      await _functions.httpsCallable('importLetterboxdCatalog').call({
+        'films': chunk,
+      });
+    }
+  }
+
+  static int? _coercePositiveInt(dynamic value) {
+    if (value is int && value > 0) return value;
+    if (value is num && value > 0) return value.toInt();
+    final parsed = int.tryParse(value?.toString() ?? '');
+    return parsed != null && parsed > 0 ? parsed : null;
   }
 
   Future<Map<String, dynamic>?> getFilmByCanonical(String canonicalKey) async {
@@ -239,7 +180,10 @@ class CatalogService {
   }
 
   Future<List<Map<String, dynamic>>> getFilmsByKeys(List<String> keys) async {
-    final orderedKeys = keys.map((k) => k.trim()).where((k) => k.isNotEmpty).toList();
+    final orderedKeys = keys
+        .map((k) => k.trim())
+        .where((k) => k.isNotEmpty)
+        .toList();
     if (orderedKeys.isEmpty) return [];
 
     final keysToLoad = <String>[];
@@ -252,7 +196,9 @@ class CatalogService {
     if (keysToLoad.isNotEmpty) {
       await _loadFilmChunks(keysToLoad, Source.cache);
       final stillMissing = keysToLoad
-          .where((k) => !_filmCache.containsKey(k) && !_missingFilmKeys.contains(k))
+          .where(
+            (k) => !_filmCache.containsKey(k) && !_missingFilmKeys.contains(k),
+          )
           .toList();
       if (stillMissing.isNotEmpty) {
         await _loadFilmChunks(stillMissing, Source.server);
@@ -261,7 +207,8 @@ class CatalogService {
 
     return [
       for (final key in orderedKeys)
-        if (_filmCache[key] != null) Map<String, dynamic>.from(_filmCache[key]!),
+        if (_filmCache[key] != null)
+          Map<String, dynamic>.from(_filmCache[key]!),
     ];
   }
 

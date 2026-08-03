@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
 import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
+import 'package:fluttergirdi/auth/email_verification_page.dart';
 import '../services/text_filter_service.dart';
 
 class GoogleRegisterPage extends StatefulWidget {
@@ -19,22 +20,26 @@ class GoogleRegisterPage extends StatefulWidget {
 class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
-  
+
   bool _isLoading = false;
   bool _agreedToTerms = false;
   bool _allowMail = false;
 
   // --- YENİ: Sağlayıcıyı (Google, Apple veya E-posta) Dinamik Tespit Etme ---
   String get _providerName {
-    if (widget.user.providerData.any((p) => p.providerId == 'apple.com')) return 'Apple';
-    if (widget.user.providerData.any((p) => p.providerId == 'google.com')) return 'Google';
+    if (widget.user.providerData.any((p) => p.providerId == 'apple.com'))
+      return 'Apple';
+    if (widget.user.providerData.any((p) => p.providerId == 'google.com'))
+      return 'Google';
     return 'E-posta'; // İnterneti kopup kaydı yarım kalanlar için
   }
 
   String get _providerId {
-    if (widget.user.providerData.any((p) => p.providerId == 'apple.com')) return 'apple';
-    if (widget.user.providerData.any((p) => p.providerId == 'google.com')) return 'google';
-    return 'email'; 
+    if (widget.user.providerData.any((p) => p.providerId == 'apple.com'))
+      return 'apple';
+    if (widget.user.providerData.any((p) => p.providerId == 'google.com'))
+      return 'google';
+    return 'email';
   }
 
   @override
@@ -74,13 +79,18 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                           await FirebaseAuth.instance.signOut();
                           if (mounted) {
                             Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(builder: (_) => const LoginPage()),
+                              MaterialPageRoute(
+                                builder: (_) => const LoginPage(),
+                              ),
                               (_) => false,
                             );
                           }
                         },
                         icon: const Icon(Icons.arrow_back, color: Colors.grey),
-                        label: const Text("Vazgeç", style: TextStyle(color: Colors.grey)),
+                        label: const Text(
+                          "Vazgeç",
+                          style: TextStyle(color: Colors.grey),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -125,17 +135,33 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5)),
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 15,
+                            offset: const Offset(0, 5),
+                          ),
                         ],
                       ),
                       child: TextFormField(
                         controller: _usernameController,
                         style: const TextStyle(color: Colors.black),
                         decoration: InputDecoration(
-                          prefixIcon: Icon(Icons.alternate_email, color: Colors.grey[400]),
+                          prefixIcon: Icon(
+                            Icons.alternate_email,
+                            color: Colors.grey[400],
+                          ),
                           hintText: 'Kullanıcı Adı Seçin',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide(color: primaryGreen, width: 1.5)),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                              color: primaryGreen,
+                              width: 1.5,
+                            ),
+                          ),
                           filled: true,
                           fillColor: Colors.white,
                         ),
@@ -143,7 +169,8 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                           final value = (v ?? '').trim();
                           if (value.isEmpty) return 'Kullanıcı adı zorunlu';
                           final re = RegExp(r'^[a-zA-Z0-9._-]{3,20}$');
-                          if (!re.hasMatch(value)) return 'Geçersiz karakter veya uzunluk (3-20)';
+                          if (!re.hasMatch(value))
+                            return 'Geçersiz karakter veya uzunluk (3-20)';
                           return null;
                         },
                       ),
@@ -160,7 +187,8 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                           child: Checkbox(
                             value: _agreedToTerms,
                             activeColor: primaryGreen,
-                            onChanged: (v) => setState(() => _agreedToTerms = v ?? false),
+                            onChanged: (v) =>
+                                setState(() => _agreedToTerms = v ?? false),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -168,21 +196,32 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                           child: RichText(
                             text: TextSpan(
                               text: 'Kaydı tamamla butonuna basarak ',
-                              style: const TextStyle(color: Colors.black87, fontSize: 13),
+                              style: const TextStyle(
+                                color: Colors.black87,
+                                fontSize: 13,
+                              ),
                               children: [
                                 TextSpan(
                                   text: 'Kullanıcı Sözleşmesini',
-                                  style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
-                                  recognizer: TapGestureRecognizer()..onTap = _showTermsDialog,
+                                  style: TextStyle(
+                                    color: primaryGreen,
+                                    fontWeight: FontWeight.bold,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                  recognizer: TapGestureRecognizer()
+                                    ..onTap = _showTermsDialog,
                                 ),
-                                const TextSpan(text: ' okuduğumu ve kabul ettiğimi onaylıyorum.'),
+                                const TextSpan(
+                                  text:
+                                      ' okuduğumu ve kabul ettiğimi onaylıyorum.',
+                                ),
                               ],
                             ),
                           ),
                         ),
                       ],
                     ),
-                    
+
                     // --- MAIL İZNİ ---
                     const SizedBox(height: 12),
                     Row(
@@ -194,16 +233,21 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                           child: Checkbox(
                             value: _allowMail,
                             activeColor: primaryGreen,
-                            onChanged: (v) => setState(() => _allowMail = v ?? false),
+                            onChanged: (v) =>
+                                setState(() => _allowMail = v ?? false),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: GestureDetector(
-                            onTap: () => setState(() => _allowMail = !_allowMail),
+                            onTap: () =>
+                                setState(() => _allowMail = !_allowMail),
                             child: Text(
                               'Cinematch hakkındaki yeniliklerden e-posta yoluyla haberdar olmak istiyorum.',
-                              style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                              style: TextStyle(
+                                color: Colors.grey[700],
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ),
@@ -221,11 +265,21 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                           backgroundColor: primaryGreen,
                           foregroundColor: Colors.white,
                           elevation: 4,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
                         ),
                         child: _isLoading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('Kaydı Tamamla', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : const Text(
+                                'Kaydı Tamamla',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -242,7 +296,10 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
     if (!_formKey.currentState!.validate()) return;
     if (!_agreedToTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lütfen kullanıcı sözleşmesini onaylayın.'), backgroundColor: Colors.redAccent),
+        const SnackBar(
+          content: Text('Lütfen kullanıcı sözleşmesini onaylayın.'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
       return;
     }
@@ -251,11 +308,14 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
 
     try {
       final uname = _usernameController.text.trim();
-      
+
       // Uygunsuz dil kontrolü
       if (TextFilterService.hasProfanity(uname)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Bu kullanıcı adı uygunsuz ifadeler içeriyor.'), backgroundColor: Colors.red),
+          const SnackBar(
+            content: Text('Bu kullanıcı adı uygunsuz ifadeler içeriyor.'),
+            backgroundColor: Colors.red,
+          ),
         );
         setState(() => _isLoading = false);
         return;
@@ -271,7 +331,9 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Bu kullanıcı adı zaten alınmış. Lütfen başka bir tane seçin.'),
+              content: Text(
+                'Bu kullanıcı adı zaten alınmış. Lütfen başka bir tane seçin.',
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -283,51 +345,42 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
       // Kullanıcı adını Auth profiline de kaydet
       await widget.user.updateDisplayName(uname);
 
-      // Firestore Kaydı
-      final db = FirebaseFirestore.instance;
-      final batch = db.batch();
+      // Onboarding bitene kadar herkese açık users profili oluşturma.
       final uid = widget.user.uid;
       final email = widget.user.email ?? "";
 
-      // Users tablosuna yaz
-      final userRef = db.collection('users').doc(uid);
-      batch.set(userRef, {
-        'displayName': uname,
-        'displayName_lc': uname.toLowerCase(),
-        'email': email,
-        'photoUrl': widget.user.photoURL,
-        'termsAccepted': true,
-        'marketingConsent': _allowMail,
-        'termsAcceptedAt': FieldValue.serverTimestamp(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'authProvider': _providerId, // YENİ: 'google' yerine dinamik _providerId kullanılıyor
-      }, SetOptions(merge: true));
-
-      // Mail izni varsa
-      if (_allowMail) {
-        final mailRef = db.collection('marketing_emails').doc(uid);
-        batch.set(mailRef, {
-          'email': email,
-          'displayName': uname,
-          'consentedAt': FieldValue.serverTimestamp(),
-          'source': '${_providerId}_register', // YENİ: Kaynak da dinamik oldu
-        });
-      }
-
-      await batch.commit();
+      await FirebaseFirestore.instance
+          .collection('registration_drafts')
+          .doc(uid)
+          .set({
+            'displayName': uname,
+            'displayName_lc': uname.toLowerCase(),
+            'email': email,
+            'photoURL': widget.user.photoURL,
+            'termsAccepted': true,
+            'marketingConsent': _allowMail,
+            'termsAcceptedAt': FieldValue.serverTimestamp(),
+            'authProvider': _providerId,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
 
       // Başarılı -> Onboarding'e yönlendir
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const OnboardingLetterboxd()),
+          MaterialPageRoute(
+            builder: (_) => _providerId == 'email'
+                ? const EmailVerificationPage()
+                : const OnboardingLetterboxd(),
+          ),
           (_) => false,
         );
       }
-
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -349,17 +402,27 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text("Kullanıcı Sözleşmesi", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                    const Text(
+                      "Kullanıcı Sözleşmesi",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
                   ],
                 ),
               ),
               const Divider(height: 1),
               Expanded(
-                child: const PDF(enableSwipe: true, swipeHorizontal: false).fromAsset(
-                  'assets/docs/sozlesme.pdf',
-                  errorWidget: (e) => Center(child: Text("Hata: $e")),
-                ),
+                child: const PDF(enableSwipe: true, swipeHorizontal: false)
+                    .fromAsset(
+                      'assets/docs/sozlesme.pdf',
+                      errorWidget: (e) => Center(child: Text("Hata: $e")),
+                    ),
               ),
               Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -370,7 +433,9 @@ class _GoogleRegisterPageState extends State<GoogleRegisterPage> {
                       setState(() => _agreedToTerms = true);
                       Navigator.pop(context);
                     },
-                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                    ),
                     child: const Text("Okudum ve Onaylıyorum"),
                   ),
                 ),

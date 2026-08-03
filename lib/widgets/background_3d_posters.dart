@@ -1,10 +1,10 @@
-// Dosya: lib/widgets/background_3d_posters.dart
-
 import 'dart:math';
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/scheduler.dart'; // Ticker için EKLENDİ
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/scheduler.dart';
 
 class Background3DPosters extends StatefulWidget {
   const Background3DPosters({super.key});
@@ -13,127 +13,202 @@ class Background3DPosters extends StatefulWidget {
   State<Background3DPosters> createState() => _Background3DPostersState();
 }
 
-// Global cache: Uygulama açık kaldığı sürece veriyi hafızada tutar
-List<String> _globalCachedPosters = []; 
+const _posterWidth = 342;
+const _posterHeight = 513;
+const _maxPosterCount = 30;
+List<String> _globalCachedPosters = [];
 
-// SingleTickerProviderStateMixin yerine TickerProviderStateMixin kullanıldı
-// Çünkü artık hem AnimationController hem de kendi Ticker'ımız var.
-class _Background3DPostersState extends State<Background3DPosters> with TickerProviderStateMixin {
-  List<String> _posterUrls = [];
+class _Background3DPostersState extends State<Background3DPosters>
+    with TickerProviderStateMixin {
+  final _posterUrls = <String>[];
+  final _failedUrls = <String>{};
+  final _scrollController1 = ScrollController();
+  final _scrollController2 = ScrollController();
+  final _scrollController3 = ScrollController();
+
   bool _isLoading = true;
-
-  final ScrollController _scrollController1 = ScrollController();
-  final ScrollController _scrollController2 = ScrollController();
-  final ScrollController _scrollController3 = ScrollController();
-  
-  late AnimationController _entranceController;
-  late Animation<Offset> _entranceAnimation;
-
-  // YENİ: Timer yerine Ticker kullanıyoruz (Sıfır kasma garantili)
-  late Ticker _ticker;
+  late final AnimationController _entranceController;
+  late final Animation<Offset> _entranceAnimation;
+  late final Ticker _ticker;
+  Duration _lastTick = Duration.zero;
+  bool _dependenciesReady = false;
+  bool _disableAnimations = false;
 
   @override
   void initState() {
     super.initState();
-    
-    // 1. Giriş Animasyonu Tanımları
     _entranceController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1800), 
+      duration: const Duration(milliseconds: 1400),
     );
-
-    _entranceAnimation = Tween<Offset>(
-      begin: const Offset(0, 1.0), 
-      end: Offset.zero,            
-    ).animate(CurvedAnimation(
-      parent: _entranceController,
-      curve: Curves.easeOutQuart,  
-    ));
-
-    // 2. Ticker (Ekran yenileme hızına senkronize döngü)
-    _ticker = createTicker((elapsed) {
-      if (!mounted) return;
-      // Timer (30ms) yerine Ticker (16ms) kullandığımız için hızları yarıya indirdik
-      _scroll(_scrollController1, 0.5);
-      _scroll(_scrollController2, 0.75);
-      _scroll(_scrollController3, 0.4);
-    });
-
+    _entranceAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.7), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _entranceController,
+            curve: Curves.easeOutQuart,
+          ),
+        );
+    _ticker = createTicker(_onTick);
     _fetchPosters();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _dependenciesReady = true;
+    _disableAnimations = MediaQuery.of(context).disableAnimations;
+
+    if (_disableAnimations) {
+      if (_ticker.isActive) _ticker.stop();
+      _entranceController.value = 1;
+    } else {
+      _startPosterMotion();
+    }
+  }
+
+  void _onTick(Duration elapsed) {
+    if (!mounted) return;
+    final delta = elapsed - _lastTick;
+    if (delta < const Duration(milliseconds: 32)) return;
+    _lastTick = elapsed;
+    final seconds = delta.inMicroseconds / Duration.microsecondsPerSecond;
+    _scroll(_scrollController1, 30 * seconds);
+    _scroll(_scrollController2, 45 * seconds);
+    _scroll(_scrollController3, 24 * seconds);
   }
 
   Future<void> _fetchPosters() async {
     if (_globalCachedPosters.isNotEmpty) {
-      if (mounted) {
-        setState(() {
-          _posterUrls = List.from(_globalCachedPosters)..shuffle(Random());
-          _isLoading = false;
-        });
-        _startAutoScroll();
-        _entranceController.forward(); 
-      }
+      _showPosters(List<String>.from(_globalCachedPosters)..shuffle(Random()));
       return;
     }
 
+    final urls = <String>{};
+    final db = FirebaseFirestore.instance;
+
+    // Tercih edilen kaynak: yalnızca sunucu/admin tarafından hazırlanan liste.
+    try {
+      final curated = await db
+          .collection('login_posters')
+          .where('enabled', isEqualTo: true)
+          .limit(40)
+          .get();
+      for (final doc in curated.docs) {
+        final url = _trustedTmdbUrl(doc.data());
+        if (url != null) urls.add(url);
+      }
+    } catch (error) {
+      debugPrint('Login poster koleksiyonu okunamadı: $error');
+    }
+
+    // Koleksiyon henüz hazırlanmamışsa güvenilir TMDB katalog kayıtlarını kullan.
+    if (urls.length < 12) {
+      await _appendCatalogPosters(urls, field: 'posterSource', value: 'tmdb');
+    }
+    if (urls.length < 12) {
+      await _appendCatalogPosters(urls, field: 'source', value: 'tmdb');
+    }
+
+    final result = urls.take(_maxPosterCount).toList()..shuffle(Random());
+    if (result.isNotEmpty) _globalCachedPosters = List<String>.from(result);
+    _showPosters(result);
+  }
+
+  Future<void> _appendCatalogPosters(
+    Set<String> urls, {
+    required String field,
+    required String value,
+  }) async {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('catalog_films')
-          .where('posterUrl', isNull: false)
-          .limit(50) 
+          .where(field, isEqualTo: value)
+          .limit(60)
           .get();
-
-      List<String> urls = [];
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        if (data['posterUrl'] != null) {
-          urls.add(data['posterUrl']);
-        }
+      for (final doc in snapshot.docs) {
+        final url = _trustedTmdbUrl(doc.data());
+        if (url != null) urls.add(url);
       }
-
-      if (urls.isNotEmpty) {
-        _globalCachedPosters = urls;
-      }
-
-      urls.shuffle(Random());
-
-      if (mounted) {
-        setState(() {
-          _posterUrls = urls;
-          _isLoading = false;
-        });
-        _startAutoScroll();
-        _entranceController.forward(); 
-      }
-    } catch (e) {
-      debugPrint("Poster fetch error: $e");
-      if (mounted) setState(() => _isLoading = false);
+    } catch (error) {
+      debugPrint('TMDB katalog posterleri okunamadı: $error');
     }
   }
 
-  void _startAutoScroll() {
-    // Ticker çalışmıyorsa başlat
-    if (!_ticker.isTicking) {
-      _ticker.start();
+  String? _trustedTmdbUrl(Map<String, dynamic> data) {
+    var path = data['posterPath']?.toString().trim() ?? '';
+    if (!RegExp(r'^/[A-Za-z0-9._-]+$').hasMatch(path)) {
+      path = '';
+    }
+
+    if (path.isEmpty) {
+      final rawUrl = data['posterUrl']?.toString().trim() ?? '';
+      final uri = Uri.tryParse(rawUrl);
+      if (uri != null &&
+          uri.scheme == 'https' &&
+          uri.host == 'image.tmdb.org') {
+        final match = RegExp(
+          r'^/t/p/(?:w\d+|original)(/[A-Za-z0-9._-]+)$',
+        ).firstMatch(uri.path);
+        path = match?.group(1) ?? '';
+      }
+    }
+
+    return path.isEmpty
+        ? null
+        : 'https://image.tmdb.org/t/p/w$_posterWidth$path';
+  }
+
+  void _showPosters(List<String> urls) {
+    if (!mounted) return;
+    setState(() {
+      _posterUrls
+        ..clear()
+        ..addAll(urls);
+      _isLoading = false;
+    });
+    _startPosterMotion();
+  }
+
+  void _startPosterMotion() {
+    if (!_dependenciesReady || _disableAnimations || _posterUrls.isEmpty) {
+      return;
+    }
+    if (!_ticker.isActive) _ticker.start();
+    if (_entranceController.status == AnimationStatus.dismissed) {
+      _entranceController.forward();
     }
   }
 
-  void _scroll(ScrollController controller, double speed) {
-    if (controller.hasClients) {
-      double maxScroll = controller.position.maxScrollExtent;
-      double currentScroll = controller.offset;
-      
-      if (currentScroll >= maxScroll * 0.9) {
-         controller.jumpTo(0);
-      } else {
-        controller.jumpTo(currentScroll + speed);
-      }
+  void _scroll(ScrollController controller, double delta) {
+    if (!controller.hasClients) return;
+    final position = controller.position;
+    if (position.maxScrollExtent <= 0) return;
+    if (position.pixels >= position.maxScrollExtent * 0.9) {
+      controller.jumpTo(0);
+    } else {
+      controller.jumpTo(
+        (position.pixels + delta).clamp(0, position.maxScrollExtent),
+      );
     }
+  }
+
+  String? _posterFor(int index, int columnOffset) {
+    if (_posterUrls.isEmpty || _failedUrls.length >= _posterUrls.length) {
+      return null;
+    }
+    for (var attempt = 0; attempt < _posterUrls.length; attempt++) {
+      final realIndex =
+          (index + (columnOffset * 5) + attempt) % _posterUrls.length;
+      final candidate = _posterUrls[realIndex];
+      if (!_failedUrls.contains(candidate)) return candidate;
+    }
+    return null;
   }
 
   @override
   void dispose() {
-    _ticker.dispose(); // Timer.cancel() yerine Ticker'ı yok ediyoruz
-    _entranceController.dispose(); 
+    _ticker.dispose();
+    _entranceController.dispose();
     _scrollController1.dispose();
     _scrollController2.dispose();
     _scrollController3.dispose();
@@ -143,43 +218,62 @@ class _Background3DPostersState extends State<Background3DPosters> with TickerPr
   @override
   Widget build(BuildContext context) {
     if (_isLoading || _posterUrls.isEmpty) {
-      return Container(color: Colors.black); 
+      return const ColoredBox(color: Colors.black);
     }
 
-    return SlideTransition(
-      position: _entranceAnimation,
-      child: Row(
-        children: [
-          Expanded(child: _buildInfiniteColumn(_scrollController1, 0)),
-          Expanded(child: _buildInfiniteColumn(_scrollController2, 1)),
-          Expanded(child: _buildInfiniteColumn(_scrollController3, 2)),
-        ],
+    return ExcludeSemantics(
+      child: IgnorePointer(
+        child: SlideTransition(
+          position: _entranceAnimation,
+          child: Row(
+            children: [
+              Expanded(child: _buildInfiniteColumn(_scrollController1, 0)),
+              Expanded(child: _buildInfiniteColumn(_scrollController2, 1)),
+              Expanded(child: _buildInfiniteColumn(_scrollController3, 2)),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildInfiniteColumn(ScrollController controller, int offsetIndex) {
-    return ListView.builder(
-      controller: controller,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: 10000, 
-      padding: EdgeInsets.zero,
-      itemBuilder: (context, index) {
-        final realIndex = (index + (offsetIndex * 5)) % _posterUrls.length;
-        final url = _posterUrls[realIndex];
-
-        return Container(
-          height: 180, 
-          margin: const EdgeInsets.all(4), 
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            image: DecorationImage(
-              image: CachedNetworkImageProvider(url, maxWidth: 300),
-              fit: BoxFit.cover,
+    return RepaintBoundary(
+      child: ListView.builder(
+        controller: controller,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: 10000,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(200),
+        padding: EdgeInsets.zero,
+        itemBuilder: (context, index) {
+          final url = _posterFor(index, offsetIndex);
+          return Container(
+            height: 180,
+            margin: const EdgeInsets.all(4),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: const Color(0xFF101510),
+              borderRadius: BorderRadius.circular(8),
             ),
-          ),
-        );
-      },
+            child: url == null
+                ? const SizedBox.shrink()
+                : CachedNetworkImage(
+                    imageUrl: url,
+                    fit: BoxFit.cover,
+                    memCacheWidth: _posterWidth,
+                    memCacheHeight: _posterHeight,
+                    fadeInDuration: const Duration(milliseconds: 180),
+                    fadeOutDuration: Duration.zero,
+                    placeholder: (_, _) =>
+                        const ColoredBox(color: Color(0xFF101510)),
+                    errorWidget: (_, failedUrl, _) {
+                      _failedUrls.add(failedUrl);
+                      return const ColoredBox(color: Color(0xFF101510));
+                    },
+                  ),
+          );
+        },
+      ),
     );
   }
 }

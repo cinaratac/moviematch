@@ -2,19 +2,13 @@ import 'dart:io'; // Platform kontrolü için eklendi
 // ignore_for_file: deprecated_member_use
 
 import 'package:firebase_core/firebase_core.dart';
-import 'package:fluttergirdi/services/push_token_service.dart';
 import 'firebase_options.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
-import 'package:fluttergirdi/services/watched_movies_service.dart';
 import 'package:fluttergirdi/theme.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
-// import 'package:fluttergirdi/services/push_token_service.dart'; // Eğer dosya adı buysa aktif et
-import 'package:fluttergirdi/auth/login_page.dart';
+import 'package:fluttergirdi/auth/auth_gate.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:fluttergirdi/screens/initial_loading_screen.dart';
-import 'package:fluttergirdi/services/global_data_service.dart';
 // App Check importu
 import 'package:firebase_app_check/firebase_app_check.dart';
 
@@ -59,13 +53,6 @@ Future<void> main() async {
         : AndroidProvider.debug,
     appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
   );
-  if (!kReleaseMode) {
-    try {
-      await FirebaseAppCheck.instance.getToken(true);
-    } catch (e) {
-      debugPrint("App Check Debug Token alınamadı: $e");
-    }
-  }
 
   // Firestore Ayarları
   FirebaseFirestore.instance.settings = const Settings(
@@ -94,21 +81,8 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
-  @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  // YENİ: Servislerin birden fazla kez başlatılmasını engelleyecek kontrol bayrağı
-  bool _servicesStarted = false;
-
-  @override
-  void initState() {
-    super.initState();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -122,38 +96,7 @@ class _MyAppState extends State<MyApp> {
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: mode,
-          home: StreamBuilder<User?>(
-            stream: FirebaseAuth.instance.authStateChanges(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-
-              final user = snapshot.data ?? FirebaseAuth.instance.currentUser;
-              if (user != null) {
-                // YENİ KONTROL: Servisler daha önce başlatılmadıysa BAŞLAT
-                if (!_servicesStarted) {
-                  _servicesStarted = true; // Bayrağı işaretle
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    NotificationService.I.start();
-                    NotificationService.I.requestPermissions();
-                    PushTokenService.I.start();
-                    WatchedMoviesService.instance.initWatchedHistory();
-                  });
-                }
-                // DİREKT HomeShell AÇMAK YERİNE ÖNCE YÜKLEME EKRANINI AÇ:
-                return const InitialLoadingScreen();
-              } else {
-                // Kullanıcı çıkış yaptıysa veya oturum yoksa bayrağı sıfırla
-                _servicesStarted = false;
-                // Önbelleği temizle (Başka hesaba girilirse eski veriler görünmesin)
-                GlobalDataService.instance.stopPreloading();
-                return const LoginPage();
-              }
-            },
-          ),
+          home: const AuthGate(),
         );
       },
     );

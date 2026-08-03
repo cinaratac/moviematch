@@ -7,6 +7,8 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:fluttergirdi/widgets/background_3d_posters.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:fluttergirdi/auth/auth_gate.dart'; // KESİN YÖNLENDİRME İÇİN EKLENDİ
+import 'package:fluttergirdi/services/global_data_service.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -25,6 +27,20 @@ class _LoginPageState extends State<LoginPage> {
   bool _isGoogleLoading = false;
   bool _isAppleLoading = false;
   bool _isPasswordVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.I.setNavigationReady(false);
+    GlobalDataService.instance.stopPreloading();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   // Standart E-posta Giriş Fonksiyonu
   Future<void> _login() async {

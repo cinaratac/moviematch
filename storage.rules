@@ -40,11 +40,27 @@ service firebase.storage {
       allow delete: if isBlogEditor() && request.auth.uid == uid;
     }
 
+    // Onboarding profil fotoğrafı sabit ve kullanıcıya ait bir yola yüklenir.
+    // Sunucu hesabı active yapmadan önce aynı dosyanın metadata'sını doğrular.
+    match /profile_images/{uid}/avatar.jpg {
+      allow read: if true;
+      allow create, update: if signedIn() &&
+        request.auth.uid == uid &&
+        request.resource.size > 0 &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType == 'image/jpeg' &&
+        request.resource.metadata.ownerUid == uid &&
+        request.resource.metadata.purpose == 'onboarding_profile';
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
     // Mevcut uygulama davranışı blog dışındaki bütün Storage yolları için
     // korunur. blog_images burada özellikle dışarıda bırakılır; aksi hâlde
     // geniş izin yukarıdaki daha sıkı blog koşullarını geçersiz kılardı.
     match /{topLevel}/{remainingPath=**} {
-      allow read, write: if signedIn() && topLevel != "blog_images";
+      allow read, write: if signedIn() &&
+        topLevel != "blog_images" &&
+        topLevel != "profile_images";
     }
   }
 }

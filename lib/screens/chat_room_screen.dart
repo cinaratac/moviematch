@@ -4,8 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttergirdi/services/notification_settings_service.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
 import '../services/text_filter_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -61,8 +61,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _hasBlockedMe = false;
   bool _isLoadingBlock = true;
 
-  late Stream<List<String>> _mutedChatsStream;
-
   // --- YENİ EKLENEN: Teslim edildi / Görüldü tik sistemi ---
   DateTime? _otherReadAt;
   DateTime? _otherDeliveredAt;
@@ -103,6 +101,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    NotificationService.I.enterChat(widget.chatId);
 
     // 1. EKRAN AÇILDIĞI AN İKONU "AÇIK" OLARAK GÖSTER
     _isMutedNotifier = ValueNotifier<bool>(false);
@@ -251,6 +250,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   void dispose() {
+    NotificationService.I.leaveChat(widget.chatId);
     // 1. Önce sunucuya kaydedilecek bir şey varsa onu hallet
     if (_isMutedNotifier.value != _initialMuteStatus) {
       final uid = FirebaseAuth.instance.currentUser?.uid;

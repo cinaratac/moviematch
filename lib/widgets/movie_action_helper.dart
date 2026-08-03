@@ -7,6 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../services/chat_service.dart';
+import '../services/catalog_service.dart';
 import '../controllers/feed_controller.dart';
 import '../services/user_cache_service.dart';
 import '../widgets/compose_post_sheet.dart';
@@ -129,10 +130,11 @@ class _MovieActionSheetState extends State<_MovieActionSheet> {
         if (results != null && results.isNotEmpty) {
           resolvedTmdbId = results[0]['id'];
           if (docId != null && resolvedTmdbId != null) {
-            FirebaseFirestore.instance
-                .collection('catalog_films')
-                .doc(docId)
-                .set({'tmdbId': resolvedTmdbId}, SetOptions(merge: true));
+            await CatalogService().resolveAndUpsert(
+              tmdbId: resolvedTmdbId,
+              title: title,
+              catalogKey: docId,
+            );
           }
         }
       } catch (e) {

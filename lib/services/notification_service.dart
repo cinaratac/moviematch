@@ -3,13 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
-import 'package:fluttergirdi/screens/public_profile_screen.dart';
+import 'package:fluttergirdi/widgets/notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class NotificationService {
@@ -19,11 +20,16 @@ class NotificationService {
   final navigatorKey = GlobalKey<NavigatorState>();
   final _fln = FlutterLocalNotificationsPlugin();
   final Map<String, DateTime> _recentPushes = {};
+  final ValueNotifier<_InAppNotification?> _banner = ValueNotifier(null);
 
   bool _inited = false;
+  bool _navigationReady = false;
+  final List<String> _activeChatIds = [];
   Map<String, dynamic>? _pendingNavigation;
   StreamSubscription<RemoteMessage>? _foregroundSub;
   StreamSubscription<RemoteMessage>? _openedSub;
+  OverlayEntry? _bannerEntry;
+  Timer? _bannerTimer;
 
   static const _chChat = 'cinematch_chat';
   static const _chSocial = 'cinematch_social';
@@ -33,9 +39,9 @@ class NotificationService {
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
     );
 
     await _fln.initialize(
@@ -108,10 +114,26 @@ class NotificationService {
   }
 
   void flushPendingNavigation() {
+    _navigationReady = true;
     final data = _pendingNavigation;
     if (data == null) return;
     _pendingNavigation = null;
     unawaited(_delayedNavigate(data));
+  }
+
+  void setNavigationReady(bool ready) {
+    _navigationReady = ready;
+    if (ready) flushPendingNavigation();
+  }
+
+  void enterChat(String chatId) {
+    _activeChatIds
+      ..remove(chatId)
+      ..add(chatId);
+  }
+
+  void leaveChat(String chatId) {
+    _activeChatIds.remove(chatId);
   }
 
   Future<void> dispose() async {
@@ -119,24 +141,31 @@ class NotificationService {
     await _openedSub?.cancel();
     _foregroundSub = null;
     _openedSub = null;
+    _navigationReady = false;
+    _activeChatIds.clear();
+    _removeBanner();
     _inited = false;
   }
 
   Future<void> _showForegroundPush(RemoteMessage message) async {
-    // Uygulama ön plandayken (kullanıcı içerideyken) veriler zaten
-    // Firestore Stream'leri sayesinde arayüze anlık yansır.
-    //
-    // Önceden burada _fln.show() çağrıldığı için, Android sen
-    // uygulamanın içindeyken bile zorla tepeden bildirim çıkarıyordu.
-    // Uygulama açıkken sistem bildirimi gelmemesi için bu kısmı boş bırakıyoruz.
+    final data = Map<String, dynamic>.from(message.data);
+    if (data['type']?.toString() == 'chat' &&
+        _activeChatIds.isNotEmpty &&
+        data['chatId']?.toString() == _activeChatIds.last) {
+      return;
+    }
+    if (!_shouldShow(_dedupeKey(message))) return;
 
-    debugPrint(
-      'Ön planda bildirim alındı ancak sistem bildirimi gösterilmeyecek: ${message.messageId}',
+    final title = message.notification?.title ?? _fallbackTitle(data);
+    final body = message.notification?.body ?? _fallbackBody(data);
+    _showInAppBanner(
+      _InAppNotification(
+        id: message.messageId ?? _dedupeKey(message),
+        title: title,
+        body: body,
+        data: data,
+      ),
     );
-
-    // Not: Eğer gelecekte uygulama açıkken üstten sistem bildirimi yerine
-    // uygulamanın kendi içinde zarif bir "In-App Snackbar" çıkarmak istersen,
-    // kodlarını buraya ekleyebilirsin. Şu an sessizce geçiyoruz.
   }
 
   void _handleRemoteTap(RemoteMessage message) {
@@ -160,7 +189,22 @@ class NotificationService {
 
   void _queueNavigation(Map<String, dynamic> data) {
     _pendingNavigation = Map<String, dynamic>.from(data);
-    unawaited(_delayedNavigate(data));
+    unawaited(_markTappedNotificationRead(data));
+    if (_navigationReady) unawaited(_delayedNavigate(data));
+  }
+
+  Future<void> _markTappedNotificationRead(Map<String, dynamic> data) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final notificationId = data['notificationId']?.toString() ?? '';
+    if (uid == null || notificationId.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('notifications')
+          .doc(notificationId)
+          .update({'read': true});
+    } catch (_) {}
   }
 
   Future<void> _delayedNavigate(Map<String, dynamic> data) async {
@@ -209,10 +253,10 @@ class NotificationService {
     }
 
     if (type == 'follow') {
-      final actorId = data['actorId']?.toString() ?? '';
-      if (actorId.isEmpty) return;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
       nav.push(
-        MaterialPageRoute(builder: (_) => PublicProfileScreen(uid: actorId)),
+        MaterialPageRoute(builder: (_) => NotificationsScreen(uid: uid)),
       );
       return;
     }
@@ -232,37 +276,15 @@ class NotificationService {
           ),
         ),
       );
+      return;
     }
-  }
 
-  NotificationDetails _chatDetails() {
-    const android = AndroidNotificationDetails(
-      _chChat,
-      'Sohbet',
-      importance: Importance.high,
-      priority: Priority.high,
-    );
-    const ios = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-    return const NotificationDetails(android: android, iOS: ios);
-  }
-
-  NotificationDetails _socialDetails() {
-    const android = AndroidNotificationDetails(
-      _chSocial,
-      'Sosyal',
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
-    );
-    const ios = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-    return const NotificationDetails(android: android, iOS: ios);
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      nav.push(
+        MaterialPageRoute(builder: (_) => NotificationsScreen(uid: uid)),
+      );
+    }
   }
 
   bool _shouldShow(String key) {
@@ -281,14 +303,6 @@ class NotificationService {
         data['messageId']?.toString() ??
         data['notificationId']?.toString() ??
         '${data['type']}_${data['chatId']}_${data['postId']}_${data['actorId']}';
-  }
-
-  int _stableId(String value) {
-    var hash = 0;
-    for (final codeUnit in value.codeUnits) {
-      hash = (hash * 31 + codeUnit) & 0x7fffffff;
-    }
-    return hash % 1000000;
   }
 
   String _fallbackTitle(Map<String, dynamic> data) {
@@ -331,6 +345,35 @@ class NotificationService {
       default:
         return 'Yeni bildirimin var';
     }
+  }
+
+  void _showInAppBanner(_InAppNotification notification) {
+    if (!_navigationReady) return;
+    final overlay = navigatorKey.currentState?.overlay;
+    if (overlay == null) return;
+
+    _banner.value = notification;
+    _bannerEntry ??= OverlayEntry(
+      builder: (_) => _InAppNotificationBanner(
+        notification: _banner,
+        onDismiss: _removeBanner,
+        onTap: (data) {
+          _removeBanner();
+          _queueNavigation(data);
+        },
+      ),
+    );
+    if (!_bannerEntry!.mounted) overlay.insert(_bannerEntry!);
+    _bannerTimer?.cancel();
+    _bannerTimer = Timer(const Duration(seconds: 5), _removeBanner);
+  }
+
+  void _removeBanner() {
+    _bannerTimer?.cancel();
+    _bannerTimer = null;
+    _banner.value = null;
+    _bannerEntry?.remove();
+    _bannerEntry = null;
   }
 
   Future<void> markAllAsRead(String userId) async {
@@ -378,5 +421,164 @@ class NotificationService {
     } catch (e) {
       debugPrint('Eski bildirimleri silme hatasi: $e');
     }
+  }
+}
+
+class _InAppNotification {
+  const _InAppNotification({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.data,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final Map<String, dynamic> data;
+}
+
+class _InAppNotificationBanner extends StatelessWidget {
+  const _InAppNotificationBanner({
+    required this.notification,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  final ValueListenable<_InAppNotification?> notification;
+  final ValueChanged<Map<String, dynamic>> onTap;
+  final VoidCallback onDismiss;
+
+  IconData _iconFor(String type) {
+    switch (type) {
+      case 'chat':
+        return Icons.chat_bubble_rounded;
+      case 'like':
+        return Icons.favorite_rounded;
+      case 'comment':
+        return Icons.mode_comment_rounded;
+      case 'follow':
+        return Icons.person_add_alt_1_rounded;
+      default:
+        return Icons.notifications_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 8,
+      left: 12,
+      right: 12,
+      child: SafeArea(
+        bottom: false,
+        child: ValueListenableBuilder<_InAppNotification?>(
+          valueListenable: notification,
+          builder: (context, item, _) {
+            return AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: item == null
+                  ? const SizedBox.shrink()
+                  : TweenAnimationBuilder<double>(
+                      key: ValueKey(item.id),
+                      tween: Tween(begin: 0, end: 1),
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, child) => Transform.translate(
+                        offset: Offset(0, -24 * (1 - value)),
+                        child: Opacity(opacity: value, child: child),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.surface,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.outlineVariant,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x33000000),
+                                blurRadius: 18,
+                                offset: Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () => onTap(item.data),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 42,
+                                    height: 42,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0x1F2E7D32),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      _iconFor(
+                                        item.data['type']?.toString() ?? '',
+                                      ),
+                                      color: const Color(0xFF2E7D32),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          item.body,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Kapat',
+                                    onPressed: onDismiss,
+                                    icon: const Icon(Icons.close_rounded),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+            );
+          },
+        ),
+      ),
+    );
   }
 }

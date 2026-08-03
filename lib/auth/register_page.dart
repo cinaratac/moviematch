@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/gestures.dart'; 
+import 'package:flutter/gestures.dart';
 import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
-import 'package:fluttergirdi/onboarding/letterboxd_onboarding.dart';
+import 'package:fluttergirdi/auth/email_verification_page.dart';
 import 'package:fluttergirdi/services/text_filter_service.dart';
 // Yeni arka plan widget'ını import ediyoruz (Paket adınız fluttergirdi varsayılmıştır)
-import 'package:fluttergirdi/widgets/background_3d_posters.dart'; 
+import 'package:fluttergirdi/widgets/background_3d_posters.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -17,13 +17,13 @@ class RegisterPage extends StatefulWidget {
 
 class _RegisterPageState extends State<RegisterPage> {
   final _form = GlobalKey<FormState>();
-  
+
   // Controller'lar
   final _username = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
-  
+
   // Şifre gizlilik durumları
   bool _obscure1 = true;
   bool _obscure2 = true;
@@ -44,25 +44,30 @@ class _RegisterPageState extends State<RegisterPage> {
     if (!_agreedToTerms) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Kayıt olmak için Kullanıcı Sözleşmesini okuyup onaylamanız gerekmektedir.'),
+          content: Text(
+            'Kayıt olmak için Kullanıcı Sözleşmesini okuyup onaylamanız gerekmektedir.',
+          ),
           backgroundColor: Colors.redAccent,
           duration: Duration(seconds: 3),
         ),
       );
-      return; 
+      return;
     }
 
     setState(() => _loading = true);
+    User? createdUser;
     try {
       final email = _email.text.trim();
       final pass = _password.text.trim();
       final uname = _username.text.trim();
-      
+
       // Küfür filtresi kontrolü
       if (TextFilterService.hasProfanity(uname)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Bu kullanıcı adı uygunsuz ifadeler içerdiği için kullanılamaz.'),
+            content: Text(
+              'Bu kullanıcı adı uygunsuz ifadeler içerdiği için kullanılamaz.',
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -77,7 +82,9 @@ class _RegisterPageState extends State<RegisterPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Bu kullanıcı adı zaten alınmış. Lütfen başka bir tane seçin.'),
+              content: Text(
+                'Bu kullanıcı adı zaten alınmış. Lütfen başka bir tane seçin.',
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -87,58 +94,39 @@ class _RegisterPageState extends State<RegisterPage> {
       }
 
       // 1) Firebase Auth ile kullanıcı oluşturma
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: pass,
-      );
+      final credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: pass);
+      createdUser = credential.user;
 
       // 2) Kullanıcı adını güncelleme
-      final user = FirebaseAuth.instance.currentUser;
       try {
-        await user?.updateDisplayName(uname);
+        await createdUser?.updateDisplayName(uname);
       } catch (_) {}
 
-      // 3) Firestore'a kaydetme
-      try {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid != null) {
-          final db = FirebaseFirestore.instance;
-          final batch = db.batch();
+      final uid = createdUser?.uid;
+      if (uid == null) throw StateError('Kullanıcı hesabı oluşturulamadı.');
 
-          // Ana Kullanıcı Kaydı
-          final userRef = db.collection('users').doc(uid);
-          batch.set(userRef, {
+      // Profil herkese açık users koleksiyonuna ancak onboarding tamamlanınca
+      // yazılır. Bu taslak yalnızca hesap sahibince okunabilir.
+      await FirebaseFirestore.instance
+          .collection('registration_drafts')
+          .doc(uid)
+          .set({
             'displayName': uname,
             'displayName_lc': uname.toLowerCase(),
             'email': email,
             'termsAccepted': true,
             'marketingConsent': _allowMail,
             'termsAcceptedAt': FieldValue.serverTimestamp(),
-            'updatedAt': FieldValue.serverTimestamp(),
+            'authProvider': 'email',
             'createdAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
 
-          // Pazarlama İzni (Varsa)
-          if (_allowMail) {
-            final mailListRef = db.collection('marketing_emails').doc(uid);
-            batch.set(mailListRef, {
-              'email': email,
-              'displayName': uname,
-              'consentedAt': FieldValue.serverTimestamp(),
-              'source': 'register_page',
-            });
-          }
-
-          await batch.commit();
-        }
-      } catch (e) {
-        debugPrint('Firestore Error: $e');
-      }
-
-      // 4) Başarılı ise Onboarding'e yönlendir
+      // E-posta/şifre kaydında onboarding'den önce 6 haneli kod doğrulanır.
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const OnboardingLetterboxd()),
+        MaterialPageRoute(builder: (_) => const EmailVerificationPage()),
         (_) => false,
       );
     } on FirebaseAuthException catch (e) {
@@ -157,7 +145,21 @@ class _RegisterPageState extends State<RegisterPage> {
           msg = 'Hata: ${e.message ?? e.code}';
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } catch (e) {
+      // Auth oluşturulup taslak kaydedilemediyse yarım/orphan hesap bırakma.
+      try {
+        await createdUser?.delete();
+      } catch (_) {
+        await FirebaseAuth.instance.signOut();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Kayıt başlatılamadı: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -178,13 +180,19 @@ class _RegisterPageState extends State<RegisterPage> {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 12.0,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
                       "Kullanıcı Sözleşmesi",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.close),
@@ -195,30 +203,35 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
               const Divider(height: 1),
               Expanded(
-                child: const PDF(
-                  enableSwipe: true,
-                  swipeHorizontal: false,
-                  autoSpacing: false,
-                  pageFling: false,
-                ).fromAsset(
-                  'assets/docs/sozlesme.pdf',
-                  errorWidget: (dynamic error) => Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.error_outline, size: 40, color: Colors.red),
-                          const SizedBox(height: 10),
-                          Text(
-                            "Sözleşme görüntülenemedi.\nHata: $error",
-                            textAlign: TextAlign.center,
+                child:
+                    const PDF(
+                      enableSwipe: true,
+                      swipeHorizontal: false,
+                      autoSpacing: false,
+                      pageFling: false,
+                    ).fromAsset(
+                      'assets/docs/sozlesme.pdf',
+                      errorWidget: (dynamic error) => Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                size: 40,
+                                color: Colors.red,
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                "Sözleşme görüntülenemedi.\nHata: $error",
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                ),
               ),
               Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -258,22 +271,20 @@ class _RegisterPageState extends State<RegisterPage> {
   Widget build(BuildContext context) {
     // Tema Renkleri
     final primaryGreen = const Color(0xFF2E7D32); // Koyu Yeşil
-    
+
     // Arka plan gradyanı (yarı saydam yaparak posterlerin görünmesini sağlıyoruz)
     // 0.90 ve 0.95 opacity, yazıların okunabilirliği ile arka plan görünürlüğü arasında iyi bir denge kurar.
-    final bgGradientStart = const Color(0xFFE8F5E9).withOpacity(0.75); 
+    final bgGradientStart = const Color(0xFFE8F5E9).withOpacity(0.75);
     final bgGradientEnd = Colors.white.withOpacity(0.85);
 
     return Scaffold(
       // Klavye açıldığında tasarımın sıkışmasını engellemek için resizeToAvoidBottomInset false yapabiliriz
       // Ancak SingleChildScrollView olduğu için true kalsa da çalışır.
-      resizeToAvoidBottomInset: true, 
+      resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
           // 1. KATMAN: Netflix Tarzı Akan Poster Duvarı (En Arkada)
-          const Positioned.fill(
-            child: Background3DPosters(),
-          ),
+          const Positioned.fill(child: Background3DPosters()),
 
           // 2. KATMAN: Yarı Saydam Gradyan Perde
           Positioned.fill(
@@ -316,7 +327,7 @@ class _RegisterPageState extends State<RegisterPage> {
                             onPressed: () => Navigator.pop(context),
                           ),
                         ),
-                        
+
                         // --- YEŞİL KARAKTER (ForestFace) ---
                         Center(
                           child: Container(
@@ -328,15 +339,18 @@ class _RegisterPageState extends State<RegisterPage> {
                                   blurRadius: 30,
                                   spreadRadius: 5,
                                   offset: const Offset(0, 10),
-                                )
+                                ),
                               ],
                             ),
-                            child: _ForestFace(offsetX: _eyeOffsetX, offsetY: _eyeOffsetY),
+                            child: _ForestFace(
+                              offsetX: _eyeOffsetX,
+                              offsetY: _eyeOffsetY,
+                            ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // --- BAŞLIKLAR ---
                         Text(
                           'Hesap Oluştur',
@@ -358,7 +372,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           ),
                         ),
                         const SizedBox(height: 32),
-                        
+
                         // --- KULLANICI ADI ---
                         _buildStyledTextFormField(
                           controller: _username,
@@ -380,7 +394,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           },
                         ),
                         const SizedBox(height: 16),
-                        
+
                         // --- E-POSTA ---
                         _buildStyledTextFormField(
                           controller: _email,
@@ -394,12 +408,13 @@ class _RegisterPageState extends State<RegisterPage> {
                           }),
                           validator: (v) {
                             if (v == null || v.isEmpty) return 'Zorunlu alan';
-                            if (!v.contains('@')) return 'Geçerli bir e-posta gir';
+                            if (!v.contains('@'))
+                              return 'Geçerli bir e-posta gir';
                             return null;
                           },
                         ),
                         const SizedBox(height: 16),
-                        
+
                         // --- ŞİFRE ---
                         _buildStyledTextFormField(
                           controller: _password,
@@ -408,7 +423,8 @@ class _RegisterPageState extends State<RegisterPage> {
                           primaryColor: primaryGreen,
                           isPassword: true,
                           isVisible: !_obscure1,
-                          onVisibilityToggle: () => setState(() => _obscure1 = !_obscure1),
+                          onVisibilityToggle: () =>
+                              setState(() => _obscure1 = !_obscure1),
                           onTap: () => setState(() {
                             _eyeOffsetX = 0;
                             _eyeOffsetY = 10;
@@ -420,7 +436,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           },
                         ),
                         const SizedBox(height: 16),
-                        
+
                         // --- ŞİFRE TEKRAR ---
                         _buildStyledTextFormField(
                           controller: _confirm,
@@ -429,18 +445,20 @@ class _RegisterPageState extends State<RegisterPage> {
                           primaryColor: primaryGreen,
                           isPassword: true,
                           isVisible: !_obscure2,
-                          onVisibilityToggle: () => setState(() => _obscure2 = !_obscure2),
+                          onVisibilityToggle: () =>
+                              setState(() => _obscure2 = !_obscure2),
                           onTap: () => setState(() {
                             _eyeOffsetX = 0;
                             _eyeOffsetY = 10;
                           }),
                           validator: (v) {
                             if (v == null || v.isEmpty) return 'Zorunlu alan';
-                            if (v != _password.text) return 'Şifreler uyuşmuyor';
+                            if (v != _password.text)
+                              return 'Şifreler uyuşmuyor';
                             return null;
                           },
                         ),
-                        
+
                         const SizedBox(height: 24),
 
                         // --- 1. KULLANICI SÖZLEŞMESİ ---
@@ -453,8 +471,10 @@ class _RegisterPageState extends State<RegisterPage> {
                               child: Checkbox(
                                 value: _agreedToTerms,
                                 activeColor: primaryGreen,
-                                onChanged: (v) => setState(() => _agreedToTerms = v ?? false),
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                onChanged: (v) =>
+                                    setState(() => _agreedToTerms = v ?? false),
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -462,7 +482,10 @@ class _RegisterPageState extends State<RegisterPage> {
                               child: RichText(
                                 text: TextSpan(
                                   text: 'Kaydol butonuna basarak ',
-                                  style: const TextStyle(color: Colors.black87, fontSize: 13),
+                                  style: const TextStyle(
+                                    color: Colors.black87,
+                                    fontSize: 13,
+                                  ),
                                   children: [
                                     TextSpan(
                                       text: 'Kullanıcı Sözleşmesini',
@@ -474,7 +497,10 @@ class _RegisterPageState extends State<RegisterPage> {
                                       recognizer: TapGestureRecognizer()
                                         ..onTap = _showTermsDialog,
                                     ),
-                                    const TextSpan(text: ' okuduğumu ve kabul ettiğimi onaylıyorum.'),
+                                    const TextSpan(
+                                      text:
+                                          ' okuduğumu ve kabul ettiğimi onaylıyorum.',
+                                    ),
                                   ],
                                 ),
                               ),
@@ -494,17 +520,23 @@ class _RegisterPageState extends State<RegisterPage> {
                               child: Checkbox(
                                 value: _allowMail,
                                 activeColor: primaryGreen,
-                                onChanged: (v) => setState(() => _allowMail = v ?? false),
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                onChanged: (v) =>
+                                    setState(() => _allowMail = v ?? false),
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: GestureDetector(
-                                onTap: () => setState(() => _allowMail = !_allowMail),
+                                onTap: () =>
+                                    setState(() => _allowMail = !_allowMail),
                                 child: Text(
                                   'Cinematch hakkındaki yeniliklerden e-posta yoluyla haberdar olmak istiyorum.',
-                                  style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                                  style: TextStyle(
+                                    color: Colors.grey[700],
+                                    fontSize: 13,
+                                  ),
                                 ),
                               ),
                             ),
@@ -531,17 +563,23 @@ class _RegisterPageState extends State<RegisterPage> {
                                 ? const SizedBox(
                                     height: 24,
                                     width: 24,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
                                   )
                                 : const Text(
                                     'Kaydol',
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                           ),
                         ),
-                        
+
                         const SizedBox(height: 24),
-                        
+
                         // --- ZATEN HESABIN VAR MI? ---
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -612,7 +650,9 @@ class _RegisterPageState extends State<RegisterPage> {
           suffixIcon: isPassword
               ? IconButton(
                   icon: Icon(
-                    isVisible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                    isVisible
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
                     color: Colors.grey[400],
                   ),
                   onPressed: onVisibilityToggle,

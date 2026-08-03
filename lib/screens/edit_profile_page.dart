@@ -1,10 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fluttergirdi/services/user_profile_service.dart';
 import 'package:fluttergirdi/services/letterboxd_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_functions/cloud_functions.dart'; // TMDB araması için eklendi
@@ -261,15 +263,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
       await LetterboxdService.fullSyncOnboarding(
         uid: user.uid,
         lbUsername: currLb,
+        source: 'manual_edit_profile',
       );
-
-      await FirebaseFirestore.instance
-          .collection('userTasteProfiles')
-          .doc(user.uid)
-          .set({
-            'refreshRequestedAt': FieldValue.serverTimestamp(),
-            'refreshSource': 'manual_edit_profile',
-          }, SetOptions(merge: true));
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -278,13 +273,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
           backgroundColor: Color(0xFF2E7D32),
         ),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Letterboxd yenileme hatası: $e');
+      debugPrintStack(stackTrace: stackTrace);
       if (!mounted) return;
+      final message = e is LetterboxdSyncException
+          ? e.message
+          : 'Letterboxd verileri güncellenemedi. Lütfen tekrar dene.';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Yenileme hatası: $e'),
-          backgroundColor: Colors.redAccent,
-        ),
+        SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -426,7 +423,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
 
       Map<String, dynamic> payload = {};
-      if (uploadedPhotoUrl != null) payload['photoURL'] = uploadedPhotoUrl;
+      if (uploadedPhotoUrl != null) {
+        payload['photoURL'] = uploadedPhotoUrl;
+        payload['photoUrl'] = FieldValue.delete();
+      }
 
       if (username.isNotEmpty) {
         payload['username'] = username;
@@ -488,6 +488,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
           await LetterboxdService.fullSyncOnboarding(
             uid: user.uid,
             lbUsername: currLb,
+            source: 'profile_username_change',
           );
         } catch (_) {}
       } else {
@@ -1180,15 +1181,24 @@ class _TMDBPersonSearchSheet extends StatefulWidget {
 
 class _TMDBPersonSearchSheetState extends State<_TMDBPersonSearchSheet> {
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  int _searchRequestId = 0;
   List<dynamic> _searchResults = [];
   bool _isLoading = false;
 
   Future<void> _searchTMDB(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() => _searchResults = []);
+    final normalizedQuery = query.trim();
+    if (!mounted) return;
+    if (normalizedQuery.isEmpty) {
+      _searchRequestId++;
+      setState(() {
+        _searchResults = [];
+        _isLoading = false;
+      });
       return;
     }
 
+    final requestId = ++_searchRequestId;
     setState(() => _isLoading = true);
 
     try {
@@ -1196,10 +1206,10 @@ class _TMDBPersonSearchSheetState extends State<_TMDBPersonSearchSheet> {
           .httpsCallable('callTMDB')
           .call({
             'endpoint': '/3/search/person',
-            'params': {'query': query, 'language': 'tr-TR'},
+            'params': {'query': normalizedQuery, 'language': 'tr-TR'},
           });
 
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           // Gelen tüm sonuçları al
           List<dynamic> allResults = result.data['results'] ?? [];
@@ -1219,13 +1229,39 @@ class _TMDBPersonSearchSheetState extends State<_TMDBPersonSearchSheet> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Arama hatası: $e')));
       }
     }
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    if (value.trim().isEmpty) {
+      _searchTMDB(value);
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 600), () {
+      if (mounted && _searchController.text == value) {
+        _searchTMDB(value);
+      }
+    });
+  }
+
+  void _onSearchSubmitted(String value) {
+    _searchDebounce?.cancel();
+    _searchTMDB(value);
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchRequestId++;
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -1275,14 +1311,8 @@ class _TMDBPersonSearchSheetState extends State<_TMDBPersonSearchSheet> {
               filled: true,
               fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
             ),
-            onChanged: (val) {
-              Future.delayed(const Duration(milliseconds: 600), () {
-                if (_searchController.text == val) {
-                  _searchTMDB(val);
-                }
-              });
-            },
-            onSubmitted: _searchTMDB,
+            onChanged: _onSearchChanged,
+            onSubmitted: _onSearchSubmitted,
           ),
           const SizedBox(height: 16),
           SizedBox(
