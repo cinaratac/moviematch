@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/initial_loading_screen.dart';
 import 'package:fluttergirdi/services/registration_state.dart';
-
+import 'package:fluttergirdi/widgets/branded_splash.dart';
 import '../onboarding/letterboxd_onboarding.dart';
 import 'email_verification_page.dart';
 import 'google_register_page.dart';
@@ -96,12 +96,25 @@ class _RegistrationGateState extends State<_RegistrationGate> {
   }
 }
 
+// import'lara ekle:
+
+
+// _GateLoading'i değiştir:
 class _GateLoading extends StatelessWidget {
   const _GateLoading();
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    return const Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40.0),
+            child: BrandedSplash(),
+          ),
+        ),
+      ),
+    );
   }
 }
 

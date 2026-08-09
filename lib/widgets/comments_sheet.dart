@@ -930,16 +930,17 @@ class _CommentTile extends StatelessWidget {
     );
   }
 
-  String _formatTime(DateTime date) {
-    final diff = DateTime.now().difference(date);
-    if (diff.inMinutes < 1) return 'şimdi';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}dk';
-    if (diff.inHours < 24) return '${diff.inHours}s';
-    if (diff.inDays < 7) return '${diff.inDays}g';
-    if (diff.inDays < 30) return '${diff.inDays ~/ 7}hf';
-    if (diff.inDays < 365) return '${diff.inDays ~/ 30}ay';
-    return '${diff.inDays ~/ 365}y';
-  }
+  
+}
+String _formatTime(DateTime date) {
+  final diff = DateTime.now().difference(date);
+  if (diff.inMinutes < 1) return 'şimdi';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}dk';
+  if (diff.inHours < 24) return '${diff.inHours}s';
+  if (diff.inDays < 7) return '${diff.inDays}g';
+  if (diff.inDays < 30) return '${diff.inDays ~/ 7}hf';
+  if (diff.inDays < 365) return '${diff.inDays ~/ 30}ay';
+  return '${diff.inDays ~/ 365}y';
 }
 
 class _SubRepliesList extends StatefulWidget {
@@ -1042,6 +1043,7 @@ class _SubReplyTile extends StatelessWidget {
     final movieData = data['movie'] as Map<String, dynamic>?;
     final replyToUid = (data['replyToUid'] ?? '').toString();
     final replyToUserName = (data['replyToUserName'] ?? '').toString();
+    final createdAt = (data['createdAt'] as Timestamp?)?.toDate(); // ← YENİ
 
     return FutureBuilder<DocumentSnapshot>(
       future: FirebaseFirestore.instance
@@ -1079,17 +1081,34 @@ class _SubReplyTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
-                      onTap: () => _openCommentAuthorProfile(context, authorId),
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: GestureDetector(
+                            onTap: () =>
+                                _openCommentAuthorProfile(context, authorId),
+                            child: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                        if (createdAt != null) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            _formatTime(createdAt),
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     if (text.isNotEmpty)
