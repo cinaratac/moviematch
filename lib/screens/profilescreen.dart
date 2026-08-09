@@ -29,6 +29,7 @@ import 'package:fluttergirdi/models/custom_list.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
 import 'package:fluttergirdi/services/gamification_service.dart';
+import 'package:fluttergirdi/services/poster_fallback_service.dart';
 
 // --- MODEL SINIFLARI ---
 
@@ -520,7 +521,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
   }
 
-  Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
+ Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     final posterWidth = profilePosterWidth(context);
     final posterHeight = profilePosterHeight(context);
 
@@ -531,29 +532,30 @@ class _ProfilePageState extends State<ProfilePage> {
     if (keys.isEmpty) {
       return SizedBox(
         height: posterHeight,
-        child: SingleChildScrollView(
+        child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              SizedBox(
-                width: posterWidth,
-                child: _AddPosterTile(
-                  target: ShelfTarget.watchlist,
-                  onRefresh: onReturnFromSearch,
-                ),
-              ),
-            ],
+          itemCount: 1,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, i) => SizedBox(
+            width: posterWidth,
+            child: _AddPosterTile(
+              target: ShelfTarget.watchlist,
+              onRefresh: onReturnFromSearch,
+            ),
           ),
         ),
       );
     }
+
     final limited = keys.take(maxItems).toList();
-    final hash = limited.join('|');
+    // Cache çakışmalarını önlemek için başına alan adını ekledik
+    final hash = 'watchlistKeys:' + limited.join('|');
     final future = _watchlistFutureCache[hash] ??= CatalogService()
         .getFilmsByKeys(limited)
         .then(
           (films) => films.map<Map<String, dynamic>?>((film) => film).toList(),
         );
+
     return FutureBuilder<List<Map<String, dynamic>?>>(
       future: future,
       builder: (context, filmSnap) {
@@ -565,7 +567,6 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         }
 
-        // EKSİK OLAN SATIRLAR BURADAYDI (films değişkeni tanımlanıyor)
         final films = (filmSnap.data ?? [])
             .where((m) => m != null)
             .map((m) => m!)
@@ -574,93 +575,84 @@ class _ProfilePageState extends State<ProfilePage> {
 
         return SizedBox(
           height: posterHeight,
-          child: SingleChildScrollView(
+          // Row yerine diğer listelerdeki gibi ListView.separated kullanıyoruz
+          child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (int i = 0; i < films.length; i++) ...[
-                  Builder(
-                    builder: (context) {
-                      final film = films[i];
-                      final poster =
-                          (film['poster'] ??
-                                  film['posterUrl'] ??
-                                  film['image'] ??
-                                  '')
-                              .toString();
-                      final title = (film['title'] ?? '') as String;
-                      final docId = (film['docId'] ?? '').toString();
-                      final tmdbId = _extractTmdbId(film);
-
-                      return GestureDetector(
-                        onTap: () {
-                          if (title.isNotEmpty) {
-                            MovieActionHelper.show(
-                              context,
-                              title: title,
-                              posterUrl: poster,
-                              docId: docId,
-                              tmdbId: tmdbId,
-                              target: ShelfTarget.watchlist,
-                              onItemDeleted: () =>
-                                  setState(() => _watchlistFutureCache.clear()),
-                            );
-                          }
-                        },
-                        child: SizedBox(
-                          width: posterWidth,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                PosterImage(
-                                  posterUrl: poster,
-                                  title: title,
-                                  tmdbId: tmdbId,
-                                  fit: BoxFit.cover,
-                                ),
-                                if (title.isNotEmpty)
-                                  Align(
-                                    alignment: Alignment.bottomCenter,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 4,
-                                      ),
-                                      color: Colors.black54,
-                                      width: double.infinity,
-                                      child: Text(
-                                        _noYear(title),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                // Ekleme Butonu
-                SizedBox(
+            itemCount: films.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              // Son eleman her zaman "+" ekleme butonu
+              if (i == films.length) {
+                return SizedBox(
                   width: posterWidth,
                   child: _AddPosterTile(
                     target: ShelfTarget.watchlist,
                     onRefresh: onReturnFromSearch,
                   ),
+                );
+              }
+
+              final film = films[i];
+              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
+              final title = (film['title'] ?? '') as String;
+              final docId = (film['docId'] ?? '').toString();
+              final tmdbId = _extractTmdbId(film);
+
+              return GestureDetector(
+                onTap: () {
+                  if (title.isNotEmpty) {
+                    MovieActionHelper.show(
+                      context,
+                      title: title,
+                      posterUrl: poster,
+                      docId: docId,
+                      tmdbId: tmdbId,
+                      target: ShelfTarget.watchlist,
+                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
+                    );
+                  }
+                },
+                child: SizedBox(
+                  width: posterWidth,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        PosterImage(
+                          posterUrl: poster,
+                          title: title,
+                          tmdbId: tmdbId,
+                          fit: BoxFit.cover,
+                        ),
+                        if (title.isNotEmpty)
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              color: Colors.black54,
+                              width: double.infinity,
+                              child: Text(
+                                _noYear(title),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-              ],
-            ),
+              );
+            },
           ),
         );
       },
@@ -2049,6 +2041,81 @@ class _AddPosterTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Katalogdan (catalog_films) gelen posterUrl boşsa (henüz sunucu tarafından
+/// yazılmamışsa), movie_detail_screen'in yaptığı gibi otomatik olarak
+/// PosterFallbackService üzerinden TMDB'den taze posteri çeker ve rebuild eder.
+/// posterUrl doluysa hiçbir ekstra ağ çağrısı yapmadan direkt PosterImage'a geçer.
+class _ShelfPosterImage extends StatefulWidget {
+  final String posterUrl;
+  final String title;
+  final int? tmdbId;
+  final BoxFit fit;
+
+  const _ShelfPosterImage({
+    required this.posterUrl,
+    required this.title,
+    required this.tmdbId,
+    required this.fit,
+  });
+
+  @override
+  State<_ShelfPosterImage> createState() => _ShelfPosterImageState();
+}
+
+class _ShelfPosterImageState extends State<_ShelfPosterImage> {
+  String? _resolvedUrl;
+  bool _isResolving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeResolve();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ShelfPosterImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // FutureBuilder cache'i yenilenip farklı bir film geldiğinde tekrar dene.
+    if (oldWidget.posterUrl != widget.posterUrl ||
+        oldWidget.tmdbId != widget.tmdbId) {
+      _resolvedUrl = null;
+      _maybeResolve();
+    }
+  }
+
+  void _maybeResolve() {
+    if (widget.posterUrl.trim().isNotEmpty) return; // Katalog zaten vermiş
+    if (_isResolving) return;
+    _isResolving = true;
+    PosterFallbackService.instance
+        .resolvePosterUrl(
+          existing: widget.posterUrl,
+          tmdbId: widget.tmdbId,
+          title: widget.title,
+        )
+        .then((url) {
+          if (!mounted) return;
+          setState(() {
+            _resolvedUrl = url;
+            _isResolving = false;
+          });
+        });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveUrl = widget.posterUrl.trim().isNotEmpty
+        ? widget.posterUrl
+        : (_resolvedUrl ?? '');
+    return PosterImage(
+      posterUrl: effectiveUrl,
+      title: widget.title,
+      tmdbId: widget.tmdbId,
+      fit: widget.fit,
     );
   }
 }

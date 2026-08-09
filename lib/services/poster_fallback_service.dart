@@ -26,47 +26,46 @@ class PosterFallbackService {
     int? year,
     bool ignoreExisting = false,
   }) async {
-    final cacheKey = [
-      tmdbId?.toString() ?? '',
-      imdbId?.trim() ?? '',
-      title?.toLowerCase().trim() ?? '',
-      year?.toString() ?? '',
-    ].join('|');
-    final cached = _resolvedCache[cacheKey];
-    if (cached != null) return cached;
+    // Sadece başlığa göre cache anahtarı oluşturuyoruz
+    final cacheKey = title?.toLowerCase().trim() ?? tmdbId?.toString() ?? '';
+    
+    if (_resolvedCache.containsKey(cacheKey)) {
+      return _resolvedCache[cacheKey];
+    }
 
     if (!ignoreExisting && _looksValid(existing)) {
-      if (cacheKey.replaceAll('|', '').isNotEmpty) {
-        _resolvedCache[cacheKey] = existing!.trim();
-      }
       return existing;
     }
 
-    if ((tmdbId == null || tmdbId <= 0) &&
-        (imdbId == null || imdbId.trim().isEmpty) &&
-        (title == null || title.trim().isEmpty)) {
-      return null;
+    // KÖKTEN ÇÖZÜM: Elimizde tmdbId veya hiçbir şey olmasa bile, sadece filmin ADI (title) varsa
+    // arama ekranında tıkır tıkır çalışan 'searchMovies' fonksiyonunu tetikleyip afişi zorla çekiyoruz!
+    if (title != null && title.trim().isNotEmpty) {
+      try {
+        final response = await FirebaseFunctions.instance
+            .httpsCallable('searchMovies') // TMDB'den arama yapan sağlam fonksiyonumuz
+            .call({'query': title.trim()});
+
+        final data = response.data;
+        if (data != null && data['results'] != null) {
+          final results = data['results'] as List;
+          if (results.isNotEmpty) {
+            // Arama sonucundaki ilk filmin afişini al
+            final posterPath = results[0]['poster_path'];
+            if (posterPath != null && posterPath.toString().isNotEmpty) {
+              final posterUrl = 'https://image.tmdb.org/t/p/w500$posterPath';
+              
+              if (cacheKey.isNotEmpty) {
+                _resolvedCache[cacheKey] = posterUrl;
+              }
+              return posterUrl;
+            }
+          }
+        }
+      } catch (e) {
+        // Fonksiyon patlarsa sessizce geç
+      }
     }
 
-    try {
-      final response = await FirebaseFunctions.instance
-          .httpsCallable('resolveCatalogMovie')
-          .call({
-            if (tmdbId != null && tmdbId > 0) 'tmdbId': tmdbId,
-            if (imdbId != null && imdbId.trim().isNotEmpty)
-              'imdbId': imdbId.trim(),
-            if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
-            if (year != null && year > 0) 'year': year,
-          });
-      final data = Map<String, dynamic>.from(response.data as Map);
-      final posterUrl = data['posterUrl']?.toString().trim();
-      if (data['ok'] != true || !_looksValid(posterUrl)) return null;
-      if (cacheKey.replaceAll('|', '').isNotEmpty) {
-        _resolvedCache[cacheKey] = posterUrl!;
-      }
-      return posterUrl;
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 }
