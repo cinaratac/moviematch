@@ -948,24 +948,21 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                                           const SizedBox(height: 7),
                                           Row(
                                             children: [
-                                              Expanded(
-                                                child: ProfileStat(
-                                                  label: 'Takipçi',
-                                                  value: _followersCount ?? 0,
-                                                  onTap: () => _showUserList(
-                                                    'Takipçiler',
-                                                    'followers',
-                                                  ),
+                                              ProfileStat(
+                                                label: 'Takipçi',
+                                                value: _followersCount ?? 0,
+                                                onTap: () => _showUserList(
+                                                  'Takipçiler',
+                                                  'followers',
                                                 ),
                                               ),
-                                              Expanded(
-                                                child: ProfileStat(
-                                                  label: 'Takip edilen',
-                                                  value: _followingCount ?? 0,
-                                                  onTap: () => _showUserList(
-                                                    'Takip Edilenler',
-                                                    'following',
-                                                  ),
+                                              const SizedBox(width: 24),
+                                              ProfileStat(
+                                                label: 'Takip edilen',
+                                                value: _followingCount ?? 0,
+                                                onTap: () => _showUserList(
+                                                  'Takip Edilenler',
+                                                  'following',
                                                 ),
                                               ),
                                             ],

@@ -255,23 +255,18 @@ Widget _profileHeaderSection({
                         )
                       : Row(
                           children: [
-                            Expanded(
-                              child: ProfileStat(
-                                label: 'Takipçi',
-                                value: followers,
-                                onTap: () =>
-                                    showUserList('Takipçiler', 'followers'),
-                              ),
+                            ProfileStat(
+                              label: 'Takipçi',
+                              value: followers,
+                              onTap: () =>
+                                  showUserList('Takipçiler', 'followers'),
                             ),
-                            Expanded(
-                              child: ProfileStat(
-                                label: 'Takip edilen',
-                                value: following,
-                                onTap: () => showUserList(
-                                  'Takip Edilenler',
-                                  'following',
-                                ),
-                              ),
+                            const SizedBox(width: 24),
+                            ProfileStat(
+                              label: 'Takip edilen',
+                              value: following,
+                              onTap: () =>
+                                  showUserList('Takip Edilenler', 'following'),
                             ),
                           ],
                         ),
@@ -521,7 +516,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return email.contains('@') ? email.split('@').first : 'Kullanıcı';
   }
 
- Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
+  Widget _watchlistSectionFromKeys(List<String> keys, {int maxItems = 30}) {
     final posterWidth = profilePosterWidth(context);
     final posterHeight = profilePosterHeight(context);
 
@@ -593,7 +588,9 @@ class _ProfilePageState extends State<ProfilePage> {
               }
 
               final film = films[i];
-              final poster = (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '').toString();
+              final poster =
+                  (film['poster'] ?? film['posterUrl'] ?? film['image'] ?? '')
+                      .toString();
               final title = (film['title'] ?? '') as String;
               final docId = (film['docId'] ?? '').toString();
               final tmdbId = _extractTmdbId(film);
@@ -608,7 +605,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       docId: docId,
                       tmdbId: tmdbId,
                       target: ShelfTarget.watchlist,
-                      onItemDeleted: () => setState(() => _watchlistFutureCache.clear()),
+                      onItemDeleted: () =>
+                          setState(() => _watchlistFutureCache.clear()),
                     );
                   }
                 },

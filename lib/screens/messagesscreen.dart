@@ -86,7 +86,7 @@ class _MessagesPageState extends State<MessagesPage>
             overlayColor: WidgetStateProperty.all(Colors.transparent),
             tabs: const [
               Tab(text: 'Sohbetler'),
-              Tab(text: 'Kulüplerim'),
+              Tab(text: 'Odalar'),
             ],
           ),
         ),
@@ -1053,7 +1053,7 @@ class _EmptyMessagesInteractiveState extends State<_EmptyMessagesInteractive> {
   }
 }
 
-// --- KULÜPLER SEKMESİ ---
+// --- Odalar SEKMESİ ---
 class JoinedClubsList extends StatefulWidget {
   final String uid;
 
@@ -1117,7 +1117,7 @@ class _JoinedClubsListState extends State<JoinedClubsList>
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    "Henüz bir kulübe üye değilsin.",
+                    "Henüz bir odaya üye değilsin.",
                     style: TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 24),
@@ -1130,7 +1130,7 @@ class _JoinedClubsListState extends State<JoinedClubsList>
                         ),
                       );
                     },
-                    child: const Text("Yeni Bir Kulüp Kur"),
+                    child: const Text("Yeni Bir Oda Kur"),
                   ),
                   const SizedBox(height: 5),
                   FilledButton.tonal(
@@ -1140,7 +1140,7 @@ class _JoinedClubsListState extends State<JoinedClubsList>
                         MaterialPageRoute(builder: (_) => const ClubsScreen()),
                       );
                     },
-                    child: const Text("Kulüpleri Keşfet"),
+                    child: const Text("Odaları Keşfet"),
                   ),
                 ],
               ),

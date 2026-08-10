@@ -263,7 +263,7 @@ class _HomeShellState extends State<HomeShell> {
               const NavigationDestination(
                 icon: Icon(Icons.person_search_outlined),
                 selectedIcon: Icon(Icons.person_search),
-                label: 'Cinephiles',
+                label: 'Cinematchs',
               ),
               NavigationDestination(
                 icon: _MessagesIcon(),

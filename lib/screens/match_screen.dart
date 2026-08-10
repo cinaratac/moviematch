@@ -101,15 +101,7 @@ class _MatchListScreenState extends State<MatchListScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
-          'Önerilen Sinefiller',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 22,
-            shadows: [Shadow(color: Colors.black54, blurRadius: 10)],
-          ),
-        ),
+        
         centerTitle: true,
       ),
       body: _loading && _all.isEmpty
