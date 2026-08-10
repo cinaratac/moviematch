@@ -244,7 +244,7 @@ class _MovieActionSheetState extends State<_MovieActionSheet> {
             child: Row(
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.zero,
                   child: SizedBox(
                     width: 50,
                     height: 75,

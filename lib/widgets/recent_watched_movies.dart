@@ -157,7 +157,7 @@ class _RecentWatchedPoster extends StatelessWidget {
           children: [
             Expanded(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.zero,
                 child: AspectRatio(
                   aspectRatio: 2 / 3,
                   child: PosterImage(

@@ -1,26 +1,295 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:infinite_carousel/infinite_carousel.dart';
 import '../services/recommendation_engine.dart';
-import '../services/catalog_service.dart';
 import '../widgets/poster_image.dart';
-import '../models/shelf_target.dart';
-import '../screens/profilescreen.dart'; // UserShelfCache için gerekli
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 
-// Extension: SearchMoviePage'deki gibi target -> field dönüşümü
-extension ShelfTargetXLocal on ShelfTarget {
-  String get userArrayField {
-    switch (this) {
-      case ShelfTarget.fiveStar:
-        return 'fiveStarKeys';
-      case ShelfTarget.disliked:
-        return 'dislikedKeys';
-      case ShelfTarget.favorites:
-        return 'favoritesKeys';
-      case ShelfTarget.watchlist:
-        return 'watchlistKeys';
-    }
+const double _posterSnapExtent = 132;
+const double _posterWidth = 132;
+const double _posterCollapsedHeight = 176;
+const double _posterExpandedHeight = 190;
+
+class _RecommendationPosterTile extends StatelessWidget {
+  final MovieRecommendation recommendation;
+  final double focus;
+  final VoidCallback onTap;
+
+  const _RecommendationPosterTile({
+    required this.recommendation,
+    required this.focus,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final easedFocus = Curves.easeOutCubic.transform(focus);
+    const width = _posterWidth;
+    final height =
+        _posterCollapsedHeight +
+        ((_posterExpandedHeight - _posterCollapsedHeight) * easedFocus);
+    final opacity = 0.52 + (0.48 * easedFocus);
+    final selected = focus > 0.62;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: AnimatedOpacity(
+        opacity: opacity,
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOutCubic,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: AnimatedContainer(
+            width: width,
+            height: height,
+            duration: const Duration(milliseconds: 90),
+            curve: Curves.easeOutCubic,
+            decoration: BoxDecoration(
+              border: selected
+                  ? Border.all(
+                      color: Theme.of(context).colorScheme.primary.withValues(
+                        alpha: 0.35 + focus * 0.4,
+                      ),
+                      width: 2,
+                    )
+                  : null,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: 0.2 + (0.22 * easedFocus),
+                  ),
+                  blurRadius: 10 + (10 * easedFocus),
+                  offset: Offset(0, 5 + (5 * easedFocus)),
+                ),
+              ],
+            ),
+            child: Hero(
+              tag: 'poster_${recommendation.tmdbId}',
+              child: RepaintBoundary(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.zero,
+                  child: PosterImage(
+                    key: ValueKey(
+                      'ai-poster-${recommendation.tmdbId}-${recommendation.posterUrl}',
+                    ),
+                    posterUrl: recommendation.posterUrl,
+                    title: recommendation.title,
+                    tmdbId: recommendation.tmdbId,
+                    fit: BoxFit.cover,
+                    cacheWidth: 396,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationDetailsPanel extends StatelessWidget {
+  final MovieRecommendation recommendation;
+
+  const _RecommendationDetailsPanel({super.key, required this.recommendation});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final genres = recommendation.genres.take(3).join(' / ');
+    final overview = recommendation.overview.trim().isEmpty
+        ? recommendation.matchReason
+        : recommendation.overview;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.48),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.24)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    recommendation.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: cs.onSurface,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _RecommendationScorePill(
+                  icon: Icons.star_rounded,
+                  label: recommendation.voteAverage.toStringAsFixed(1),
+                  color: Colors.amber,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (genres.isNotEmpty)
+                  _RecommendationMetaPill(
+                    icon: Icons.movie_filter_rounded,
+                    label: genres,
+                  ),
+                _RecommendationMetaPill(
+                  icon: Icons.favorite_rounded,
+                  label: '%${recommendation.matchScore.toInt()} uyum',
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (recommendation.matchReason.trim().isNotEmpty) ...[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: cs.primary.withValues(alpha: 0.18)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.auto_awesome_rounded,
+                        size: 15,
+                        color: cs.primary,
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Neden \u00f6nerildi?',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: cs.primary,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              recommendation.matchReason,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: cs.onSurface,
+                                height: 1.3,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            Text(
+              overview,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationMetaPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _RecommendationMetaPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: cs.surface.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: cs.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationScorePill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _RecommendationScorePill({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -32,18 +301,95 @@ class RecommendationCard extends StatefulWidget {
 }
 
 class _RecommendationCardState extends State<RecommendationCard>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
   @override
   bool get wantKeepAlive => true;
   List<MovieRecommendation>? _recommendations;
   bool _loading = true;
-  int _currentIndex = 0;
-  bool _actionInProgress = false; // Tıklama koruması
+  int _focusedIndex = 0;
+  int _detailsIndex = 0;
+  final InfiniteScrollController _posterController = InfiniteScrollController();
+  late final AnimationController _detailsController;
+  late final Animation<double> _detailsOpacity;
+  late final Animation<Offset> _detailsOffset;
 
   @override
   void initState() {
     super.initState();
+    _detailsController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    );
+    final detailsCurve = CurvedAnimation(
+      parent: _detailsController,
+      curve: Curves.easeOutCubic,
+    );
+    _detailsOpacity = Tween<double>(begin: 0, end: 1).animate(detailsCurve);
+    _detailsOffset = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(detailsCurve);
     _loadRecommendations();
+  }
+
+  @override
+  void dispose() {
+    _posterController.dispose();
+    _detailsController.dispose();
+    super.dispose();
+  }
+
+  void _selectRecommendation(
+    int index, {
+    bool animateScroll = true,
+    bool animateDetails = true,
+  }) {
+    final recommendations = _recommendations;
+    if (recommendations == null || recommendations.isEmpty) return;
+
+    final clampedIndex = index.clamp(0, recommendations.length - 1);
+    final detailsChanged = clampedIndex != _detailsIndex;
+
+    setState(() {
+      _focusedIndex = clampedIndex;
+      _detailsIndex = clampedIndex;
+    });
+    if (detailsChanged && animateDetails) {
+      _detailsController.forward(from: 0);
+    }
+
+    if (!animateScroll || !_posterController.hasClients) return;
+
+    _posterController.animateToItem(
+      clampedIndex,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  void _openMovieDetail(MovieRecommendation recommendation) {
+    if (recommendation.tmdbId == 0) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MovieDetailScreen(
+          tmdbId: recommendation.tmdbId,
+          title: recommendation.title,
+          posterUrl: recommendation.posterUrl,
+        ),
+      ),
+    );
+  }
+
+  void _handleCarouselIndexChanged(int index) {
+    if (index == _detailsIndex && index == _focusedIndex) return;
+
+    setState(() {
+      _focusedIndex = index;
+      _detailsIndex = index;
+    });
+    _detailsController.forward(from: 0);
   }
 
   Future<void> _loadRecommendations({bool forceRefresh = false}) async {
@@ -64,7 +410,10 @@ class _RecommendationCardState extends State<RecommendationCard>
         setState(() {
           _recommendations = recs;
           _loading = false;
+          _focusedIndex = 0;
+          _detailsIndex = 0;
         });
+        _detailsController.forward(from: 0);
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
@@ -90,12 +439,12 @@ class _RecommendationCardState extends State<RecommendationCard>
             ),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: cs.outlineVariant.withOpacity(0.2),
+              color: cs.outlineVariant.withValues(alpha: 0.2),
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.4),
+                color: Colors.black.withValues(alpha: 0.4),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -108,11 +457,11 @@ class _RecommendationCardState extends State<RecommendationCard>
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: cs.primary.withOpacity(0.1),
+                  color: cs.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: cs.primary.withOpacity(0.2),
+                      color: cs.primary.withValues(alpha: 0.2),
                       blurRadius: 20,
                       spreadRadius: -5,
                     ),
@@ -124,7 +473,7 @@ class _RecommendationCardState extends State<RecommendationCard>
               const SizedBox(height: 20),
 
               Text(
-                'Sistem Nasıl Çalışıyor?',
+                'Sistem Nas\u0131l \u00c7al\u0131\u015f\u0131yor?',
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                   letterSpacing: -0.5,
@@ -137,17 +486,17 @@ class _RecommendationCardState extends State<RecommendationCard>
               _buildFancyInfoItem(
                 context,
                 icon: Icons.person_search_rounded,
-                title: 'Sana Özel Analiz',
+                title: 'Sana \u00d6zel Analiz',
                 desc:
-                    'Sevdiğin türler, yönetmenler ve izleme geçmişin yapay zeka ile analiz edilir.',
+                    'Ge\u00e7mi\u015fin, y\u00f6netmenlerin ve sevdi\u011fin oyuncular taran\u0131yor.',
               ),
               const SizedBox(height: 16),
               _buildFancyInfoItem(
                 context,
                 icon: Icons.calendar_month_rounded,
-                title: 'Haftalık Yenilenme',
+                title: 'Haftal\u0131k Yenilenme',
                 desc:
-                    'Her hafta listen sıfırlanır ve keşfetmen için yepyeni, taze öneriler getirilir.',
+                    'Her hafta listen s\u0131f\u0131rlan\u0131r ve ke\u015ffetmen i\u00e7in yepyeni, taze \u00f6neriler getirilir.',
               ),
 
               const SizedBox(height: 28),
@@ -164,7 +513,7 @@ class _RecommendationCardState extends State<RecommendationCard>
                   ),
                   onPressed: () => Navigator.pop(context),
                   child: const Text(
-                    'Süper, Anlaşıldı',
+                    'S\u00fcper, Anla\u015f\u0131ld\u0131',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -222,122 +571,6 @@ class _RecommendationCardState extends State<RecommendationCard>
     );
   }
 
-  void _nextRecommendation() {
-    if (_recommendations == null || _recommendations!.isEmpty) return;
-    setState(() {
-      _currentIndex = (_currentIndex + 1) % _recommendations!.length;
-    });
-  }
-
-  void _previousRecommendation() {
-    if (_recommendations == null || _recommendations!.isEmpty) return;
-    setState(() {
-      _currentIndex =
-          (_currentIndex - 1 + _recommendations!.length) %
-          _recommendations!.length;
-    });
-  }
-
-  Future<void> _addToShelf(ShelfTarget target) async {
-    if (_recommendations == null || _recommendations!.isEmpty) return;
-    final rec = _recommendations![_currentIndex];
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    setState(() => _actionInProgress = true);
-
-    try {
-      final db = FirebaseFirestore.instance;
-
-      final tmdbId = rec.tmdbId;
-      final title = rec.title;
-      final posterUrl = rec.posterUrl;
-
-      final primaryKey = await CatalogService().upsertFromTmdb({
-        'id': tmdbId,
-        'title': title,
-        'release_date': rec.releaseDate,
-      });
-      if (primaryKey == null) {
-        throw StateError('Film güvenli kataloğa kaydedilemedi.');
-      }
-
-      final String userArrayField = target.userArrayField;
-      await db.collection('users').doc(uid).set({
-        userArrayField: FieldValue.arrayUnion([primaryKey]),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // DÜZELTME: Alan isimleri 'loved' ve 'disliked' olarak güncellendi (UserProfileService ile uyumlu olması için)
-      if (target == ShelfTarget.fiveStar) {
-        await db.collection('userTasteProfiles').doc(uid).set({
-          'loved': FieldValue.arrayUnion([
-            primaryKey,
-          ]), // 'fiveStars' -> 'loved'
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      } else if (target == ShelfTarget.disliked) {
-        await db.collection('userTasteProfiles').doc(uid).set({
-          'disliked': FieldValue.arrayUnion([
-            primaryKey,
-          ]), // 'lowRatings' -> 'disliked'
-          'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      }
-
-      try {
-        final Map<String, String> newLocalItem = {
-          'title': title,
-          'poster': posterUrl,
-          'posterUrl': posterUrl,
-        };
-        switch (target) {
-          case ShelfTarget.fiveStar:
-            UserShelfCache.fiveStar = List.from(UserShelfCache.fiveStar)
-              ..add(newLocalItem);
-            break;
-          case ShelfTarget.favorites:
-            UserShelfCache.favorites = List.from(UserShelfCache.favorites)
-              ..add(newLocalItem);
-            break;
-          case ShelfTarget.watchlist:
-            UserShelfCache.watchlist = List.from(UserShelfCache.watchlist)
-              ..add(newLocalItem);
-            break;
-          case ShelfTarget.disliked:
-            UserShelfCache.disliked = List.from(UserShelfCache.disliked)
-              ..add(newLocalItem);
-            break;
-        }
-      } catch (e) {
-        debugPrint('Cache güncelleme hatası: $e');
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${rec.title} listene eklendi!'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-          ),
-        );
-        setState(() {
-          _recommendations!.removeAt(_currentIndex);
-          if (_currentIndex >= _recommendations!.length) {
-            _currentIndex = 0;
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _actionInProgress = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -364,7 +597,7 @@ class _RecommendationCardState extends State<RecommendationCard>
               const CircularProgressIndicator(),
               const SizedBox(height: 20),
               Text(
-                'Yapay zeka sana göre filmler seçiyor...',
+                'Yapay zeka sana g\u00f6re filmler se\u00e7iyor...',
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: cs.onPrimaryContainer,
                   fontWeight: FontWeight.bold,
@@ -373,9 +606,9 @@ class _RecommendationCardState extends State<RecommendationCard>
               ),
               const SizedBox(height: 6),
               Text(
-                'Geçmişin, yönetmenlerin ve sevdiğin oyuncular taranıyor.',
+                'Sevdi\u011fin t\u00fcrler, y\u00f6netmenler ve izleme ge\u00e7mi\u015fin yapay zeka ile analiz edilir.',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onPrimaryContainer.withOpacity(0.7),
+                  color: cs.onPrimaryContainer.withValues(alpha: 0.7),
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -389,22 +622,21 @@ class _RecommendationCardState extends State<RecommendationCard>
       return const SizedBox.shrink();
     }
 
-    final recommendation = _recommendations![_currentIndex];
+    final recommendations = _recommendations!;
+    final detailsIndex = _detailsIndex.clamp(0, recommendations.length - 1);
+    final recommendation = recommendations[detailsIndex];
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [cs.primaryContainer, cs.secondaryContainer],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.28)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -419,14 +651,13 @@ class _RecommendationCardState extends State<RecommendationCard>
                 Icon(Icons.auto_awesome, color: cs.primary, size: 20),
                 const SizedBox(width: 8),
                 Text(
-                  'Haftalık Keşif Listen',
+                  'Haftal\u0131k Ke\u015fif Listen',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: cs.onPrimaryContainer,
+                    color: cs.onSurface,
                   ),
                 ),
                 const Spacer(),
-
                 SizedBox(
                   height: 32,
                   width: 32,
@@ -435,187 +666,57 @@ class _RecommendationCardState extends State<RecommendationCard>
                     iconSize: 20,
                     icon: Icon(
                       Icons.info_outline,
-                      color: cs.onSurfaceVariant.withOpacity(0.7),
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.72),
                     ),
-                    tooltip: 'Bu liste nasıl oluşuyor?',
+                    tooltip: 'Bu liste nas\u0131l olu\u015fuyor?',
                     onPressed: _showInfoDialog,
                   ),
                 ),
               ],
             ),
           ),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: 100,
-                    height: 150,
-                    // Tıklama özelliği eklendi:
-                    child: GestureDetector(
-                      onTap: () {
-                        if (recommendation.tmdbId != 0) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => MovieDetailScreen(
-                                tmdbId: recommendation.tmdbId,
-                                title: recommendation.title,
-                                posterUrl: recommendation.posterUrl,
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      child: PosterImage(
-                        posterUrl: recommendation.posterUrl,
-                        title: recommendation.title,
-                        tmdbId: recommendation.tmdbId,
-                        fit: BoxFit.cover,
-                        cacheWidth: 300,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        recommendation.title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 6),
-
-                      Row(
-                        children: [
-                          Icon(Icons.favorite, size: 14, color: Colors.red),
-                          const SizedBox(width: 4),
-                          Text(
-                            '%${recommendation.matchScore.toInt()} Uyum',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: cs.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: cs.surface.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          recommendation.matchReason,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontSize: 11,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-
-                      Row(
-                        children: [
-                          const Icon(Icons.star, size: 14, color: Colors.amber),
-                          const SizedBox(width: 4),
-                          Text(
-                            recommendation.voteAverage.toStringAsFixed(1),
-                            style: theme.textTheme.labelMedium,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-
-                      if (recommendation.genres.isNotEmpty)
-                        SizedBox(
-                          height: 20,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: recommendation.genres.take(3).length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(width: 4),
-                            itemBuilder: (ctx, i) {
-                              return Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                ),
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: cs.surface.withOpacity(0.3),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  recommendation.genres[i],
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+          SizedBox(
+            height: 190,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: InfiniteCarousel.builder(
+                controller: _posterController,
+                itemCount: recommendations.length,
+                itemExtent: _posterSnapExtent,
+                center: false,
+                anchor: 0,
+                loop: false,
+                velocityFactor: 0.12,
+                onIndexChanged: _handleCarouselIndexChanged,
+                itemBuilder: (context, itemIndex, realIndex) {
+                  final rec = recommendations[itemIndex];
+                  final focus = itemIndex == _focusedIndex ? 1.0 : 0.0;
+                  return _RecommendationPosterTile(
+                    recommendation: rec,
+                    focus: focus,
+                    onTap: () {
+                      if (itemIndex == _detailsIndex) {
+                        _openMovieDetail(rec);
+                        return;
+                      }
+                      _selectRecommendation(itemIndex);
+                    },
+                  );
+                },
+              ),
             ),
           ),
-
-          const SizedBox(height: 12),
-
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: cs.surface.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.chevron_left, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32),
-                        onPressed: _previousRecommendation,
-                      ),
-                      Text(
-                        '${_currentIndex + 1}/${_recommendations!.length}',
-                        style: theme.textTheme.labelSmall,
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.chevron_right, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32),
-                        onPressed: _nextRecommendation,
-                      ),
-                    ],
-                  ),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: FadeTransition(
+              opacity: _detailsOpacity,
+              child: SlideTransition(
+                position: _detailsOffset,
+                child: _RecommendationDetailsPanel(
+                  key: ValueKey(recommendation.tmdbId),
+                  recommendation: recommendation,
                 ),
-              ],
+              ),
             ),
           ),
         ],

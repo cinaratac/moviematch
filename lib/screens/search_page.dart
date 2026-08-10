@@ -6,6 +6,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/utils/layout_metrics.dart';
+import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
+import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'actors_screen.dart';
@@ -259,7 +262,9 @@ class _PeopleSearchResult {
 }
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({super.key, this.showDiscoverContentWhenEmpty = false});
+
+  final bool showDiscoverContentWhenEmpty;
 
   static Future<void> preloadRecents() async {
     await _SearchRecentsCache.load();
@@ -280,8 +285,6 @@ class _SearchPageState extends State<SearchPage> {
 
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-  final ScrollController _resultsController = ScrollController();
-
   final Map<_SearchKind, List<_UnifiedSearchItem>> _results = {
     _SearchKind.movie: [],
     _SearchKind.actor: [],
@@ -293,7 +296,7 @@ class _SearchPageState extends State<SearchPage> {
   final Set<_SearchKind> _failedKinds = {};
 
   List<_UnifiedSearchItem> _recentItems = [];
-  _SearchKind _filter = _SearchKind.all;
+  final Set<_SearchKind> _selectedFilters = {};
   Timer? _debounce;
   String _activeQuery = '';
   int _requestId = 0;
@@ -312,7 +315,6 @@ class _SearchPageState extends State<SearchPage> {
     } else {
       unawaited(_hydrateRecents());
     }
-    _resultsController.addListener(_handleResultScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _searchFocusNode.requestFocus();
@@ -323,8 +325,6 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _requestId++;
     _debounce?.cancel();
-    _resultsController.removeListener(_handleResultScroll);
-    _resultsController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -379,14 +379,15 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Set<_SearchKind> get _desiredKinds =>
-      _filter == _SearchKind.all ? _contentKinds : {_filter};
+      _selectedFilters.isEmpty ? _contentKinds : _selectedFilters;
 
-  void _selectFilter(_SearchKind filter) {
-    if (_filter == filter) return;
-    setState(() => _filter = filter);
-    if (_resultsController.hasClients) {
-      _resultsController.jumpTo(0);
-    }
+  void _toggleFilter(_SearchKind filter) {
+    if (filter == _SearchKind.all) return;
+    setState(() {
+      if (!_selectedFilters.remove(filter)) {
+        _selectedFilters.add(filter);
+      }
+    });
     _loadMissingKinds();
   }
 
@@ -534,8 +535,8 @@ class _SearchPageState extends State<SearchPage> {
           return _UnifiedSearchItem(
             kind: _SearchKind.movie,
             id: id,
-            title: title.isEmpty ? 'İsimsiz film' : title,
-            subtitle: subtitleParts.join(' • '),
+            title: title.isEmpty ? 'Ä°simsiz film' : title,
+            subtitle: subtitleParts.join(' â€¢ '),
             imageUrl: posterPath == null || posterPath.isEmpty
                 ? null
                 : 'https://image.tmdb.org/t/p/w200$posterPath',
@@ -670,25 +671,72 @@ class _SearchPageState extends State<SearchPage> {
             kind: _SearchKind.user,
             id: user['uid'].toString(),
             title: username.isEmpty ? 'isimsiz' : username,
-            subtitle: subtitleParts.join(' • '),
+            subtitle: subtitleParts.join(' â€¢ '),
             imageUrl: photoUrl == null || photoUrl.isEmpty ? null : photoUrl,
           );
         })
         .toList(growable: false);
   }
 
-  void _handleResultScroll() {
-    if (_filter != _SearchKind.movie ||
+  bool _handleResultScroll(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical ||
+        !_desiredKinds.contains(_SearchKind.movie) ||
         _activeQuery.isEmpty ||
         _loadingMoreMovies ||
-        _moviePage >= _movieTotalPages ||
-        !_resultsController.hasClients) {
-      return;
+        _moviePage >= _movieTotalPages) {
+      return false;
     }
-    final position = _resultsController.position;
-    if (position.pixels >= position.maxScrollExtent - 240) {
+    if (notification.metrics.pixels >=
+        notification.metrics.maxScrollExtent - 240) {
       unawaited(_loadMoreMovies());
     }
+    return false;
+  }
+
+  String get _activeFilterLabel {
+    if (_selectedFilters.isEmpty) return 'tÃ¼m kategoriler';
+    return _selectedFilters.map((kind) => kind.label.toLowerCase()).join(', ');
+  }
+
+  IconData get _activeFilterIcon {
+    if (_selectedFilters.length == 1) return _selectedFilters.first.icon;
+    return Icons.manage_search_rounded;
+  }
+
+  List<_UnifiedSearchItem> get _visibleResults {
+    final kinds = _desiredKinds;
+    return [
+      if (kinds.contains(_SearchKind.movie)) ...?_results[_SearchKind.movie],
+      if (kinds.contains(_SearchKind.user)) ...?_results[_SearchKind.user],
+      if (kinds.contains(_SearchKind.actor)) ...?_results[_SearchKind.actor],
+      if (kinds.contains(_SearchKind.director))
+        ...?_results[_SearchKind.director],
+    ];
+  }
+
+  List<_UnifiedSearchItem> get _visibleRecents => _recentItems;
+
+  bool get _isLoadingCurrent => _desiredKinds.any(_loadingKinds.contains);
+
+  bool get _hasCurrentError => _desiredKinds.any(_failedKinds.contains);
+
+  Future<void> _hydrateRecents() async {
+    final loaded = await _SearchRecentsCache.load();
+    if (!mounted) return;
+    setState(() {
+      _recentItems = loaded;
+      _recentsReady = true;
+    });
+  }
+
+  Future<void> _rememberResult(_UnifiedSearchItem item) async {
+    final updated = List<_UnifiedSearchItem>.from(_recentItems)
+      ..removeWhere((recent) => recent.storageKey == item.storageKey)
+      ..insert(0, item);
+    if (updated.length > 20) updated.removeRange(20, updated.length);
+    if (mounted) setState(() => _recentItems = updated);
+
+    await _SearchRecentsCache.persist(updated);
   }
 
   Future<void> _loadMoreMovies() async {
@@ -712,7 +760,7 @@ class _SearchPageState extends State<SearchPage> {
     } catch (_) {
       if (mounted && requestId == _requestId) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Daha fazla film yüklenemedi.')),
+          const SnackBar(content: Text('Daha fazla film yÃ¼klenemedi.')),
         );
       }
     } finally {
@@ -720,47 +768,6 @@ class _SearchPageState extends State<SearchPage> {
         setState(() => _loadingMoreMovies = false);
       }
     }
-  }
-
-  List<_UnifiedSearchItem> get _visibleResults {
-    if (_filter != _SearchKind.all) {
-      return List<_UnifiedSearchItem>.unmodifiable(
-        _results[_filter] ?? const [],
-      );
-    }
-    return [
-      ...?_results[_SearchKind.movie],
-      ...?_results[_SearchKind.user],
-      ...?_results[_SearchKind.actor],
-      ...?_results[_SearchKind.director],
-    ];
-  }
-
-  List<_UnifiedSearchItem> get _visibleRecents => _filter == _SearchKind.all
-      ? _recentItems
-      : _recentItems.where((item) => item.kind == _filter).toList();
-
-  bool get _isLoadingCurrent => _desiredKinds.any(_loadingKinds.contains);
-
-  bool get _hasCurrentError => _desiredKinds.any(_failedKinds.contains);
-
-  Future<void> _hydrateRecents() async {
-    final loaded = await _SearchRecentsCache.load();
-    if (!mounted) return;
-    setState(() {
-      _recentItems = loaded;
-      _recentsReady = true;
-    });
-  }
-
-  Future<void> _rememberResult(_UnifiedSearchItem item) async {
-    final updated = List<_UnifiedSearchItem>.from(_recentItems)
-      ..removeWhere((recent) => recent.storageKey == item.storageKey)
-      ..insert(0, item);
-    if (updated.length > 20) updated.removeRange(20, updated.length);
-    if (mounted) setState(() => _recentItems = updated);
-
-    await _SearchRecentsCache.persist(updated);
   }
 
   Future<void> _removeRecent(_UnifiedSearchItem item) async {
@@ -812,80 +819,103 @@ class _SearchPageState extends State<SearchPage> {
     return Scaffold(
       backgroundColor: colors.surface,
       resizeToAvoidBottomInset: true,
-      appBar: AppBar(
-        backgroundColor: colors.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        toolbarHeight: 64,
-        titleSpacing: 0,
-        title: Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: Container(
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: colors.outlineVariant),
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            SliverAppBar(
+              backgroundColor: colors.surface,
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              floating: false,
+              pinned: false,
+              snap: false,
+              toolbarHeight: 66,
+              automaticallyImplyLeading: false,
+              titleSpacing: 0,
+              title: _buildSearchField(context),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(38),
+                child: _buildFilterBar(context),
+              ),
             ),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              onChanged: _onSearchChanged,
-              onSubmitted: _submitSearch,
-              textInputAction: TextInputAction.search,
-              textAlignVertical: TextAlignVertical.center,
-              style: TextStyle(color: colors.onSurface),
-              decoration: InputDecoration(
-                hintText: 'Film, kişi veya kullanıcı ara...',
-                hintStyle: TextStyle(color: colors.onSurfaceVariant),
-                prefixIcon: const Icon(
-                  Icons.search,
-                  color: _primaryGreen,
-                  size: 20,
+          ];
+        },
+        body: ColoredBox(
+          color: colors.surface,
+          child: _activeQuery.isEmpty
+              ? _recentsReady
+                    ? _buildRecents(context)
+                    : const Center(
+                        child: CircularProgressIndicator(color: _primaryGreen),
+                      )
+              : _buildSearchResults(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 430),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: SizedBox(
+            height: 42,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.surfaceContainerHighest.withValues(alpha: 0.82),
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(
+                  color: colors.outlineVariant.withValues(alpha: 0.7),
                 ),
-                prefixIconConstraints: const BoxConstraints(
-                  minWidth: 42,
-                  minHeight: 42,
-                ),
-                suffixIcon: _searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Aramayı temizle',
-                        onPressed: _clearSearch,
-                        icon: Icon(
-                          Icons.close_rounded,
-                          color: colors.onSurfaceVariant,
+              ),
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                onChanged: _onSearchChanged,
+                onSubmitted: _submitSearch,
+                textInputAction: TextInputAction.search,
+                textAlignVertical: TextAlignVertical.center,
+                style: TextStyle(color: colors.onSurface, fontSize: 15),
+                decoration: InputDecoration(
+                  hintText: 'Film, ki\u015fi veya kullan\u0131c\u0131 ara',
+                  hintStyle: TextStyle(
+                    color: colors.onSurfaceVariant.withValues(alpha: 0.82),
+                    fontSize: 14,
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.search_rounded,
+                    color: _primaryGreen,
+                    size: 20,
+                  ),
+                  prefixIconConstraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
+                  ),
+                  suffixIcon: _searchController.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Aramay\u0131 temizle',
+                          onPressed: _clearSearch,
+                          icon: Icon(
+                            Icons.close_rounded,
+                            color: colors.onSurfaceVariant,
+                            size: 19,
+                          ),
                         ),
-                      ),
-                suffixIconConstraints: const BoxConstraints(
-                  minWidth: 42,
-                  minHeight: 42,
+                  suffixIconConstraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 ),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 11),
               ),
             ),
           ),
-        ),
-      ),
-      body: ColoredBox(
-        color: colors.surface,
-        child: Column(
-          children: [
-            _buildFilterBar(context),
-            Expanded(
-              child: _activeQuery.isEmpty
-                  ? _recentsReady
-                        ? _buildRecents(context)
-                        : const Center(
-                            child: CircularProgressIndicator(
-                              color: _primaryGreen,
-                            ),
-                          )
-                  : _buildSearchResults(context),
-            ),
-          ],
         ),
       ),
     );
@@ -896,44 +926,77 @@ class _SearchPageState extends State<SearchPage> {
     return Material(
       color: colors.surface,
       child: SizedBox(
-        height: 42,
-        child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          scrollDirection: Axis.horizontal,
-          itemCount: _SearchKind.values.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 5),
-          itemBuilder: (context, index) {
-            final kind = _SearchKind.values[index];
-            final selected = _filter == kind;
-            return ChoiceChip(
-              selected: selected,
-              onSelected: (_) => _selectFilter(kind),
-              avatar: Icon(
-                kind.icon,
-                size: 15,
-                color: selected ? colors.onPrimary : colors.onSurfaceVariant,
-              ),
-              label: Text(kind.label),
-              labelStyle: TextStyle(
-                color: selected ? colors.onPrimary : colors.onSurface,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 12,
-              ),
-              labelPadding: const EdgeInsets.symmetric(horizontal: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 5),
-              visualDensity: const VisualDensity(horizontal: -2, vertical: -4),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              selectedColor: _primaryGreen,
-              backgroundColor: colors.surfaceContainerHighest,
-              side: BorderSide(
-                color: selected ? _primaryGreen : colors.outlineVariant,
-              ),
-              showCheckmark: false,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            );
-          },
+        height: 38,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 3, 10, 5),
+          child: Row(
+            children: _contentKinds
+                .map((kind) {
+                  final selected = _selectedFilters.contains(kind);
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? _primaryGreen
+                              : colors.surfaceContainerHighest,
+                          border: Border.all(
+                            color: selected
+                                ? _primaryGreen
+                                : colors.outlineVariant,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => _toggleFilter(kind),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 3,
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    kind.icon,
+                                    size: 13,
+                                    color: selected
+                                        ? colors.onPrimary
+                                        : colors.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      kind.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.clip,
+                                      softWrap: false,
+                                      style: TextStyle(
+                                        color: selected
+                                            ? colors.onPrimary
+                                            : colors.onSurface,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 11,
+                                        height: 1,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                })
+                .toList(growable: false),
+          ),
         ),
       ),
     );
@@ -942,15 +1005,16 @@ class _SearchPageState extends State<SearchPage> {
   Widget _buildRecents(BuildContext context) {
     final recents = _visibleRecents;
     final colors = Theme.of(context).colorScheme;
+    if (widget.showDiscoverContentWhenEmpty) {
+      return _buildDiscoverEmptyContent(context, recents);
+    }
+
     if (recents.isEmpty) {
       return _EmptySearchState(
-        icon: _filter == _SearchKind.all
-            ? Icons.manage_search_rounded
-            : _filter.icon,
+        icon: _activeFilterIcon,
         title: 'Aramaya başla',
-        message: _filter == _SearchKind.all
-            ? 'Filmleri, oyuncuları, yönetmenleri ve kullanıcıları tek ekranda bulabilirsin.'
-            : '${_filter.label} içinde arama yapabilirsin.',
+        message:
+            'Filmleri, oyuncular, yönetmenleri ve kullanıcıları tek ekranda bulabilirsin.',
       );
     }
 
@@ -997,6 +1061,58 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  Widget _buildDiscoverEmptyContent(
+    BuildContext context,
+    List<_UnifiedSearchItem> recents,
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    final bottomPadding =
+        AppLayoutMetrics.bottomNavigationClearance(context) + 16;
+
+    return ListView(
+      padding: EdgeInsets.only(top: 8, bottom: bottomPadding),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      children: [
+        if (recents.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Son Aramalar',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: colors.onSurface,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _clearRecents,
+                  child: const Text('Temizle'),
+                ),
+              ],
+            ),
+          ),
+          ...recents.map(
+            (item) => Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: _UnifiedSearchTile(
+                item: item,
+                onTap: () => _openResult(item),
+                onRemove: () => _removeRecent(item),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        const RecommendationCard(),
+        const SizedBox(height: 8),
+        const DiscoveryListsWidget(),
+      ],
+    );
+  }
+
   Widget _buildSearchResults(BuildContext context) {
     final results = _visibleResults;
     if (_isLoadingCurrent && results.isEmpty) {
@@ -1009,8 +1125,8 @@ class _SearchPageState extends State<SearchPage> {
       if (_hasCurrentError) {
         return _EmptySearchState(
           icon: Icons.cloud_off_rounded,
-          title: 'Arama tamamlanamadı',
-          message: 'Bağlantını kontrol edip tekrar deneyebilirsin.',
+          title: 'Arama tamamlanamadÄ±',
+          message: 'BaÄŸlantÄ±nÄ± kontrol edip tekrar deneyebilirsin.',
           actionLabel: 'Tekrar dene',
           onAction: () {
             _failedKinds.removeAll(_desiredKinds);
@@ -1020,9 +1136,9 @@ class _SearchPageState extends State<SearchPage> {
       }
       return _EmptySearchState(
         icon: Icons.search_off_rounded,
-        title: 'Sonuç bulunamadı',
+        title: 'SonuÃ§ bulunamadÄ±',
         message:
-            '“$_activeQuery” için ${_filter.label.toLowerCase()} arasında bir sonuç yok.',
+            'â€œ$_activeQueryâ€ iÃ§in $_activeFilterLabel arasÄ±nda bir sonuÃ§ yok.',
       );
     }
 
@@ -1031,34 +1147,36 @@ class _SearchPageState extends State<SearchPage> {
         if (_isLoadingCurrent)
           const LinearProgressIndicator(minHeight: 2, color: _primaryGreen),
         Expanded(
-          child: ListView.separated(
-            controller: _resultsController,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            itemCount: results.length + (_loadingMoreMovies ? 1 : 0),
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              if (index == results.length) {
-                return const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: _primaryGreen,
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _handleResultScroll,
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              itemCount: results.length + (_loadingMoreMovies ? 1 : 0),
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                if (index == results.length) {
+                  return const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _primaryGreen,
+                        ),
                       ),
                     ),
-                  ),
+                  );
+                }
+                final item = results[index];
+                return _UnifiedSearchTile(
+                  item: item,
+                  onTap: () => _openResult(item),
                 );
-              }
-              final item = results[index];
-              return _UnifiedSearchTile(
-                item: item,
-                onTap: () => _openResult(item),
-              );
-            },
+              },
+            ),
           ),
         ),
       ],
@@ -1139,7 +1257,7 @@ class _UnifiedSearchTile extends StatelessWidget {
               if (onRemove != null) ...[
                 const SizedBox(width: 2),
                 IconButton(
-                  tooltip: 'Son aramalardan kaldır',
+                  tooltip: 'Son aramalardan kaldÄ±r',
                   visualDensity: VisualDensity.compact,
                   onPressed: onRemove,
                   icon: Icon(

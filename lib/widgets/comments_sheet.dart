@@ -929,9 +929,8 @@ class _CommentTile extends StatelessWidget {
       },
     );
   }
-
-  
 }
+
 String _formatTime(DateTime date) {
   final diff = DateTime.now().difference(date);
   if (diff.inMinutes < 1) return 'şimdi';

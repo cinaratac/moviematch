@@ -366,7 +366,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                     child: SizedBox(
                       width: posterWidth,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.zero,
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
@@ -1492,7 +1492,7 @@ class _WatchlistSection extends StatelessWidget {
                 child: SizedBox(
                   width: posterWidth,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.zero,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -1731,7 +1731,7 @@ class _ActivityWidget extends StatelessWidget {
           children: [
             if ((item.posterUrl).isNotEmpty || item.tmdbId != null) ...[
               ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.zero,
                 child: PosterImage(
                   posterUrl: item.posterUrl,
                   title: item.title,
@@ -1922,9 +1922,7 @@ class _CustomListCard extends StatelessWidget {
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: const BorderRadius.horizontal(
-                left: Radius.circular(12),
-              ),
+              borderRadius: BorderRadius.zero,
               child: SizedBox(
                 width: 70,
                 height: double.infinity,

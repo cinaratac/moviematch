@@ -8,6 +8,7 @@ import 'package:fluttergirdi/screens/feed_screens.dart';
 import 'package:fluttergirdi/screens/match_screen.dart';
 import 'package:fluttergirdi/screens/messagesscreen.dart';
 import 'package:fluttergirdi/screens/profilescreen.dart';
+import 'package:fluttergirdi/screens/search_page.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
 import 'package:fluttergirdi/screens/news_detail_page.dart';
 import 'package:fluttergirdi/screens/news_list_page.dart';
@@ -30,15 +31,30 @@ class _HomeShellState extends State<HomeShell> {
   Timer? _smartLoadingTimer;
   Timer? _announcementTimer;
 
-  final List<Widget> _pages = [
-    const FeedPage(),
-    const MatchListScreen(),
-    const MessagesPage(),
-    const ProfilePage(),
+  List<Widget> get _pages => const [
+    FeedPage(),
+    SearchPage(showDiscoverContentWhenEmpty: true),
+    MatchListScreen(),
+    MessagesPage(),
+    ProfilePage(),
   ];
 
   // Sadece Feed açık başlar, diğerleri akıllı sistemle yüklenecek.
-  final List<bool> _loadedPages = [true, false, false, false];
+  final List<bool> _loadedPages = [true, false, false, false, false];
+
+  void _syncLoadedPagesLength() {
+    final pageCount = _pages.length;
+    if (_loadedPages.length < pageCount) {
+      _loadedPages.addAll(
+        List<bool>.filled(pageCount - _loadedPages.length, false),
+      );
+    } else if (_loadedPages.length > pageCount) {
+      _loadedPages.removeRange(pageCount, _loadedPages.length);
+    }
+    if (_loadedPages.isNotEmpty) {
+      _loadedPages[0] = true;
+    }
+  }
 
   @override
   void initState() {
@@ -78,6 +94,8 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _switchToTab(int targetIndex) {
+    _syncLoadedPagesLength();
+    if (targetIndex < 0 || targetIndex >= _pages.length) return;
     if (_index == targetIndex) return;
 
     // Geçiş yapılırken anlık duraksamayı önlemek için timer'ı sıfırla
@@ -97,19 +115,25 @@ class _HomeShellState extends State<HomeShell> {
     // uygulamanın ilk açılışta kasmasına sebep olur.
 
     _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
-      if (mounted && !_loadedPages[3]) {
-        setState(() => _loadedPages[3] = true); // 1. Öncelik: Profil Sayfası
+      if (mounted && !_loadedPages[4]) {
+        setState(() => _loadedPages[4] = true); // 1. Öncelik: Profil Sayfası
       }
 
       _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
-        if (mounted && !_loadedPages[2]) {
-          setState(() => _loadedPages[2] = true); // 2. Öncelik: Mesajlar
+        if (mounted && !_loadedPages[3]) {
+          setState(() => _loadedPages[3] = true); // 2. Öncelik: Mesajlar
         }
 
         _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
           if (mounted && !_loadedPages[1]) {
-            setState(() => _loadedPages[1] = true); // 3. Öncelik: Cinephiles
+            setState(() => _loadedPages[1] = true); // 3. Öncelik: Keşfet
           }
+
+          _smartLoadingTimer = Timer(const Duration(milliseconds: 500), () {
+            if (mounted && !_loadedPages[2]) {
+              setState(() => _loadedPages[2] = true); // 4. Öncelik: Cinephiles
+            }
+          });
         });
       });
     });
@@ -184,6 +208,8 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    _syncLoadedPagesLength();
+
     return PopScope(
       canPop: _index == 0,
       onPopInvokedWithResult: (bool didPop, Object? result) {
@@ -259,6 +285,11 @@ class _HomeShellState extends State<HomeShell> {
                 icon: Icon(Icons.view_list_outlined),
                 selectedIcon: Icon(Icons.view_list),
                 label: 'Feed',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.explore_outlined),
+                selectedIcon: Icon(Icons.explore),
+                label: 'Keşfet',
               ),
               const NavigationDestination(
                 icon: Icon(Icons.person_search_outlined),

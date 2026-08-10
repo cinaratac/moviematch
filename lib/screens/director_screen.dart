@@ -11,6 +11,7 @@ class _DirectorCacheData {
   final List<dynamic> movies;
   _DirectorCacheData(this.details, this.movies);
 }
+
 final Map<int, _DirectorCacheData> _globalDirectorCache = {};
 
 class DirectorScreen extends StatefulWidget {
@@ -45,7 +46,10 @@ class _DirectorScreenState extends State<DirectorScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
-    final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .get();
     if (doc.exists) {
       final List favDirectors = doc.data()?['favDirectors'] ?? [];
       if (mounted) {
@@ -62,22 +66,29 @@ class _DirectorScreenState extends State<DirectorScreen> {
   // --- YENİ EKLENEN FONKSİYON: İZLEME ORANINI HESAPLAR ---
   Future<Map<String, int>> _calculateWatchData(List<dynamic> tmdbMovies) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || tmdbMovies.isEmpty) return {'watched': 0, 'total': tmdbMovies.length};
+    if (uid == null || tmdbMovies.isEmpty)
+      return {'watched': 0, 'total': tmdbMovies.length};
 
     try {
       List<int> tmdbIds = [];
       for (var m in tmdbMovies) {
         if (m['id'] != null) tmdbIds.add(m['id']);
       }
-      
+
       if (tmdbIds.isEmpty) return {'watched': 0, 'total': tmdbMovies.length};
 
       Set<String> listDocIds = {};
       final _fs = FirebaseFirestore.instance;
-      
+
       for (var i = 0; i < tmdbIds.length; i += 30) {
-        final chunk = tmdbIds.sublist(i, i + 30 > tmdbIds.length ? tmdbIds.length : i + 30);
-        final qs = await _fs.collection('catalog_films').where('tmdbId', whereIn: chunk).get();
+        final chunk = tmdbIds.sublist(
+          i,
+          i + 30 > tmdbIds.length ? tmdbIds.length : i + 30,
+        );
+        final qs = await _fs
+            .collection('catalog_films')
+            .where('tmdbId', whereIn: chunk)
+            .get();
         for (var doc in qs.docs) {
           listDocIds.add(doc.id.trim().toLowerCase());
         }
@@ -87,15 +98,19 @@ class _DirectorScreenState extends State<DirectorScreen> {
       final userDoc = await _fs.collection('users').doc(uid).get();
       if (userDoc.exists) {
         final data = userDoc.data() ?? {};
-        
+
         // Buraya sistemdeki tüm 'izlenmiş sayılan' koleksiyonları ekliyoruz
         final keysList = [
           ...List<dynamic>.from(data['favoritesKeys'] ?? []),
           ...List<dynamic>.from(data['fiveStarKeys'] ?? []),
-          ...List<dynamic>.from(data['dislikedKeys'] ?? []), // <-- Sevmediklerim eklendi
-          ...List<dynamic>.from(data['watchedKeys'] ?? []),   // <-- Sadece izledim butonu eklendi
+          ...List<dynamic>.from(
+            data['dislikedKeys'] ?? [],
+          ), // <-- Sevmediklerim eklendi
+          ...List<dynamic>.from(
+            data['watchedKeys'] ?? [],
+          ), // <-- Sadece izledim butonu eklendi
         ];
-        
+
         for (var id in keysList) {
           if (id != null) myWatchedIds.add(id.toString().trim().toLowerCase());
         }
@@ -109,7 +124,7 @@ class _DirectorScreenState extends State<DirectorScreen> {
       }
 
       return {'watched': watchedCount, 'total': tmdbMovies.length};
-    } catch(e) {
+    } catch (e) {
       return {'watched': 0, 'total': tmdbMovies.length};
     }
   }
@@ -143,7 +158,9 @@ class _DirectorScreenState extends State<DirectorScreen> {
       final creditsData = creditsRes.data;
       final List<dynamic> crew = creditsData['crew'] ?? [];
 
-      List<dynamic> directed = crew.where((c) => c['job'] == 'Director').toList();
+      List<dynamic> directed = crew
+          .where((c) => c['job'] == 'Director')
+          .toList();
 
       directed.sort((a, b) {
         final popA = (a['popularity'] as num?) ?? 0;
@@ -165,8 +182,11 @@ class _DirectorScreenState extends State<DirectorScreen> {
           _watchDataFuture = _calculateWatchData(_directedMovies);
           _isLoading = false;
         });
-        
-        _globalDirectorCache[widget.directorId] = _DirectorCacheData(_directorDetails!, _directedMovies);
+
+        _globalDirectorCache[widget.directorId] = _DirectorCacheData(
+          _directorDetails!,
+          _directedMovies,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -202,7 +222,9 @@ class _DirectorScreenState extends State<DirectorScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                _isFavorited ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                _isFavorited
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
                 color: _isFavorited ? Colors.green : Colors.grey,
                 size: 22,
               ),
@@ -216,11 +238,15 @@ class _DirectorScreenState extends State<DirectorScreen> {
                 _isFavorited = !wasFavorited;
               });
 
-              final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+              final userRef = FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(uid);
               final directorData = {
                 'name': widget.directorName,
                 'id': widget.directorId,
-                if ((_directorDetails?['profile_path'] ?? '').toString().isNotEmpty)
+                if ((_directorDetails?['profile_path'] ?? '')
+                    .toString()
+                    .isNotEmpty)
                   'profile_path': _directorDetails!['profile_path'],
               };
 
@@ -248,9 +274,11 @@ class _DirectorScreenState extends State<DirectorScreen> {
                             ? '${widget.directorName} favorilere eklendi!'
                             : '${widget.directorName} favorilerden çıkarıldı!',
                       ),
-                      backgroundColor: !wasFavorited ? Colors.green.shade700 : Colors.redAccent,
+                      backgroundColor: !wasFavorited
+                          ? Colors.green.shade700
+                          : Colors.redAccent,
                       behavior: SnackBarBehavior.floating,
-                      duration: const Duration(seconds: 1), 
+                      duration: const Duration(seconds: 1),
                     ),
                   );
                 }
@@ -285,7 +313,8 @@ class _DirectorScreenState extends State<DirectorScreen> {
                           borderRadius: BorderRadius.circular(12),
                           child: _directorDetails!['profile_path'] != null
                               ? CachedNetworkImage(
-                                  imageUrl: 'https://image.tmdb.org/t/p/w500${_directorDetails!['profile_path']}',
+                                  imageUrl:
+                                      'https://image.tmdb.org/t/p/w500${_directorDetails!['profile_path']}',
                                   width: 120,
                                   height: 180,
                                   fit: BoxFit.cover,
@@ -294,7 +323,11 @@ class _DirectorScreenState extends State<DirectorScreen> {
                                   width: 120,
                                   height: 180,
                                   color: cs.surfaceContainerHighest,
-                                  child: const Icon(Icons.person, size: 50, color: Colors.grey),
+                                  child: const Icon(
+                                    Icons.person,
+                                    size: 50,
+                                    color: Colors.grey,
+                                  ),
                                 ),
                         ),
                         const SizedBox(width: 16),
@@ -304,26 +337,45 @@ class _DirectorScreenState extends State<DirectorScreen> {
                             children: [
                               Text(
                                 widget.directorName,
-                                style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               if (_directorDetails!['birthday'] != null)
-                                _buildInfoRow('Doğum', _directorDetails!['birthday']),
+                                _buildInfoRow(
+                                  'Doğum',
+                                  _directorDetails!['birthday'],
+                                ),
                               if (_directorDetails!['place_of_birth'] != null)
-                                _buildInfoRow('Yer', _directorDetails!['place_of_birth']),
+                                _buildInfoRow(
+                                  'Yer',
+                                  _directorDetails!['place_of_birth'],
+                                ),
                               if (_directorDetails!['deathday'] != null)
-                                _buildInfoRow('Ölüm', _directorDetails!['deathday']),
+                                _buildInfoRow(
+                                  'Ölüm',
+                                  _directorDetails!['deathday'],
+                                ),
 
                               const SizedBox(height: 12),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF2E7D32).withOpacity(0.1),
+                                  color: const Color(
+                                    0xFF2E7D32,
+                                  ).withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Text(
                                   'Yönetmen',
-                                  style: TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
+                                  style: TextStyle(
+                                    color: Color(0xFF2E7D32),
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ],
@@ -333,24 +385,36 @@ class _DirectorScreenState extends State<DirectorScreen> {
                     ),
                   ),
                 ),
-                if (_directorDetails!['biography'] != null && _directorDetails!['biography'].toString().isNotEmpty)
+                if (_directorDetails!['biography'] != null &&
+                    _directorDetails!['biography'].toString().isNotEmpty)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0,
+                        vertical: 8.0,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Biyografi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Text(
+                            'Biyografi',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             _directorDetails!['biography'],
-                            style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              height: 1.5,
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                
+
                 // --- İZLEME ORANI (YÖNETTİĞİ FİLMLER BAŞLIĞI VE PROGRESS BAR) ---
                 if (_directedMovies.isNotEmpty)
                   SliverToBoxAdapter(
@@ -359,36 +423,70 @@ class _DirectorScreenState extends State<DirectorScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Yönettiği Filmler', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          
+                          const Text(
+                            'Yönettiği Filmler',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
                           if (_watchDataFuture != null)
                             FutureBuilder<Map<String, int>>(
                               future: _watchDataFuture,
                               builder: (context, snapshot) {
-                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting) {
                                   return const Padding(
                                     padding: EdgeInsets.only(top: 12.0),
-                                    child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.greenAccent)),
+                                    child: SizedBox(
+                                      height: 16,
+                                      width: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.greenAccent,
+                                      ),
+                                    ),
                                   );
                                 }
 
-                                final watchedCount = snapshot.data?['watched'] ?? 0;
+                                final watchedCount =
+                                    snapshot.data?['watched'] ?? 0;
                                 final totalCount = snapshot.data?['total'] ?? 0;
-                                if (totalCount == 0) return const SizedBox.shrink();
+                                if (totalCount == 0)
+                                  return const SizedBox.shrink();
 
-                                final double percentage = (watchedCount / totalCount) * 100;
+                                final double percentage =
+                                    (watchedCount / totalCount) * 100;
 
                                 return Padding(
-                                  padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+                                  padding: const EdgeInsets.only(
+                                    top: 12.0,
+                                    bottom: 4.0,
+                                  ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Text("İzleme Oranı", style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
-                                          Text("%${percentage.toStringAsFixed(0)} ($watchedCount/$totalCount)", 
-                                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
+                                          Text(
+                                            "İzleme Oranı",
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.grey.shade400,
+                                            ),
+                                          ),
+                                          Text(
+                                            "%${percentage.toStringAsFixed(0)} ($watchedCount/$totalCount)",
+                                            style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.greenAccent,
+                                            ),
+                                          ),
                                         ],
                                       ),
                                       const SizedBox(height: 6),
@@ -397,7 +495,10 @@ class _DirectorScreenState extends State<DirectorScreen> {
                                         child: LinearProgressIndicator(
                                           value: percentage / 100,
                                           backgroundColor: Colors.white24,
-                                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.greenAccent),
+                                          valueColor:
+                                              const AlwaysStoppedAnimation<
+                                                Color
+                                              >(Colors.greenAccent),
                                           minHeight: 6,
                                         ),
                                       ),
@@ -410,22 +511,25 @@ class _DirectorScreenState extends State<DirectorScreen> {
                       ),
                     ),
                   ),
-                // -------------------------------------------------------------
 
+                // -------------------------------------------------------------
                 if (_directedMovies.isNotEmpty)
                   SliverPadding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     sliver: SliverGrid(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 3,
-                            childAspectRatio: 0.65, 
+                            childAspectRatio: 0.65,
                             crossAxisSpacing: 10,
                             mainAxisSpacing: 10,
                           ),
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final movie = _directedMovies[index];
                         final posterPath = movie['poster_path'];
-                        final fullPosterUrl = posterPath != null ? 'https://image.tmdb.org/t/p/w500$posterPath' : '';
+                        final fullPosterUrl = posterPath != null
+                            ? 'https://image.tmdb.org/t/p/w500$posterPath'
+                            : '';
 
                         return GestureDetector(
                           onTap: () {
@@ -444,7 +548,7 @@ class _DirectorScreenState extends State<DirectorScreen> {
                             children: [
                               Expanded(
                                 child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
+                                  borderRadius: BorderRadius.zero,
                                   child: PosterImage(
                                     posterUrl: fullPosterUrl,
                                     title: movie['title'],
@@ -457,7 +561,10 @@ class _DirectorScreenState extends State<DirectorScreen> {
                                 movie['title'] ?? 'Film',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
                                 textAlign: TextAlign.center,
                               ),
                             ],
@@ -478,8 +585,16 @@ class _DirectorScreenState extends State<DirectorScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$title: ', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+          Text(
+            '$title: ',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
+          Expanded(
+            child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
         ],
       ),
     );

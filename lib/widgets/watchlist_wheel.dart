@@ -74,7 +74,7 @@ class _WatchlistWheelState extends State<WatchlistWheel>
 
     final start = _angle;
     // Hedef: 5 ile 8 arası tam tur ve rastgele bir dilim seçimi
-    final fullTurns = 5 + _rng.nextInt(4); 
+    final fullTurns = 5 + _rng.nextInt(4);
     final slice = (2 * math.pi) / widget.items.length;
     final offsetWithinSlice =
         _rng.nextDouble() * (slice * 0.9) + slice * 0.05; // Kenarlardan kaçın
@@ -86,8 +86,8 @@ class _WatchlistWheelState extends State<WatchlistWheel>
     }
 
     final pointerAngle = -math.pi / 2; // Tepe noktası (12 yönü)
-    final targetAngleCenter = targetIdx * slice + slice / 2.0; 
-    final delta = _normalizeAngle(targetAngleCenter - pointerAngle); 
+    final targetAngleCenter = targetIdx * slice + slice / 2.0;
+    final delta = _normalizeAngle(targetAngleCenter - pointerAngle);
 
     final end = start + fullTurns * 2 * math.pi + delta + offsetWithinSlice;
 
@@ -160,9 +160,9 @@ class _WatchlistWheelState extends State<WatchlistWheel>
             Positioned(top: 0, child: _Pointer()),
           ],
         ),
-        
+
         const SizedBox(height: 24),
-        
+
         // 1. Eğer birden fazla film varsa, çark dönerken seçili olanı şık bir şekilde yazdırır
         if (selected != null && items.length > 1)
           Padding(
@@ -172,9 +172,9 @@ class _WatchlistWheelState extends State<WatchlistWheel>
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
 
@@ -184,20 +184,26 @@ class _WatchlistWheelState extends State<WatchlistWheel>
           height: 52,
           child: FilledButton.icon(
             // Sadece 1 film varsa tıklandığında popup göster (onChosen), çok varsa çarkı çevir (spin)
-            onPressed: items.length == 1 
-                ? () => widget.onChosen?.call(items.first) 
-                : (items.length > 1 && !_spinning) ? spin : null,
+            onPressed: items.length == 1
+                ? () => widget.onChosen?.call(items.first)
+                : (items.length > 1 && !_spinning)
+                ? spin
+                : null,
             icon: Icon(
-              items.length == 1 ? Icons.send_rounded : Icons.casino, 
-              size: 22
+              items.length == 1 ? Icons.send_rounded : Icons.casino,
+              size: 22,
             ),
             label: Text(
               items.length == 1 ? 'Direkt Gönder' : 'Çarkı Çevir',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32), // Uygulamanızın Tema Yeşili
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              backgroundColor: const Color(
+                0xFF2E7D32,
+              ), // Uygulamanızın Tema Yeşili
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               elevation: 4,
             ),
           ),
@@ -332,8 +338,10 @@ class _CenterBadge extends StatelessWidget {
                 fit: BoxFit.cover,
                 // --- ÇÖZÜM BURADA: TARAYICI GİBİ DAVRAN ---
                 headers: const {
-                  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                  'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                  'User-Agent':
+                      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Accept':
+                      'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
                 },
                 // ----------------------------------------
                 errorBuilder: (_, __, ___) => const SizedBox(

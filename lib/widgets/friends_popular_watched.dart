@@ -200,7 +200,7 @@ class _PopularMovieCard extends StatelessWidget {
                 children: [
                   Positioned.fill(
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.zero,
                       child: PosterImage(
                         posterUrl: movie.posterUrl,
                         title: movie.title,
@@ -406,7 +406,7 @@ class _PopularMoviePlaceholder extends StatelessWidget {
         children: [
           Expanded(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.zero,
               child: ColoredBox(color: fill, child: const SizedBox.expand()),
             ),
           ),

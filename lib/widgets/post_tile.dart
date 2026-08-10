@@ -696,9 +696,7 @@ class _PostTileState extends State<PostTile> {
                   child: Row(
                     children: [
                       ClipRRect(
-                        borderRadius: const BorderRadius.horizontal(
-                          left: Radius.circular(12),
-                        ),
+                        borderRadius: BorderRadius.zero,
                         child: PosterImage(
                           posterUrl: widget.moviePoster,
                           title: widget.movieTitle,

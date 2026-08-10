@@ -188,6 +188,9 @@ class _PosterImageState extends State<PosterImage> {
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: Duration.zero,
+      placeholderFadeInDuration: Duration.zero,
       errorWidget: (context, url, error) {
         // Eğer resim hatalıysa (Örn: 404), cache'i temizle ki sonsuza dek bozuk resim göstermesin
         customCacheManager.removeFile(_generateCacheKey(url));

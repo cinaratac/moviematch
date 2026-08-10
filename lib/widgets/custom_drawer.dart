@@ -270,7 +270,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
           child: InkWell(
             onTap: () {
               Navigator.pop(context);
-              TabService.instance.changeTab(3);
+              TabService.instance.changeTab(4);
             },
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),

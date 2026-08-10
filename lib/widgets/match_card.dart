@@ -341,7 +341,7 @@ class _MatchCardState extends State<MatchCard>
                       child: AspectRatio(
                         aspectRatio: 2 / 3,
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.zero,
                           child: PosterImage(
                             posterUrl: film.posterUrl,
                             title: film.title,

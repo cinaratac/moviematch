@@ -210,7 +210,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.zero,
                         child: PosterImage(
                           posterUrl: posterUrl,
                           title: title,
@@ -308,129 +308,139 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
                         ),
                       ),
                       onPressed: isSaving
-    ? null
-    : () async {
-        if (widget.isSelectionMode) {
-          final selectedMovie = {
-            'id': movie['id'],
-            'title': title,
-            'original_title': originalTitle,
-            'poster': posterUrl,
-            'poster_path': movie['poster_path'],
-            'release_date': release,
-            'releaseDate': release,
-            'overview': overview,
-          };
-          Navigator.pop(contextInner, selectedMovie);
-          return;
-        }
+                          ? null
+                          : () async {
+                              if (widget.isSelectionMode) {
+                                final selectedMovie = {
+                                  'id': movie['id'],
+                                  'title': title,
+                                  'original_title': originalTitle,
+                                  'poster': posterUrl,
+                                  'poster_path': movie['poster_path'],
+                                  'release_date': release,
+                                  'releaseDate': release,
+                                  'overview': overview,
+                                };
+                                Navigator.pop(contextInner, selectedMovie);
+                                return;
+                              }
 
-        setSheetState(() => isSaving = true);
-        final messenger = ScaffoldMessenger.of(context);
-        bool isSuccess = false;
+                              setSheetState(() => isSaving = true);
+                              final messenger = ScaffoldMessenger.of(context);
+                              bool isSuccess = false;
 
-        try {
-          final uid = FirebaseAuth.instance.currentUser?.uid;
-          if (uid == null) {
-            Navigator.pop(contextInner);
-            return;
-          }
+                              try {
+                                final uid =
+                                    FirebaseAuth.instance.currentUser?.uid;
+                                if (uid == null) {
+                                  Navigator.pop(contextInner);
+                                  return;
+                                }
 
-          final movieMap = Map<String, dynamic>.from(movie as Map);
-          final int? tmdbId = movieMap['id'] is int
-              ? movieMap['id'] as int
-              : int.tryParse('${movieMap['id'] ?? ''}');
-          if (tmdbId == null || tmdbId <= 0) {
-            throw StateError('Geçersiz film verisi (TMDB id bulunamadı).');
-          }
+                                final movieMap = Map<String, dynamic>.from(
+                                  movie as Map,
+                                );
+                                final int? tmdbId = movieMap['id'] is int
+                                    ? movieMap['id'] as int
+                                    : int.tryParse('${movieMap['id'] ?? ''}');
+                                if (tmdbId == null || tmdbId <= 0) {
+                                  throw StateError(
+                                    'Geçersiz film verisi (TMDB id bulunamadı).',
+                                  );
+                                }
 
-          // OPTIMISTIC CACHE: resolveCatalogMovie Cloud Function'ının
-          // gecikmesini/geçici hatasını (App Check, ağ vb.) beklemiyoruz.
-          // Kanonik anahtarı yerel olarak üretip RAM cache'e hemen yazıyoruz,
-          // sunucu senkronunu arka planda (await YOK) tetikliyoruz.
-          final primaryKey = CatalogService.canonicalKeyFromTmdb(tmdbId);
-          CatalogService().injectToCache(primaryKey, {
-            ...movieMap,
-            'posterUrl': posterUrl,
-          });
-          // ignore: unawaited_futures
-          CatalogService().upsertFromTmdb(movieMap, catalogKey: primaryKey);
+                                // OPTIMISTIC CACHE: resolveCatalogMovie Cloud Function'ının
+                                // gecikmesini/geçici hatasını (App Check, ağ vb.) beklemiyoruz.
+                                // Kanonik anahtarı yerel olarak üretip RAM cache'e hemen yazıyoruz,
+                                // sunucu senkronunu arka planda (await YOK) tetikliyoruz.
+                                final primaryKey =
+                                    CatalogService.canonicalKeyFromTmdb(tmdbId);
+                                CatalogService().injectToCache(primaryKey, {
+                                  ...movieMap,
+                                  'posterUrl': posterUrl,
+                                });
+                                // ignore: unawaited_futures
+                                CatalogService().upsertFromTmdb(
+                                  movieMap,
+                                  catalogKey: primaryKey,
+                                );
 
-          if (widget.target != null) {
-            final previousList = await UserProfileService.instance
-                .moveMovieToTarget(
-                  uid: uid,
-                  movieId: primaryKey,
-                  tmdbId: tmdbId,
-                  movieData: movieMap,
-                  target: widget.target!,
-                  posterUrl: posterUrl,
-                );
+                                if (widget.target != null) {
+                                  final previousList = await UserProfileService
+                                      .instance
+                                      .moveMovieToTarget(
+                                        uid: uid,
+                                        movieId: primaryKey,
+                                        tmdbId: tmdbId,
+                                        movieData: movieMap,
+                                        target: widget.target!,
+                                        posterUrl: posterUrl,
+                                      );
 
-            final Map<String, String> newLocalItem = {
-              'title': title,
-              'poster': posterUrl,
-              'posterUrl': posterUrl,
-            };
-            switch (widget.target!) {
-              case ShelfTarget.fiveStar:
-                UserShelfCache.fiveStar = List.from(
-                  UserShelfCache.fiveStar,
-                )..add(newLocalItem);
-                break;
-              case ShelfTarget.favorites:
-                UserShelfCache.favorites = List.from(
-                  UserShelfCache.favorites,
-                )..add(newLocalItem);
-                break;
-              case ShelfTarget.watchlist:
-                UserShelfCache.watchlist = List.from(
-                  UserShelfCache.watchlist,
-                )..add(newLocalItem);
-                break;
-              case ShelfTarget.disliked:
-                UserShelfCache.disliked = List.from(
-                  UserShelfCache.disliked,
-                )..add(newLocalItem);
-                break;
-            }
+                                  final Map<String, String> newLocalItem = {
+                                    'title': title,
+                                    'poster': posterUrl,
+                                    'posterUrl': posterUrl,
+                                  };
+                                  switch (widget.target!) {
+                                    case ShelfTarget.fiveStar:
+                                      UserShelfCache.fiveStar = List.from(
+                                        UserShelfCache.fiveStar,
+                                      )..add(newLocalItem);
+                                      break;
+                                    case ShelfTarget.favorites:
+                                      UserShelfCache.favorites = List.from(
+                                        UserShelfCache.favorites,
+                                      )..add(newLocalItem);
+                                      break;
+                                    case ShelfTarget.watchlist:
+                                      UserShelfCache.watchlist = List.from(
+                                        UserShelfCache.watchlist,
+                                      )..add(newLocalItem);
+                                      break;
+                                    case ShelfTarget.disliked:
+                                      UserShelfCache.disliked = List.from(
+                                        UserShelfCache.disliked,
+                                      )..add(newLocalItem);
+                                      break;
+                                  }
 
-            String targetName = switch (widget.target!) {
-              ShelfTarget.fiveStar => 'Sevdiklerim',
-              ShelfTarget.disliked => 'Sevmedim',
-              ShelfTarget.favorites => 'Favoriler',
-              ShelfTarget.watchlist => 'İzlenecekler',
-            };
+                                  String targetName = switch (widget.target!) {
+                                    ShelfTarget.fiveStar => 'Sevdiklerim',
+                                    ShelfTarget.disliked => 'Sevmedim',
+                                    ShelfTarget.favorites => 'Favoriler',
+                                    ShelfTarget.watchlist => 'İzlenecekler',
+                                  };
 
-            String message = previousList != null
-                ? "'$title', $previousList listesinden çıkarılıp $targetName listesine eklendi."
-                : "'$title', $targetName listesine eklendi.";
+                                  String message = previousList != null
+                                      ? "'$title', $previousList listesinden çıkarılıp $targetName listesine eklendi."
+                                      : "'$title', $targetName listesine eklendi.";
 
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(message),
-                backgroundColor: Colors.green.shade700,
-                behavior: SnackBarBehavior.floating,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(message),
+                                      backgroundColor: Colors.green.shade700,
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
 
-          isSuccess = true;
-        } catch (e) {
-          messenger.showSnackBar(
-            SnackBar(content: Text('Hata: $e')),
-          );
-        }
+                                isSuccess = true;
+                              } catch (e) {
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text('Hata: $e')),
+                                );
+                              }
 
-        if (contextInner.mounted) {
-          if (isSuccess) {
-            Navigator.pop(contextInner, true);
-          } else {
-            setSheetState(() => isSaving = false);
-          }
-        }
-      },
+                              if (contextInner.mounted) {
+                                if (isSuccess) {
+                                  Navigator.pop(contextInner, true);
+                                } else {
+                                  setSheetState(() => isSaving = false);
+                                }
+                              }
+                            },
                     ),
                   ),
                 ],
@@ -553,7 +563,7 @@ class _SearchMoviePageState extends State<SearchMoviePage> {
       onTap: () => _showMovieDetails(movie),
       borderRadius: BorderRadius.circular(12),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.zero,
         child: Stack(
           fit: StackFit.expand,
           children: [

@@ -5,21 +5,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:fluttergirdi/screens/news_list_page.dart';
-import 'package:fluttergirdi/screens/search_page.dart';
 
 import '../controllers/feed_controller.dart';
 import '../services/user_cache_service.dart';
 import '../widgets/post_skeleton.dart';
 import '../services/feed_service.dart';
 import 'package:fluttergirdi/widgets/post_tile.dart';
+import 'package:fluttergirdi/widgets/app_popular_movies.dart';
 import 'package:fluttergirdi/widgets/recommended_users.dart';
 import 'package:fluttergirdi/widgets/notifications.dart';
-import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import '../widgets/compose_post_sheet.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:fluttergirdi/widgets/custom_drawer.dart';
-import 'package:fluttergirdi/widgets/dashboard_stats_row.dart';
-import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
 import 'package:fluttergirdi/widgets/friends_popular_watched.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/services/tab_service.dart';
@@ -36,7 +33,6 @@ class _FeedPageState extends State<FeedPage>
     with SingleTickerProviderStateMixin {
   final FeedController _controller = FeedController.instance;
   late final TabController _tabController;
-  late final Future<void> _searchRecentsReady;
 
   // AppBar animasyonu ayrı tutulur; her kaydırma karesi tüm feed'i yenilemez.
   final ValueNotifier<double> _appBarOpacity = ValueNotifier<double>(1.0);
@@ -46,7 +42,6 @@ class _FeedPageState extends State<FeedPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _searchRecentsReady = SearchPage.preloadRecents();
     if (!_controller.isInitialized) {
       _controller.init();
     }
@@ -132,47 +127,12 @@ class _FeedPageState extends State<FeedPage>
             scrolledUnderElevation: 0,
             toolbarHeight: 60,
             titleSpacing: 0,
-            title: Align(
-              alignment: Alignment.centerLeft,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 220),
-                child: InkWell(
-                  onTap: () async {
-                    await _searchRecentsReady;
-                    if (!context.mounted) return;
-                    Navigator.of(context).push(
-                      PageRouteBuilder<void>(
-                        pageBuilder: (_, _, _) => const SearchPage(),
-                        transitionDuration: Duration.zero,
-                        reverseTransitionDuration: Duration.zero,
-                      ),
-                    );
-                  },
-                  borderRadius: BorderRadius.circular(24),
-                  child: Container(
-                    height: 40,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search,
-                          size: 20,
-                          color: cs.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          'Film, kişi ve kullanıcı ara',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+            title: Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: Text(
+                'Feed',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ),
@@ -471,14 +431,7 @@ class _PopularFeedHeaderState extends State<_PopularFeedHeader>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return const Column(
-      children: [
-        OfflineBanner(),
-        RecommendationCard(),
-        DashboardStatsRow(),
-        DiscoveryListsWidget(),
-      ],
-    );
+    return const Column(children: [OfflineBanner(), AppPopularMovies()]);
   }
 }
 

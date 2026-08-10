@@ -1753,6 +1753,154 @@ exports.generateWeeklySocialReport = onCall(async (request) => {
   };
 });
 
+// Mobil uygulamadaki Feed popüler filmler widget'ı için güvenli özet döndürür.
+// Ham profile_movie_events ve diary kayıtları istemciye açılmaz.
+exports.getWeeklyPopularMovies = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "Giriş yapmanız gerekiyor.");
+  }
+
+  const resultLimit = Math.min(
+    10,
+    Math.max(1, Number(request.data && request.data.resultLimit) || 10)
+  );
+  const maxWeeks = Math.min(
+    3,
+    Math.max(1, Number(request.data && request.data.maxWeeks) || 3)
+  );
+  const end = new Date();
+  const istanbulNow = new Date(end.getTime() + (3 * 60 * 60 * 1000));
+  const day = istanbulNow.getUTCDay() || 7;
+  istanbulNow.setUTCDate(istanbulNow.getUTCDate() - day + 1);
+  istanbulNow.setUTCHours(0, 0, 0, 0);
+  const currentWeekStart = new Date(
+    istanbulNow.getTime() - (3 * 60 * 60 * 1000)
+  );
+  const finish = new Date(
+    currentWeekStart.getTime() + (7 * 24 * 60 * 60 * 1000)
+  );
+  const db = admin.firestore();
+
+  async function loadRange(start) {
+    const startTimestamp = admin.firestore.Timestamp.fromDate(start);
+    const finishTimestamp = admin.firestore.Timestamp.fromDate(finish);
+    const [legacyAdditions, diaryAdditions] = await Promise.all([
+      db.collection("profile_movie_events")
+        .where("addedAt", ">=", startTimestamp)
+        .where("addedAt", "<", finishTimestamp)
+        .get(),
+      db.collectionGroup("diary")
+        .where("recordedAt", ">=", startTimestamp)
+        .where("recordedAt", "<", finishTimestamp)
+        .get(),
+    ]);
+
+    const legacyItems = legacyAdditions.docs
+      .map((doc) => doc.data() || {})
+      .filter((item) => item.catalogType === "watched");
+    const diaryItems = diaryAdditions.docs.map((doc) => ({
+      ...(doc.data() || {}),
+      userId: doc.ref.parent.parent && doc.ref.parent.parent.id,
+      catalogType: "watched",
+    }));
+
+    const catalogCache = new Map();
+    async function resolveCatalog(rawKey, rawTmdbId) {
+      const key = String(rawKey || "").trim();
+      const embeddedTmdb = /^tmdb:(\d+)$/.exec(key);
+      const numericTmdb = Number(rawTmdbId) ||
+        (embeddedTmdb ? Number(embeddedTmdb[1]) : Number(key)) || null;
+      const cacheKey = `${key}|${numericTmdb || ""}`;
+      if (catalogCache.has(cacheKey)) return catalogCache.get(cacheKey);
+
+      const pending = (async () => {
+        let catalogDoc = key
+          ? await db.collection("catalog_films").doc(key).get()
+          : null;
+        if ((!catalogDoc || !catalogDoc.exists) && numericTmdb) {
+          const snap = await db.collection("catalog_films")
+            .where("tmdbId", "==", numericTmdb)
+            .limit(1)
+            .get();
+          catalogDoc = snap.empty ? null : snap.docs[0];
+        }
+        const data = catalogDoc && catalogDoc.exists
+          ? catalogDoc.data() || {}
+          : {};
+        const tmdbId = Number(data.tmdbId) || numericTmdb;
+        return {
+          id: tmdbId
+            ? `tmdb:${tmdbId}`
+            : (catalogDoc && catalogDoc.exists ? catalogDoc.id : key),
+          tmdbId: tmdbId || null,
+          title: cleanText(data.title, 140) || key,
+          year: Number(data.year) || null,
+          posterUrl: cleanText(data.posterUrl, 1200),
+        };
+      })();
+      catalogCache.set(cacheKey, pending);
+      return pending;
+    }
+
+    const resolvedLegacyItems = await Promise.all(
+      legacyItems.map(async (item) => ({
+        userId: String(item.userId || ""),
+        movie: await resolveCatalog(item.movieKey, item.tmdbId),
+      }))
+    );
+    const resolvedDiaryItems = diaryItems.map((item) => {
+      const tmdbId = positiveInteger(item.tmdbId);
+      const movieKey = cleanText(item.movieKey, 300);
+      return {
+        userId: String(item.userId || ""),
+        movie: {
+          id: tmdbId ? `tmdb:${tmdbId}` : movieKey,
+          tmdbId: tmdbId || null,
+          title: cleanText(item.title, 140) || movieKey,
+          year: positiveInteger(item.releaseYear),
+          posterUrl: cleanText(item.posterUrl, 1200),
+        },
+      };
+    });
+
+    const counts = new Map();
+    [...resolvedLegacyItems, ...resolvedDiaryItems].forEach(({ userId, movie }) => {
+      if (!movie.id) return;
+      const current = counts.get(movie.id) || {
+        ...movie,
+        viewers: new Set(),
+      };
+      current.viewers.add(userId || `anonymous:${current.viewers.size}`);
+      counts.set(movie.id, current);
+    });
+
+    return [...counts.values()]
+      .map(({ viewers, ...movie }) => ({ ...movie, additions: viewers.size }))
+      .sort(
+        (a, b) =>
+          b.additions - a.additions || a.title.localeCompare(b.title, "tr")
+      );
+  }
+
+  let movies = [];
+  let usedWeeks = 1;
+  for (let weekSpan = 1; weekSpan <= maxWeeks; weekSpan += 1) {
+    const start = new Date(
+      currentWeekStart.getTime() -
+        ((weekSpan - 1) * 7 * 24 * 60 * 60 * 1000)
+    );
+    movies = await loadRange(start);
+    usedWeeks = weekSpan;
+    if (movies.length >= resultLimit || weekSpan === maxWeeks) break;
+  }
+
+  return {
+    ok: true,
+    usedWeeks,
+    movies: movies.slice(0, resultLimit),
+  };
+});
+
 // Admin sosyal medya stüdyosundaki film ızgarası ve puan sıralaması için TMDB
 // detaylarını tek istekte hazırlar. İstemci ayrı ayrı TMDB çağrısı yapmaz.
 exports.getSocialGridMovies = onCall(
