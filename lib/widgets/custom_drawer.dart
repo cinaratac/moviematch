@@ -13,6 +13,7 @@ import 'package:fluttergirdi/screens/clubs_tab.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -89,7 +90,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
             children: [
               _buildProfileHeader(_currentUid),
 
-              Divider(height: 1, color: colors.outlineVariant),
+              const HairlineDivider(),
 
               Expanded(
                 child: ListView(
@@ -362,11 +363,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
             ),
           ),
           const SizedBox(height: 7),
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
+          const HairlineDivider(),
         ],
       ),
     );

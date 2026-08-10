@@ -302,6 +302,8 @@ class RecommendationCard extends StatefulWidget {
 
 class _RecommendationCardState extends State<RecommendationCard>
     with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
+  static final Map<String, List<MovieRecommendation>> _sessionCache = {};
+
   @override
   bool get wantKeepAlive => true;
   List<MovieRecommendation>? _recommendations;
@@ -329,7 +331,16 @@ class _RecommendationCardState extends State<RecommendationCard>
       begin: const Offset(0, 0.08),
       end: Offset.zero,
     ).animate(detailsCurve);
-    _loadRecommendations();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final cached = uid == null ? null : _sessionCache[uid];
+    if (cached != null && cached.isNotEmpty) {
+      _recommendations = cached;
+      _loading = false;
+      _detailsController.value = 1;
+    } else {
+      _loadRecommendations();
+    }
   }
 
   @override
@@ -394,18 +405,23 @@ class _RecommendationCardState extends State<RecommendationCard>
 
   Future<void> _loadRecommendations({bool forceRefresh = false}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
+    if (uid == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
 
     if (mounted) setState(() => _loading = true);
 
     try {
       if (forceRefresh) {
         RecommendationEngine.instance.clearMemoryCache();
+        _sessionCache.remove(uid);
       }
       final recs = await RecommendationEngine.instance.generateRecommendations(
         uid,
       );
 
+      _sessionCache[uid] = List<MovieRecommendation>.unmodifiable(recs);
       if (mounted) {
         setState(() {
           _recommendations = recs;

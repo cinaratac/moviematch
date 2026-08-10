@@ -6,6 +6,7 @@ import 'package:fluttergirdi/services/custom_list_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 import 'package:fluttergirdi/screens/lists_screen.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 class DiscoveryListsWidget extends StatefulWidget {
   const DiscoveryListsWidget({super.key});
@@ -65,6 +66,8 @@ class _DiscoveryListsWidgetState extends State<DiscoveryListsWidget>
             ),
           ),
         ),
+
+        const HairlineDivider(indent: 16, endIndent: 16),
 
         // Liste Akışı
         SizedBox(

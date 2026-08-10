@@ -3,6 +3,7 @@ import 'package:fluttergirdi/models/diary_entry.dart';
 import 'package:fluttergirdi/screens/diary_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 /// A read-free preview of the denormalized diary summary already present on
 /// the user's profile document.
@@ -27,10 +28,11 @@ class RecentWatchedMovies extends StatelessWidget {
         : Colors.black87;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 14, bottom: 18),
+      padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const HairlineDivider(),
           Row(
             children: [
               Icon(

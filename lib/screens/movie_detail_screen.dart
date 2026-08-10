@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/services/catalog_service.dart';
@@ -363,9 +364,13 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                   sliver: SliverList(
                     delegate: SliverChildListDelegate.fixed([
                       _buildHeader(isDark, textColor),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 24),
+                      const HairlineDivider(indent: 20, endIndent: 20),
+                      const SizedBox(height: 24),
                       _buildOverview(textColor),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 24),
+                      const HairlineDivider(indent: 20, endIndent: 20),
+                      const SizedBox(height: 24),
                       _buildCastSection(textColor),
                       _buildAvailabilitySection(textColor),
                       const SizedBox(height: 30),
@@ -481,8 +486,8 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                     spacing: 8,
                     runSpacing: 6,
                     children: [
-                      if (_year.isNotEmpty) _buildTag(_year, isDark),
-                      if (_runtime.isNotEmpty) _buildTag(_runtime, isDark),
+                      if (_year.isNotEmpty) _buildTag(_year),
+                      if (_runtime.isNotEmpty) _buildTag(_runtime),
                       if (_isWatched) _buildWatchedTag(),
                     ],
                   ),
@@ -517,21 +522,11 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   }
 
   Widget _buildWatchedTag() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.greenAccent.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.5)),
-      ),
-      child: const Text(
-        'İzledim',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: Colors.greenAccent,
-        ),
-      ),
+    return const TintedTag(
+      label: 'İzledim',
+      icon: Icons.check_rounded,
+      color: Colors.greenAccent,
+      compact: true,
     );
   }
 
@@ -553,14 +548,11 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Yönetmen',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: textColor.withValues(alpha: 0.5),
-            ),
+          const AccentMetadata(
+            text: 'Yönetmen',
+            icon: Icons.movie_creation_outlined,
           ),
+          const SizedBox(height: 4),
           Text(
             _director,
             style: TextStyle(
@@ -753,24 +745,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     );
   }
 
-  Widget _buildTag(String text, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: isDark ? Colors.white24 : Colors.black12),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: isDark ? Colors.white70 : Colors.black87,
-        ),
-      ),
-    );
-  }
+  Widget _buildTag(String text) => TintedTag(label: text, compact: true);
 }
 
 class _WatchProviderCard extends StatelessWidget {

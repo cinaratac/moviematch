@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/shell.dart';
 import 'package:fluttergirdi/services/app_popular_movies_service.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
+import 'package:fluttergirdi/services/message_avatar_cache_service.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
 import 'package:fluttergirdi/services/push_token_service.dart';
 import 'package:fluttergirdi/services/user_cache_service.dart';
@@ -19,6 +21,8 @@ class InitialLoadingScreen extends StatefulWidget {
 }
 
 class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
+  double _progress = 0.06;
+
   @override
   void initState() {
     super.initState();
@@ -33,17 +37,17 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
     // Preloading zaten main.dart'ta başladı ama shell'de de çağrılıyor.
     // Burada tekrar çağırmak zararlı değil — ??= guard var içeride.
     GlobalDataService.instance.startPreloading();
+    _setProgress(0.14);
 
-    await Future.wait([
-      Future.delayed(const Duration(milliseconds: 700)),
-      _waitForCriticalData(),
-    ]);
+    await _waitForCriticalData();
 
     if (!mounted) return;
+    _setProgress(0.74);
     await _precacheFirstViewportImages();
 
-    // Animasyon bittikten sonra kısa yumuşatma
-    await Future.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    _setProgress(1);
+    await Future.delayed(const Duration(milliseconds: 320));
 
     if (mounted) {
       Navigator.pushReplacement(
@@ -52,7 +56,7 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
           pageBuilder: (_, _, _) => const HomeShell(),
           transitionsBuilder: (_, animation, _, child) =>
               FadeTransition(opacity: animation, child: child),
-          transitionDuration: const Duration(milliseconds: 500),
+          transitionDuration: const Duration(milliseconds: 350),
         ),
       );
     }
@@ -65,21 +69,45 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
   }
 
   Future<void> _waitForCriticalData() async {
+    unawaited(FeedController.instance.initFollowing());
+    var completed = 0;
+
+    Future<void> waitFor(Future<dynamic> operation) async {
+      try {
+        await operation.timeout(const Duration(seconds: 4));
+      } catch (_) {
+        // Ağ yavaşsa ekranı kilitleme; servis yüklemeyi arka planda tamamlar.
+      } finally {
+        completed++;
+        _setProgress(0.14 + (completed * 0.15));
+      }
+    }
+
     await Future.wait([
-      FeedController.instance.init(),
-      FeedController.instance.initFollowing(),
-      AppPopularMoviesService.instance.preload(),
-      _waitForProfile(),
+      waitFor(FeedController.instance.init()),
+      waitFor(AppPopularMoviesService.instance.preload()),
+      waitFor(_waitForProfile()),
+      waitFor(_waitForChats()),
     ]);
   }
 
   Future<void> _waitForProfile() async {
     try {
       await GlobalDataService.instance.profileReady.timeout(
-        const Duration(seconds: 3),
+        const Duration(seconds: 2),
       );
     } catch (_) {
       debugPrint("Profil yüklemesi zaman aşımına uğradı, devam ediliyor.");
+    }
+  }
+
+  Future<void> _waitForChats() async {
+    try {
+      await GlobalDataService.instance.chatsReady.timeout(
+        const Duration(seconds: 2),
+      );
+    } catch (_) {
+      debugPrint('Sohbet ön yüklemesi zaman aşımına uğradı, devam ediliyor.');
     }
   }
 
@@ -88,6 +116,14 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final providers = <ImageProvider>[];
     final seenUrls = <String>{};
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final chats = GlobalDataService.instance.myChats ?? const [];
+    final avatarPreload = currentUid.isEmpty
+        ? Future<void>.value()
+        : MessageAvatarCacheService.instance.preloadChats(
+            currentUid,
+            chats.map((doc) => doc.data()),
+          );
 
     void addImage(
       Object? rawUrl, {
@@ -112,12 +148,12 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
 
     final popularMovies =
         AppPopularMoviesService.instance.cachedMovies ?? const [];
-    for (final movie in popularMovies) {
+    for (final movie in popularMovies.take(5)) {
       addImage(movie.posterUrl, cacheWidth: 312, isPoster: true);
     }
 
     final feed = FeedController.instance;
-    for (final post in feed.posts.take(4)) {
+    for (final post in feed.posts.take(3)) {
       final data = post.data() ?? const <String, dynamic>{};
       final authorId = (data['authorId'] ?? '').toString();
       final cachedUser = UserCacheService.instance.getFromCache(authorId);
@@ -143,28 +179,36 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
       );
     }
 
-    await Future.wait(
-      providers.map((provider) async {
-        try {
-          await precacheImage(
-            provider,
-            context,
-            onError: (_, _) {},
-          ).timeout(const Duration(seconds: 8));
-        } catch (_) {
-          // Bozuk bir görsel uygulamanın açılmasını engellememeli.
-        }
-      }),
-    );
+    try {
+      await Future.wait([
+        avatarPreload,
+        Future.wait(
+          providers.map((provider) async {
+            try {
+              await precacheImage(provider, context, onError: (_, _) {});
+            } catch (_) {
+              // Bozuk bir görsel uygulamanın açılmasını engellememeli.
+            }
+          }),
+        ),
+      ]).timeout(const Duration(milliseconds: 1800));
+    } catch (_) {
+      // Kalan görseller normal ekran açıldıktan sonra cache'e girebilir.
+    }
+  }
+
+  void _setProgress(double value) {
+    if (!mounted) return;
+    setState(() => _progress = value.clamp(0.0, 1.0));
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       body: Center(
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 40.0),
-          child: BrandedSplash(),
+          padding: const EdgeInsets.symmetric(horizontal: 40.0),
+          child: BrandedSplash(progress: _progress),
         ),
       ),
     );

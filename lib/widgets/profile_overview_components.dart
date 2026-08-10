@@ -1,5 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 import 'package:fluttergirdi/models/gamification.dart';
 
 final Map<int, Future<String>> _personPortraitCache = {};
@@ -186,6 +187,7 @@ class ProfileStat extends StatelessWidget {
                 color: textColor.withValues(alpha: 0.72),
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
+                letterSpacing: 0.2,
               ),
             ),
           ],
@@ -223,22 +225,15 @@ class ProfilePreferenceSection extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black87;
-
     return Padding(
-      padding: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: textColor,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 9),
+          const HairlineDivider(),
+          const SizedBox(height: 8),
+          AccentMetadata(text: title),
+          const SizedBox(height: 7),
           if (showPortraits)
             SizedBox(
               height: 104,
@@ -265,22 +260,7 @@ class ProfilePreferenceSection extends StatelessWidget {
                 final name = item is Map
                     ? (item['name'] ?? '').toString()
                     : item.toString();
-                return Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.09)
-                        : Colors.black.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    name,
-                    style: TextStyle(color: textColor, fontSize: 12),
-                  ),
-                );
+                return TintedTag(label: name);
               }).toList(),
             ),
         ],

@@ -30,6 +30,7 @@ import 'package:fluttergirdi/screens/custom_list_detail_screen.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
 import 'package:fluttergirdi/services/gamification_service.dart';
 import 'package:fluttergirdi/services/poster_fallback_service.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 // --- MODEL SINIFLARI ---
 
@@ -804,23 +805,32 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _buildSectionHeader(
     String title,
     List<String> keys,
-    ShelfTarget target,
-  ) {
+    ShelfTarget target, {
+    Color? accentColor,
+  }) {
     // target eklendi
     final textColor = Theme.of(context).brightness == Brightness.dark
         ? Colors.white
         : Colors.black87;
     return Padding(
-      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: textColor,
-            ),
+          Row(
+            children: [
+              if (accentColor != null) ...[
+                Container(width: 18, height: 2, color: accentColor),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+            ],
           ),
           if (keys.isNotEmpty)
             GestureDetector(
@@ -959,23 +969,32 @@ class _ProfilePageState extends State<ProfilePage> {
           'Sevdiği Filmler',
           fiveStarKeys,
           ShelfTarget.fiveStar,
+          accentColor: const Color(0xFFFF9800),
         ),
         _shelfSectionFromUserField(
           'fiveStarKeys',
           emptyText: '5★ film bulunamadı.',
           maxItems: 20,
         ),
+        const HairlineDivider(),
         _buildSectionHeader(
           'Sevmediği Filmler',
           dislikedKeys,
           ShelfTarget.disliked,
+          accentColor: const Color(0xFFE53935),
         ),
         _shelfSectionFromUserField(
           'dislikedKeys',
           emptyText: 'Sevmediği film bulunamadı.',
           maxItems: 20,
         ),
-        _buildSectionHeader('Watchlist', watchlistKeys, ShelfTarget.watchlist),
+        const HairlineDivider(),
+        _buildSectionHeader(
+          'Watchlist',
+          watchlistKeys,
+          ShelfTarget.watchlist,
+          accentColor: const Color(0xFF2196F3),
+        ),
         _watchlistSectionFromKeys(watchlistKeys, maxItems: 20),
       ],
     );
@@ -1376,8 +1395,13 @@ class _ActivitiesTabState extends State<_ActivitiesTab>
             physics: const NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             padding: EdgeInsets.zero,
-            separatorBuilder: (_, __) =>
-                const SizedBox(height: 12), // Kartlar arası boşluk
+            separatorBuilder: (_, _) => const Column(
+              children: [
+                SizedBox(height: 6),
+                HairlineDivider(),
+                SizedBox(height: 6),
+              ],
+            ),
             itemBuilder: (context, i) {
               final a = _activities[i];
               final when = a.createdAt;
@@ -2213,7 +2237,7 @@ class _UserListSheetState extends State<_UserListSheet> {
               ),
             ),
           ),
-          const Divider(height: 1),
+          const HairlineDivider(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -2231,7 +2255,8 @@ class _UserListSheetState extends State<_UserListSheet> {
                 }
                 return ListView.separated(
                   itemCount: docs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, _) =>
+                      const HairlineDivider(indent: 72, endIndent: 16),
                   itemBuilder: (context, index) {
                     final docId = docs[index].id;
                     return FutureBuilder<DocumentSnapshot>(

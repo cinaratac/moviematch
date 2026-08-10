@@ -6,6 +6,7 @@ import 'package:fluttergirdi/services/ai_chat_service.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/widgets/chat_ui_components.dart'
     show MessageBubble;
+import 'package:fluttergirdi/widgets/cinematch_bot_avatar.dart';
 
 /// cinematchbotai (Python/Flask) ile canlı konuşulan sohbet odası.
 ///
@@ -167,13 +168,7 @@ class _AiChatRoomScreenState extends State<AiChatRoomScreen> {
         titleSpacing: 8,
         title: Row(
           children: [
-            CircleAvatar(
-              backgroundColor: cs.primaryContainer,
-              child: Icon(
-                Icons.smart_toy_outlined,
-                color: cs.onPrimaryContainer,
-              ),
-            ),
+            const CinematchBotAvatar(),
             const SizedBox(width: 10),
             const Text('CineBot AI', style: TextStyle(fontSize: 17)),
           ],
@@ -245,15 +240,7 @@ class _AiChatRoomScreenState extends State<AiChatRoomScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 if (!mine) ...[
-                                  CircleAvatar(
-                                    radius: 12,
-                                    backgroundColor: cs.primaryContainer,
-                                    child: Icon(
-                                      Icons.smart_toy_outlined,
-                                      size: 14,
-                                      color: cs.onPrimaryContainer,
-                                    ),
-                                  ),
+                                  const CinematchBotAvatar(size: 24),
                                   const SizedBox(width: 8),
                                 ],
                                 Flexible(

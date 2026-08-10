@@ -33,10 +33,6 @@ class _FeedPageState extends State<FeedPage>
   final FeedController _controller = FeedController.instance;
   late final TabController _tabController;
 
-  // AppBar animasyonu ayrı tutulur; her kaydırma karesi tüm feed'i yenilemez.
-  final ValueNotifier<double> _appBarOpacity = ValueNotifier<double>(1.0);
-  double _lastOffset = 0.0;
-
   @override
   void initState() {
     super.initState();
@@ -49,7 +45,6 @@ class _FeedPageState extends State<FeedPage>
   @override
   void dispose() {
     _tabController.dispose();
-    _appBarOpacity.dispose();
     super.dispose();
   }
 
@@ -63,28 +58,6 @@ class _FeedPageState extends State<FeedPage>
             1500) {
       _controller.loadMore();
     }
-
-    final currentOffset = scrollInfo.metrics.pixels;
-    final delta = currentOffset - _lastOffset;
-    final currentOpacity = _appBarOpacity.value;
-    double newOpacity = currentOpacity;
-
-    if (currentOffset <= 150) {
-      newOpacity = 1.0;
-    } else {
-      if (delta > 0) {
-        newOpacity -= delta * 0.005;
-      } else if (delta < 0) {
-        newOpacity -= delta * 0.005;
-      }
-      newOpacity = newOpacity.clamp(0.0, 1.0);
-    }
-
-    // Sınırdayken her kare tekrar bildirim göndermeyi engeller.
-    if (newOpacity != currentOpacity) {
-      _appBarOpacity.value = newOpacity;
-    }
-    _lastOffset = currentOffset;
 
     return false;
   }
@@ -105,33 +78,41 @@ class _FeedPageState extends State<FeedPage>
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    // Status bar (çentik) boyutu + Özel AppBar'ın toplam boyutu
-    final topPadding = MediaQuery.of(context).padding.top + 110.0;
+    const topPadding = 0.0;
 
     return Scaffold(
       drawer: const CustomDrawer(),
-      // Body AppBar'ın altından (y=0'dan) başlar, böylece AppBar saydamlaştıkça postlar üstten akar
-      extendBodyBehindAppBar: true,
-
-      // --- ÖZEL APPBAR TASARIMI ---
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(110),
-        child: ValueListenableBuilder<double>(
-          valueListenable: _appBarOpacity,
-          child: AppBar(
-            backgroundColor: cs.surface.withOpacity(
-              0.96,
-            ), // Hafif buzlu cam/saydam zemin
+      body: NestedScrollView(
+        floatHeaderSlivers: true,
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          SliverAppBar(
+            floating: true,
+            snap: true,
+            pinned: false,
+            backgroundColor: cs.surface,
+            surfaceTintColor: Colors.transparent,
             elevation: 0,
             scrolledUnderElevation: 0,
             toolbarHeight: 60,
             titleSpacing: 0,
             title: Padding(
-              padding: const EdgeInsets.only(left: 16),
-              child: Text(
-                'Feed',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
+              padding: const EdgeInsets.only(left: 2),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: 190,
+                  height: 54,
+                  child: ClipRect(
+                    child: Transform.scale(
+                      scale: 1.53,
+                      child: Image.asset(
+                        'assets/images/cinematch_name.png',
+                        fit: BoxFit.cover,
+                        alignment: Alignment.center,
+                        filterQuality: FilterQuality.high,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -179,35 +160,24 @@ class _FeedPageState extends State<FeedPage>
               ),
             ),
           ),
-          builder: (context, opacity, child) => Opacity(
-            opacity: opacity,
-            child: IgnorePointer(
-              // Şeffaflık yarıyı geçtiğinde tıklamaları listeye geçir.
-              ignoring: opacity < 0.5,
-              child: child,
-            ),
-          ),
-        ),
-      ),
-
-      // --- ANA GÖVDE VE KAYDIRMA DİNLEYİCİSİ ---
-      body: NotificationListener<ScrollUpdateNotification>(
-        onNotification: _onScrollNotification,
-        child: TabBarView(
-          controller: _tabController,
-          children: [
-            RefreshIndicator(
-              edgeOffset:
-                  topPadding, // Yenileme ikonunun AppBar altında çıkması için
-              onRefresh: _controller.refresh,
-              child: ValueListenableBuilder<int>(
-                valueListenable: _controller.popularRevision,
-                builder: (context, revision, child) =>
-                    _buildPopularFeed(topPadding),
+        ],
+        body: NotificationListener<ScrollUpdateNotification>(
+          onNotification: _onScrollNotification,
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              RefreshIndicator(
+                edgeOffset: topPadding,
+                onRefresh: _controller.refresh,
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _controller.popularRevision,
+                  builder: (context, revision, child) =>
+                      _buildPopularFeed(topPadding),
+                ),
               ),
-            ),
-            _FollowingFeed(topPadding: topPadding),
-          ],
+              _FollowingFeed(topPadding: topPadding),
+            ],
+          ),
         ),
       ),
 
@@ -311,7 +281,7 @@ class _FeedPageState extends State<FeedPage>
           1 +
           (showPublicationTeaser ? 1 : 0) +
           (_controller.isLoadingMore ? 1 : 0),
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, i) {
         if (i == 0) {
           return const _PopularFeedHeader();
@@ -542,7 +512,7 @@ class _FollowingFeedState extends State<_FollowingFeed>
             _controller.followingPosts.length +
             1 +
             (showPublicationTeaser ? 1 : 0),
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, i) {
           if (i == 0) {
             return Column(

@@ -185,6 +185,7 @@ class _AppPopularMovieCard extends StatelessWidget {
               style: theme.textTheme.labelSmall?.copyWith(
                 color: textColor.withValues(alpha: 0.62),
                 fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
               ),
             ),
           ],

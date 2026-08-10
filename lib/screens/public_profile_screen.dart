@@ -23,6 +23,7 @@ import 'package:fluttergirdi/widgets/follow_user_list_dialog.dart';
 import 'package:fluttergirdi/widgets/recent_watched_movies.dart';
 import 'package:fluttergirdi/widgets/profile_overview_components.dart';
 import 'package:fluttergirdi/widgets/streak_bottom_sheet.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 // Aktivite Verisi Modeli
 class _ActivityItemData {
@@ -300,6 +301,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     String title,
     List<String> keys, {
     int maxItems = 30,
+    Color? accentColor,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final posterWidth = profilePosterWidth(context);
@@ -317,7 +319,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSectionHeader(title, keys),
+        _buildSectionHeader(title, keys, accentColor: accentColor),
         const SizedBox(height: 8),
         FutureBuilder<List<Map<String, dynamic>?>>(
           future: (() {
@@ -414,21 +416,33 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
   final Map<String, Future<List<Map<String, dynamic>?>>> _watchlistFutureCache =
       {};
 
-  Widget _buildSectionHeader(String title, List<String> keys) {
+  Widget _buildSectionHeader(
+    String title,
+    List<String> keys, {
+    Color? accentColor,
+  }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 20.0, bottom: 8.0),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: textColor,
-            ),
+          Row(
+            children: [
+              if (accentColor != null) ...[
+                Container(width: 18, height: 2, color: accentColor),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+            ],
           ),
           if (keys.isNotEmpty)
             GestureDetector(
@@ -1399,17 +1413,31 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
       ),
       children: [
         if (fiveKeys.isNotEmpty) ...[
-          _shelfSectionFromKeys('Sevdiği Filmler', fiveKeys, maxItems: 30),
-          const SizedBox(height: 16),
+          _shelfSectionFromKeys(
+            'Sevdiği Filmler',
+            fiveKeys,
+            maxItems: 30,
+            accentColor: const Color(0xFFFF9800),
+          ),
+          if (disKeys.isNotEmpty || watchlistKeys.isNotEmpty)
+            const HairlineDivider(),
         ],
         if (disKeys.isNotEmpty) ...[
-          _shelfSectionFromKeys('Sevmediği Filmler', disKeys, maxItems: 30),
-          const SizedBox(height: 16),
+          _shelfSectionFromKeys(
+            'Sevmediği Filmler',
+            disKeys,
+            maxItems: 30,
+            accentColor: const Color(0xFFE53935),
+          ),
+          if (watchlistKeys.isNotEmpty) const HairlineDivider(),
         ],
 
         if (watchlistKeys.isNotEmpty) ...[
-          _buildSectionHeader('Watchlist', watchlistKeys),
-          const SizedBox(height: 8),
+          _buildSectionHeader(
+            'Watchlist',
+            watchlistKeys,
+            accentColor: const Color(0xFF2196F3),
+          ),
           _WatchlistSection(
             data: data,
             watchlistFutureCache: _watchlistFutureCache,
@@ -1678,7 +1706,13 @@ class _ActivitiesTabState extends State<_ActivitiesTab>
               physics: const NeverScrollableScrollPhysics(),
               shrinkWrap: true,
               padding: EdgeInsets.zero,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              separatorBuilder: (_, _) => const Column(
+                children: [
+                  SizedBox(height: 6),
+                  HairlineDivider(),
+                  SizedBox(height: 6),
+                ],
+              ),
               itemBuilder: (context, i) {
                 final a = _activities[i];
                 final when = a.createdAt;
@@ -2021,7 +2055,7 @@ class _UserListSheetState extends State<_UserListSheet> {
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
-          const Divider(height: 1),
+          const HairlineDivider(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -2039,7 +2073,8 @@ class _UserListSheetState extends State<_UserListSheet> {
                 }
                 return ListView.separated(
                   itemCount: docs.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, _) =>
+                      const HairlineDivider(indent: 72, endIndent: 16),
                   itemBuilder: (context, index) {
                     final docId = docs[index].id;
                     return FutureBuilder<DocumentSnapshot>(

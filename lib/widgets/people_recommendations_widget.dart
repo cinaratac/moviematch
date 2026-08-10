@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/services/people_recommendation_service.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 class PeopleRecommendationsWidget extends StatefulWidget {
   const PeopleRecommendationsWidget({super.key});
@@ -65,7 +66,10 @@ class _PeopleRecommendationsWidgetState
           ),
           if (recommendations.actors.isNotEmpty &&
               recommendations.directors.isNotEmpty)
-            const SizedBox(height: 20),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: HairlineDivider(indent: 16, endIndent: 16),
+            ),
           _PeopleRow(
             title: 'Sana Özel Yönetmenler',
             icon: Icons.video_camera_front_outlined,
@@ -203,15 +207,7 @@ class _PersonCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 3),
-                      Text(
-                        reason,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      AccentMetadata(text: reason),
                     ],
                   ),
                 ),

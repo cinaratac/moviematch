@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/ai_chat_room_screen.dart';
@@ -15,8 +16,11 @@ import 'package:fluttergirdi/widgets/messages_skeleton.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
 import 'package:fluttergirdi/services/user_cache_service.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
+import 'package:fluttergirdi/services/message_avatar_cache_service.dart';
 import 'package:fluttergirdi/widgets/app_confirm_dialog.dart';
+import 'package:fluttergirdi/widgets/cinematch_bot_avatar.dart';
 import 'package:fluttergirdi/utils/layout_metrics.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 class MessagesPage extends StatefulWidget {
   const MessagesPage({super.key});
@@ -47,57 +51,64 @@ class _MessagesPageState extends State<MessagesPage>
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: cs.surface,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        centerTitle: true,
-        toolbarHeight: 65,
-        titleSpacing: 16,
-        title: Container(
-          height: 40,
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: TabBar(
-            controller: _tabController,
-            indicatorSize: TabBarIndicatorSize.tab,
-            dividerColor: Colors.transparent,
-            indicator: BoxDecoration(
-              color: cs.surface,
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 4,
-                  offset: const Offset(0, 1),
+      body: NestedScrollView(
+        floatHeaderSlivers: true,
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          SliverAppBar(
+            floating: true,
+            snap: true,
+            pinned: false,
+            backgroundColor: cs.surface,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            centerTitle: true,
+            toolbarHeight: 65,
+            titleSpacing: 16,
+            title: Container(
+              height: 40,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                indicator: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
                 ),
-              ],
+                labelColor: cs.onSurface,
+                unselectedLabelColor: cs.onSurfaceVariant,
+                labelStyle: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                tabs: const [
+                  Tab(text: 'Sohbetler'),
+                  Tab(text: 'Odalar'),
+                ],
+              ),
             ),
-            labelColor: cs.onSurface,
-            unselectedLabelColor: cs.onSurfaceVariant,
-            labelStyle: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-            ),
-            overlayColor: WidgetStateProperty.all(Colors.transparent),
-            tabs: const [
-              Tab(text: 'Sohbetler'),
-              Tab(text: 'Odalar'),
-            ],
           ),
-        ),
-        // bottom propertysi ve arama çubuğu buradan tamamen kaldırıldı
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _ChatsView(uid: uid), // Filtre parametresi kaldırıldı
-          JoinedClubsList(uid: uid), // Filtre parametresi kaldırıldı
         ],
+        body: TabBarView(
+          controller: _tabController,
+          children: [
+            _ChatsView(uid: uid),
+            JoinedClubsList(uid: uid),
+          ],
+        ),
       ),
     );
   }
@@ -460,7 +471,9 @@ class _ChatsViewState extends State<_ChatsView>
               else
                 SliverList(
                   delegate: SliverChildBuilderDelegate((context, index) {
-                    if (index.isOdd) return const Divider(height: 1);
+                    if (index.isOdd) {
+                      return const HairlineDivider(indent: 72, endIndent: 16);
+                    }
 
                     final docIndex = index ~/ 2;
                     final doc = docs[docIndex];
@@ -612,16 +625,9 @@ class ChatListTile extends StatelessWidget {
                   builder: (_) => PublicProfileScreen(uid: otherUid),
                 ),
               ),
-        child: CircleAvatar(
-          backgroundImage: (!isAi && photoUrl != null && photoUrl.isNotEmpty)
-              ? NetworkImage(photoUrl)
-              : null,
-          child: isAi
-              ? const Icon(Icons.smart_toy_outlined)
-              : (photoUrl == null || photoUrl.isEmpty)
-              ? const Icon(Icons.person)
-              : null,
-        ),
+        child: isAi
+            ? const CinematchBotAvatar()
+            : _MessageAvatar(photoUrl: photoUrl),
       ),
       title: Text(
         displayName,
@@ -862,14 +868,7 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
             leading: Stack(
               alignment: Alignment.bottomRight,
               children: [
-                CircleAvatar(
-                  backgroundImage: (photo != null && photo.isNotEmpty)
-                      ? NetworkImage(photo)
-                      : null,
-                  child: (photo == null || photo.isEmpty)
-                      ? const Icon(Icons.person)
-                      : null,
-                ),
+                _MessageAvatar(photoUrl: photo),
                 const CircleAvatar(
                   radius: 8,
                   backgroundColor: Colors.white,
@@ -917,6 +916,62 @@ class _NewMatchHeaderState extends State<NewMatchHeader> {
           ),
         );
       },
+    );
+  }
+}
+
+class _MessageAvatar extends StatelessWidget {
+  const _MessageAvatar({
+    this.photoUrl,
+    this.radius = 20,
+    this.fallbackIcon = Icons.person_outline_rounded,
+  });
+
+  final String? photoUrl;
+  final double radius;
+  final IconData fallbackIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = photoUrl?.trim() ?? '';
+    final size = radius * 2;
+    const cacheSize = MessageAvatarCacheService.cacheSize;
+    final avatarCache = MessageAvatarCacheService.instance;
+    final fallback = ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Center(child: Icon(fallbackIcon, size: radius)),
+    );
+
+    return SizedBox.square(
+      dimension: size,
+      child: ClipOval(
+        child: url.isEmpty
+            ? fallback
+            : FutureBuilder<void>(
+                future: avatarCache.ensureCached(url),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done ||
+                      snapshot.hasError) {
+                    return fallback;
+                  }
+                  return CachedNetworkImage(
+                    imageUrl: url,
+                    cacheManager: avatarCache.cacheManager,
+                    width: size,
+                    height: size,
+                    fit: BoxFit.cover,
+                    memCacheWidth: cacheSize,
+                    memCacheHeight: cacheSize,
+                    maxWidthDiskCache: cacheSize,
+                    maxHeightDiskCache: cacheSize,
+                    fadeInDuration: const Duration(milliseconds: 100),
+                    useOldImageOnUrlChange: true,
+                    placeholder: (_, _) => fallback,
+                    errorWidget: (_, _, _) => fallback,
+                  );
+                },
+              ),
+      ),
     );
   }
 }

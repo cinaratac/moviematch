@@ -11,6 +11,7 @@ import 'package:fluttergirdi/utils/layout_metrics.dart';
 import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
 import 'package:fluttergirdi/widgets/people_recommendations_widget.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'actors_screen.dart';
@@ -537,8 +538,8 @@ class _SearchPageState extends State<SearchPage> {
           return _UnifiedSearchItem(
             kind: _SearchKind.movie,
             id: id,
-            title: title.isEmpty ? 'Ä°simsiz film' : title,
-            subtitle: subtitleParts.join(' â€¢ '),
+            title: title.isEmpty ? 'İsimsiz film' : title,
+            subtitle: subtitleParts.join(' • '),
             imageUrl: posterPath == null || posterPath.isEmpty
                 ? null
                 : 'https://image.tmdb.org/t/p/w200$posterPath',
@@ -673,7 +674,7 @@ class _SearchPageState extends State<SearchPage> {
             kind: _SearchKind.user,
             id: user['uid'].toString(),
             title: username.isEmpty ? 'isimsiz' : username,
-            subtitle: subtitleParts.join(' â€¢ '),
+            subtitle: subtitleParts.join(' • '),
             imageUrl: photoUrl == null || photoUrl.isEmpty ? null : photoUrl,
           );
         })
@@ -696,7 +697,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   String get _activeFilterLabel {
-    if (_selectedFilters.isEmpty) return 'tÃ¼m kategoriler';
+    if (_selectedFilters.isEmpty) return 'tüm kategoriler';
     return _selectedFilters.map((kind) => kind.label.toLowerCase()).join(', ');
   }
 
@@ -762,7 +763,7 @@ class _SearchPageState extends State<SearchPage> {
     } catch (_) {
       if (mounted && requestId == _requestId) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Daha fazla film yÃ¼klenemedi.')),
+          const SnackBar(content: Text('Daha fazla film yüklenemedi.')),
         );
       }
     } finally {
@@ -1048,7 +1049,11 @@ class _SearchPageState extends State<SearchPage> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             itemCount: recents.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            separatorBuilder: (_, _) => const HairlineDivider(
+              indent: 16,
+              endIndent: 16,
+              verticalPadding: 4,
+            ),
             itemBuilder: (context, index) {
               final item = recents[index];
               return _UnifiedSearchTile(
@@ -1075,46 +1080,62 @@ class _SearchPageState extends State<SearchPage> {
       padding: EdgeInsets.only(top: 8, bottom: bottomPadding),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       children: [
-        if (recents.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 12, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Son Aramalar',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: colors.onSurface,
-                    ),
+        _buildDiscoverRecents(context, recents, colors),
+        const RecommendationCard(key: ValueKey('discover_recommendations')),
+        const SizedBox(height: 8),
+        const DiscoveryListsWidget(key: ValueKey('discover_lists')),
+        const SizedBox(height: 12),
+        const PeopleRecommendationsWidget(
+          key: ValueKey('discover_people_recommendations'),
+        ),
+        const SizedBox(height: 12),
+        const DiscoverNewsAndBlogSections(
+          key: ValueKey('discover_news_and_blogs'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDiscoverRecents(
+    BuildContext context,
+    List<_UnifiedSearchItem> recents,
+    ColorScheme colors,
+  ) {
+    if (recents.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Son Aramalar',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: colors.onSurface,
                   ),
                 ),
-                TextButton(
-                  onPressed: _clearRecents,
-                  child: const Text('Temizle'),
-                ),
-              ],
-            ),
-          ),
-          ...recents.map(
-            (item) => Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: _UnifiedSearchTile(
-                item: item,
-                onTap: () => _openResult(item),
-                onRemove: () => _removeRecent(item),
               ),
+              TextButton(
+                onPressed: _clearRecents,
+                child: const Text('Temizle'),
+              ),
+            ],
+          ),
+        ),
+        for (final item in recents)
+          Padding(
+            key: ValueKey(item.storageKey),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: _UnifiedSearchTile(
+              item: item,
+              onTap: () => _openResult(item),
+              onRemove: () => _removeRecent(item),
             ),
           ),
-          const SizedBox(height: 8),
-        ],
-        const RecommendationCard(),
         const SizedBox(height: 8),
-        const DiscoveryListsWidget(),
-        const SizedBox(height: 12),
-        const PeopleRecommendationsWidget(),
-        const SizedBox(height: 12),
-        const DiscoverNewsAndBlogSections(),
       ],
     );
   }
@@ -1131,8 +1152,8 @@ class _SearchPageState extends State<SearchPage> {
       if (_hasCurrentError) {
         return _EmptySearchState(
           icon: Icons.cloud_off_rounded,
-          title: 'Arama tamamlanamadÄ±',
-          message: 'BaÄŸlantÄ±nÄ± kontrol edip tekrar deneyebilirsin.',
+          title: 'Arama tamamlanamadı',
+          message: 'Bağlantını kontrol edip tekrar deneyebilirsin.',
           actionLabel: 'Tekrar dene',
           onAction: () {
             _failedKinds.removeAll(_desiredKinds);
@@ -1142,9 +1163,9 @@ class _SearchPageState extends State<SearchPage> {
       }
       return _EmptySearchState(
         icon: Icons.search_off_rounded,
-        title: 'SonuÃ§ bulunamadÄ±',
+        title: 'Sonuç bulunamadı',
         message:
-            'â€œ$_activeQueryâ€ iÃ§in $_activeFilterLabel arasÄ±nda bir sonuÃ§ yok.',
+            '"$_activeQuery" için $_activeFilterLabel arasında bir sonuç yok.',
       );
     }
 
@@ -1159,7 +1180,11 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               itemCount: results.length + (_loadingMoreMovies ? 1 : 0),
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              separatorBuilder: (_, _) => const HairlineDivider(
+                indent: 16,
+                endIndent: 16,
+                verticalPadding: 4,
+              ),
               itemBuilder: (context, index) {
                 if (index == results.length) {
                   return const Padding(
@@ -1203,10 +1228,11 @@ class _UnifiedSearchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Material(
-      color: colors.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(16),
+      color: colors.surfaceContainerLow.withValues(alpha: 0.62),
+      borderRadius: BorderRadius.circular(8),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -1224,46 +1250,30 @@ class _UnifiedSearchTile extends StatelessWidget {
                       item.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: colors.onSurface,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.1,
                       ),
                     ),
                     if (item.subtitle.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        item.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
+                      const SizedBox(height: 5),
+                      AccentMetadata(text: item.subtitle, icon: item.kind.icon),
                     ],
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                decoration: BoxDecoration(
-                  color: colors.primaryContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  item.kind.resultLabel,
-                  style: TextStyle(
-                    color: colors.onPrimaryContainer,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              TintedTag(
+                label: item.kind.resultLabel,
+                icon: item.kind.icon,
+                compact: true,
               ),
               if (onRemove != null) ...[
                 const SizedBox(width: 2),
                 IconButton(
-                  tooltip: 'Son aramalardan kaldÄ±r',
+                  tooltip: 'Son aramalardan kaldır',
                   visualDensity: VisualDensity.compact,
                   onPressed: onRemove,
                   icon: Icon(

@@ -9,7 +9,9 @@ import 'package:fluttergirdi/widgets/green_characters.dart';
 /// içinde asıl preloading yapılırken güvenle gösterilebilir.
 /// Süre belirsiz olabileceği için animasyon tek seferlik değil, döngülü.
 class BrandedSplash extends StatefulWidget {
-  const BrandedSplash({super.key});
+  const BrandedSplash({super.key, this.progress});
+
+  final double? progress;
 
   @override
   State<BrandedSplash> createState() => _BrandedSplashState();
@@ -37,7 +39,30 @@ class _BrandedSplashState extends State<BrandedSplash>
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
-    )..repeat(reverse: true); // süre belirsiz → indeterminate döngü
+    );
+    final progress = widget.progress;
+    if (progress == null) {
+      _controller.animateTo(
+        0.86,
+        duration: const Duration(milliseconds: 1800),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _controller.value = progress.clamp(0.0, 1.0);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant BrandedSplash oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final progress = widget.progress;
+    if (progress != null && progress != oldWidget.progress) {
+      _controller.animateTo(
+        progress.clamp(0.0, 1.0),
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    }
   }
 
   @override
@@ -99,7 +124,9 @@ class _BrandedSplashState extends State<BrandedSplash>
                           borderRadius: BorderRadius.circular(4),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF2E7D32).withValues(alpha: 0.4),
+                              color: const Color(
+                                0xFF2E7D32,
+                              ).withValues(alpha: 0.4),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),
@@ -129,11 +156,9 @@ class _BrandedSplashState extends State<BrandedSplash>
           style: TextStyle(
             fontSize: 15,
             height: 1.4,
-            color: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.color
-                ?.withValues(alpha: 0.7),
+            color: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
             fontStyle: FontStyle.italic,
           ),
         ),

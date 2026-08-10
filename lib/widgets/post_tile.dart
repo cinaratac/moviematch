@@ -17,6 +17,7 @@ import 'package:fluttergirdi/screens/chat_room_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
 import 'package:fluttergirdi/services/follow_system_service.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 class PostTile extends StatefulWidget {
   final String postId;
@@ -541,8 +542,8 @@ class _PostTileState extends State<PostTile> {
         color: cs.surface,
         border: Border(
           bottom: BorderSide(
-            color: cs.outlineVariant.withOpacity(0.2),
-            width: 1,
+            color: cs.outlineVariant.withValues(alpha: 0.32),
+            width: 0.5,
           ),
         ),
       ),
@@ -772,14 +773,12 @@ class _PostTileState extends State<PostTile> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Wrap(
                 spacing: 8,
+                runSpacing: 6,
                 children: widget.tags.map((tag) {
-                  return Text(
-                    '#$tag',
-                    style: const TextStyle(
-                      color: Color(0xFF2E7D32),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
+                  return TintedTag(
+                    label: '#$tag',
+                    color: const Color(0xFF2E7D32),
+                    compact: true,
                   );
                 }).toList(),
               ),

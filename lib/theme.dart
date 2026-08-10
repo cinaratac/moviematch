@@ -44,6 +44,11 @@ class AppTheme {
     ),
     scaffoldBackgroundColor: Colors.white,
     appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
+    dividerTheme: const DividerThemeData(
+      color: Color(0x1A000000),
+      thickness: 0.5,
+      space: 1,
+    ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -65,7 +70,6 @@ class AppTheme {
           secondary: orange,
           tertiary: coral,
           surface: plumDark,
-          background: plumDark,
           onSurface: Colors.white,
         ),
     textTheme: const TextTheme(
@@ -76,6 +80,11 @@ class AppTheme {
     ),
     scaffoldBackgroundColor: plumDark,
     appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
+    dividerTheme: const DividerThemeData(
+      color: Color(0x1FFFFFFF),
+      thickness: 0.5,
+      space: 1,
+    ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

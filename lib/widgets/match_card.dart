@@ -12,6 +12,7 @@ import 'package:fluttergirdi/services/follow_system_service.dart';
 import 'package:fluttergirdi/screens/public_profile_screen.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
 import 'package:fluttergirdi/widgets/poster_image.dart';
+import 'package:fluttergirdi/widgets/ui_polish.dart';
 
 // --- YENİ EKLENEN IMPORTLAR ---
 import 'package:fluttergirdi/screens/actors_screen.dart';
@@ -363,23 +364,7 @@ class _MatchCardState extends State<MatchCard>
   }
 
   Widget _buildPrefChip(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.34), width: 1),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          height: 1.1,
-        ),
-      ),
-    );
+    return TintedTag(label: text, color: color, compact: true);
   }
 
   // Tıklama desteği için güncellenmiş çip fonksiyonu
