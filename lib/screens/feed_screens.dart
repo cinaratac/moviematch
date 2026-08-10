@@ -4,7 +4,6 @@ import 'package:fluttergirdi/utils/layout_metrics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:fluttergirdi/screens/news_list_page.dart';
 
 import '../controllers/feed_controller.dart';
 import '../services/user_cache_service.dart';
@@ -136,20 +135,7 @@ class _FeedPageState extends State<FeedPage>
                 ),
               ),
             ),
-            actions: [
-              IconButton(
-                tooltip: 'Gündem ve Blog',
-                icon: const Icon(Icons.newspaper_rounded),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const NewsListPage()),
-                  );
-                },
-              ),
-              const NotificationsButton(),
-              const SizedBox(width: 8),
-            ],
+            actions: [const NotificationsButton(), const SizedBox(width: 8)],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(50),
               child: Container(

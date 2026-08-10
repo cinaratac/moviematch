@@ -32,6 +32,8 @@ class FeedController extends ChangeNotifier {
   }
 
   bool isInitialized = false;
+  Future<void>? _initializationFuture;
+  Future<void>? _followingInitializationFuture;
 
   // --- POPÜLER AKIŞ DEĞİŞKENLERİ ---
   bool isLoading = true;
@@ -54,9 +56,21 @@ class FeedController extends ChangeNotifier {
   // ==========================================
   // 1. POPÜLER AKIŞ METOTLARI
   // ==========================================
-  Future<void> init() async {
-    // Daha önce yüklendiyse (veya yükleme ekranında yüklendiyse) tekrar çekme!
-    if (isInitialized && posts.isNotEmpty) return;
+  Future<void> init() {
+    if (isInitialized) return Future.value();
+    final pending = _initializationFuture;
+    if (pending != null) return pending;
+
+    final future = _initializePopularFeed();
+    _initializationFuture = future;
+    return future.whenComplete(() {
+      if (identical(_initializationFuture, future)) {
+        _initializationFuture = null;
+      }
+    });
+  }
+
+  Future<void> _initializePopularFeed() async {
     isLoading = true;
     _notifyPopular();
     await _loadData(initial: true);
@@ -190,8 +204,21 @@ class FeedController extends ChangeNotifier {
   // ==========================================
   // 2. TAKİP EDİLENLER AKIŞI METOTLARI
   // ==========================================
-  Future<void> initFollowing() async {
-    if (isFollowingInitialized && followingPosts.isNotEmpty) return;
+  Future<void> initFollowing() {
+    if (isFollowingInitialized) return Future.value();
+    final pending = _followingInitializationFuture;
+    if (pending != null) return pending;
+
+    final future = _initializeFollowingFeed();
+    _followingInitializationFuture = future;
+    return future.whenComplete(() {
+      if (identical(_followingInitializationFuture, future)) {
+        _followingInitializationFuture = null;
+      }
+    });
+  }
+
+  Future<void> _initializeFollowingFeed() async {
     isFollowingLoading = true;
     _notifyFollowing();
     await _loadFollowingData();

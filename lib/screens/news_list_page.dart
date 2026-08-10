@@ -15,6 +15,331 @@ class NewsListPage extends StatefulWidget {
   State<NewsListPage> createState() => _NewsListPageState();
 }
 
+class DiscoverNewsAndBlogSections extends StatefulWidget {
+  const DiscoverNewsAndBlogSections({super.key});
+
+  @override
+  State<DiscoverNewsAndBlogSections> createState() =>
+      _DiscoverNewsAndBlogSectionsState();
+}
+
+class _DiscoverNewsAndBlogSectionsState
+    extends State<DiscoverNewsAndBlogSections>
+    with AutomaticKeepAliveClientMixin {
+  static const _pageSize = 3;
+
+  List<NewsArticle> _news = const [];
+  List<BlogPost> _blogs = const [];
+  DocumentSnapshot<Map<String, dynamic>>? _newsCursor;
+  DocumentSnapshot<Map<String, dynamic>>? _blogCursor;
+  bool _newsLoading = true;
+  bool _blogLoading = true;
+  bool _newsLoadingMore = false;
+  bool _blogLoadingMore = false;
+  bool _hasMoreNews = false;
+  bool _hasMoreBlogs = false;
+  Object? _newsError;
+  Object? _blogError;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNews();
+    _loadBlogs();
+  }
+
+  Future<void> _loadNews({bool forceRefresh = false}) async {
+    setState(() {
+      _newsLoading = true;
+      _newsError = null;
+    });
+    try {
+      final page = await NewsService.instance.fetchFirstPage(
+        pageSize: _pageSize,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted) return;
+      setState(() {
+        _news = page.articles;
+        _newsCursor = page.cursor;
+        _hasMoreNews = page.hasMore;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _newsError = error);
+    } finally {
+      if (mounted) setState(() => _newsLoading = false);
+    }
+  }
+
+  Future<void> _loadBlogs({bool forceRefresh = false}) async {
+    setState(() {
+      _blogLoading = true;
+      _blogError = null;
+    });
+    try {
+      final page = await BlogService.instance.fetchFirstPage(
+        pageSize: _pageSize,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted) return;
+      setState(() {
+        _blogs = page.posts;
+        _blogCursor = page.cursor;
+        _hasMoreBlogs = page.hasMore;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _blogError = error);
+    } finally {
+      if (mounted) setState(() => _blogLoading = false);
+    }
+  }
+
+  Future<void> _loadMoreNews() async {
+    final cursor = _newsCursor;
+    if (cursor == null || !_hasMoreNews || _newsLoadingMore) return;
+    setState(() => _newsLoadingMore = true);
+    try {
+      final page = await NewsService.instance.fetchNextPage(
+        after: cursor,
+        pageSize: _pageSize,
+      );
+      if (!mounted) return;
+      final knownIds = _news.map((article) => article.id).toSet();
+      setState(() {
+        _news = [
+          ..._news,
+          ...page.articles.where((article) => knownIds.add(article.id)),
+        ];
+        _newsCursor = page.cursor;
+        _hasMoreNews = page.hasMore;
+      });
+    } catch (_) {
+      if (mounted) _showLoadMoreError('Diğer haberler yüklenemedi.');
+    } finally {
+      if (mounted) setState(() => _newsLoadingMore = false);
+    }
+  }
+
+  Future<void> _loadMoreBlogs() async {
+    final cursor = _blogCursor;
+    if (cursor == null || !_hasMoreBlogs || _blogLoadingMore) return;
+    setState(() => _blogLoadingMore = true);
+    try {
+      final page = await BlogService.instance.fetchNextPage(
+        after: cursor,
+        pageSize: _pageSize,
+      );
+      if (!mounted) return;
+      final knownIds = _blogs.map((post) => post.id).toSet();
+      setState(() {
+        _blogs = [
+          ..._blogs,
+          ...page.posts.where((post) => knownIds.add(post.id)),
+        ];
+        _blogCursor = page.cursor;
+        _hasMoreBlogs = page.hasMore;
+      });
+    } catch (_) {
+      if (mounted) _showLoadMoreError('Diğer blog yazıları yüklenemedi.');
+    } finally {
+      if (mounted) setState(() => _blogLoadingMore = false);
+    }
+  }
+
+  void _showLoadMoreError(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _openArticle(NewsArticle article) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            NewsDetailPage(articleId: article.id, initialArticle: article),
+      ),
+    );
+  }
+
+  void _openPost(BlogPost post) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BlogDetailPage(post: post)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [_buildNews(), const SizedBox(height: 42), _buildBlogs()],
+      ),
+    );
+  }
+
+  Widget _buildNews() {
+    if (_newsLoading && _news.isEmpty) {
+      return const _EmbeddedLoading(
+        masthead: _Masthead(
+          kicker: 'CINEMATCH',
+          title: 'Sinema Gündemi',
+          subtitle: 'Vizyondan, sektörden ve sinema dünyasından haberler',
+        ),
+      );
+    }
+    if (_newsError != null && _news.isEmpty) {
+      return _ErrorState(
+        message: 'Haberler şu anda yüklenemedi.',
+        onRetry: () => _loadNews(forceRefresh: true),
+      );
+    }
+    if (_news.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _Masthead(
+          kicker: 'CINEMATCH',
+          title: 'Sinema Gündemi',
+          subtitle: 'Vizyondan, sektörden ve sinema dünyasından haberler',
+        ),
+        const SizedBox(height: 16),
+        _LeadNewsCard(
+          article: _news.first,
+          onTap: () => _openArticle(_news.first),
+        ),
+        if (_news.length > 1) ...[
+          const SizedBox(height: 24),
+          const _SectionRule(title: 'Son Haberler'),
+          const SizedBox(height: 2),
+          for (final article in _news.skip(1)) ...[
+            _NewspaperRow(article: article, onTap: () => _openArticle(article)),
+            const Divider(height: 1),
+          ],
+        ],
+        if (_hasMoreNews)
+          _EmbeddedLoadMoreButton(
+            loading: _newsLoadingMore,
+            onPressed: _loadMoreNews,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBlogs() {
+    if (_blogLoading && _blogs.isEmpty) {
+      return const _EmbeddedLoading(
+        masthead: _Masthead(
+          kicker: 'YAZARLARDAN',
+          title: 'CineMatch Blog',
+          subtitle: 'İncelemeler, listeler ve sinema üzerine özgün yazılar',
+        ),
+      );
+    }
+    if (_blogError != null && _blogs.isEmpty) {
+      return _ErrorState(
+        message: 'Blog yazıları şu anda yüklenemedi.',
+        onRetry: () => _loadBlogs(forceRefresh: true),
+      );
+    }
+    if (_blogs.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _Masthead(
+          kicker: 'YAZARLARDAN',
+          title: 'CineMatch Blog',
+          subtitle: 'İncelemeler, listeler ve sinema üzerine özgün yazılar',
+        ),
+        const SizedBox(height: 16),
+        _LeadBlogCard(post: _blogs.first, onTap: () => _openPost(_blogs.first)),
+        if (_blogs.length > 1) ...[
+          const SizedBox(height: 26),
+          const _SectionRule(title: 'Yeni Yazılar'),
+          const SizedBox(height: 4),
+          for (final post in _blogs.skip(1)) ...[
+            _BlogRow(post: post, onTap: () => _openPost(post)),
+            const Divider(height: 1),
+          ],
+        ],
+        if (_hasMoreBlogs)
+          _EmbeddedLoadMoreButton(
+            loading: _blogLoadingMore,
+            onPressed: _loadMoreBlogs,
+          ),
+      ],
+    );
+  }
+}
+
+class _EmbeddedLoading extends StatelessWidget {
+  const _EmbeddedLoading({required this.masthead});
+
+  final Widget masthead;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        masthead,
+        const SizedBox(height: 16),
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: ColoredBox(color: colors.surfaceContainerHighest),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmbeddedLoadMoreButton extends StatelessWidget {
+  const _EmbeddedLoadMoreButton({
+    required this.loading,
+    required this.onPressed,
+  });
+
+  final bool loading;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Center(
+        child: IconButton(
+          tooltip: 'Daha fazla göster',
+          onPressed: loading ? null : onPressed,
+          icon: loading
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
+          style: IconButton.styleFrom(
+            fixedSize: const Size(44, 44),
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _NewsListPageState extends State<NewsListPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;

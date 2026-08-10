@@ -12,9 +12,6 @@ class AppPopularMovies extends StatefulWidget {
 
 class _AppPopularMoviesState extends State<AppPopularMovies>
     with AutomaticKeepAliveClientMixin {
-  static List<AppPopularMovie>? _cache;
-  static Future<List<AppPopularMovie>>? _pending;
-
   List<AppPopularMovie>? _movies;
   bool _loading = false;
 
@@ -28,19 +25,17 @@ class _AppPopularMoviesState extends State<AppPopularMovies>
   }
 
   void _load() {
-    final cached = _cache;
+    final service = AppPopularMoviesService.instance;
+    final cached = service.cachedMovies;
     if (cached != null) {
       _movies = cached;
       return;
     }
 
     _loading = true;
-    final future = _pending ??= AppPopularMoviesService.instance
-        .loadWeeklyPopularMovies();
-    future
+    service
+        .loadWeeklyPopularMovies()
         .then((movies) {
-          _pending = null;
-          _cache = movies;
           if (!mounted) return;
           setState(() {
             _movies = movies;
@@ -48,7 +43,6 @@ class _AppPopularMoviesState extends State<AppPopularMovies>
           });
         })
         .catchError((_) {
-          _pending = null;
           if (!mounted) return;
           setState(() {
             _movies = const [];

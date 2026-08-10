@@ -5,13 +5,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:fluttergirdi/screens/actors_screen.dart';
 import 'package:fluttergirdi/screens/director_screen.dart';
 import 'package:fluttergirdi/services/catalog_service.dart';
+import 'package:fluttergirdi/services/movie_availability_service.dart';
 import 'package:fluttergirdi/services/shelf_state_cache.dart';
 import 'package:fluttergirdi/widgets/movie_action_sheet.dart';
 import 'package:fluttergirdi/widgets/movie_review_section.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class _MovieDetailsCacheEntry {
   final DateTime fetchedAt;
@@ -86,11 +87,14 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
   bool _isWatched = false;
   String? _watchedUid;
   Map<String, dynamic>? _directorInfo;
+  MovieAvailability? _availability;
+  bool _availabilityLoading = true;
 
   @override
   void initState() {
     super.initState();
     _initWatchedState();
+    unawaited(_loadAvailability());
     final cachedDetails = _MovieDetailsCache.get(widget.tmdbId);
     if (cachedDetails != null) {
       _applyDetails(cachedDetails);
@@ -204,6 +208,29 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
         _handleShelfStateChanged();
       }),
     );
+  }
+
+  Future<void> _loadAvailability() async {
+    final availability = await MovieAvailabilityService.instance.load(
+      widget.tmdbId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _availability = availability;
+      _availabilityLoading = false;
+    });
+  }
+
+  Future<void> _openExternalUrl(String rawUrl) async {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri != null &&
+        await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Bağlantı açılamadı.')));
   }
 
   void _showAddSheet() {
@@ -340,6 +367,7 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
                       _buildOverview(textColor),
                       const SizedBox(height: 30),
                       _buildCastSection(textColor),
+                      _buildAvailabilitySection(textColor),
                       const SizedBox(height: 30),
                       MovieReviewSection(
                         tmdbId: widget.tmdbId,
@@ -613,6 +641,118 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
     );
   }
 
+  Widget _buildAvailabilitySection(Color textColor) {
+    if (_availabilityLoading) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 30, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 132,
+              height: 18,
+              color: textColor.withValues(alpha: 0.08),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              height: 96,
+              decoration: BoxDecoration(
+                color: textColor.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final availability = _availability;
+    if (availability == null || availability.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final trailerKey = availability.youtubeTrailerKey;
+    final watchLink = availability.watchLink;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 30),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Nerede İzlenir?',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'TR',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (availability.providers.isNotEmpty || trailerKey != null) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 78,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                scrollDirection: Axis.horizontal,
+                itemCount:
+                    availability.providers.length +
+                    (trailerKey == null ? 0 : 1),
+                separatorBuilder: (_, _) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  if (trailerKey != null && index == 0) {
+                    return _TrailerWatchCard(
+                      onTap: () => _openExternalUrl(
+                        Uri.https('www.youtube.com', '/watch', {
+                          'v': trailerKey,
+                        }).toString(),
+                      ),
+                    );
+                  }
+                  final providerIndex = index - (trailerKey == null ? 0 : 1);
+                  final provider = availability.providers[providerIndex];
+                  return _WatchProviderCard(
+                    provider: provider,
+                    onTap: watchLink == null
+                        ? null
+                        : () => _openExternalUrl(watchLink),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildTag(String text, bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -627,6 +767,171 @@ class _MovieDetailScreenState extends State<MovieDetailScreen> {
           fontSize: 12,
           fontWeight: FontWeight.w600,
           color: isDark ? Colors.white70 : Colors.black87,
+        ),
+      ),
+    );
+  }
+}
+
+class _WatchProviderCard extends StatelessWidget {
+  const _WatchProviderCard({required this.provider, required this.onTap});
+
+  final MovieWatchProvider provider;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return SizedBox(
+      width: 124,
+      child: Material(
+        color: colors.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(
+            color: colors.outlineVariant.withValues(alpha: 0.45),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: provider.logoUrl.isEmpty
+                        ? ColoredBox(
+                            color: colors.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.live_tv_rounded,
+                              color: colors.onSurfaceVariant,
+                              size: 19,
+                            ),
+                          )
+                        : CachedNetworkImage(
+                            imageUrl: provider.logoUrl,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 102,
+                            errorWidget: (_, _, _) => Icon(
+                              Icons.live_tv_rounded,
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        provider.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: colors.onSurface,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        provider.offerTypes.join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TrailerWatchCard extends StatelessWidget {
+  const _TrailerWatchCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return SizedBox(
+      width: 124,
+      child: Material(
+        color: colors.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(
+            color: colors.outlineVariant.withValues(alpha: 0.45),
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE53935).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: Icon(
+                      Icons.play_arrow_rounded,
+                      color: Color(0xFFE53935),
+                      size: 24,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Fragman',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: colors.onSurface,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'YouTube',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -27,8 +27,10 @@ class BlogService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final Map<String, BlogPost> _postCache = {};
   BlogPage? _firstPageCache;
+  int? _firstPageCacheSize;
   DateTime? _firstPageFetchedAt;
   Future<BlogPage>? _firstPageInFlight;
+  int? _firstPageInFlightSize;
   List<BlogPost>? _teaserCache;
   DateTime? _teaserCachedAt;
   Future<List<BlogPost>>? _teaserInFlight;
@@ -42,23 +44,35 @@ class BlogService {
     final cachedAt = _firstPageFetchedAt;
     final isFresh =
         cachedAt != null && DateTime.now().difference(cachedAt) <= _cacheTtl;
-    if (!forceRefresh && isFresh && _firstPageCache != null) {
+    if (!forceRefresh &&
+        isFresh &&
+        _firstPageCache != null &&
+        _firstPageCacheSize == pageSize) {
       return Future.value(_firstPageCache);
     }
 
-    if (!forceRefresh && _firstPageInFlight != null) {
+    if (!forceRefresh &&
+        _firstPageInFlight != null &&
+        _firstPageInFlightSize == pageSize) {
       return _firstPageInFlight!;
     }
 
     final future = _fetchPage(pageSize: pageSize);
     _firstPageInFlight = future;
+    _firstPageInFlightSize = pageSize;
     return future
         .then((page) {
           _firstPageCache = page;
+          _firstPageCacheSize = pageSize;
           _firstPageFetchedAt = DateTime.now();
           return page;
         })
-        .whenComplete(() => _firstPageInFlight = null);
+        .whenComplete(() {
+          if (identical(_firstPageInFlight, future)) {
+            _firstPageInFlight = null;
+            _firstPageInFlightSize = null;
+          }
+        });
   }
 
   Future<BlogPage> fetchNextPage({
@@ -115,13 +129,14 @@ class BlogService {
     Query<Map<String, dynamic>> query = _db
         .collection('public_blog_posts')
         .orderBy('publishedAt', descending: true)
-        .limit(pageSize);
+        .limit(pageSize + 1);
     if (after != null) query = query.startAfterDocument(after);
 
     final snapshot = await query.get(
       const GetOptions(source: Source.serverAndCache),
     );
-    final posts = snapshot.docs
+    final pageDocs = snapshot.docs.take(pageSize).toList(growable: false);
+    final posts = pageDocs
         .map(BlogPost.fromFirestore)
         .where((post) => post.title.isNotEmpty)
         .toList(growable: false);
@@ -131,8 +146,8 @@ class BlogService {
 
     return BlogPage(
       posts: posts,
-      cursor: snapshot.docs.isEmpty ? after : snapshot.docs.last,
-      hasMore: snapshot.docs.length == pageSize,
+      cursor: pageDocs.isEmpty ? after : pageDocs.last,
+      hasMore: snapshot.docs.length > pageSize,
     );
   }
 }

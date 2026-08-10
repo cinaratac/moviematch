@@ -6,8 +6,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:fluttergirdi/screens/news_list_page.dart';
 import 'package:fluttergirdi/utils/layout_metrics.dart';
 import 'package:fluttergirdi/widgets/discovery_lists_widget.dart';
+import 'package:fluttergirdi/widgets/people_recommendations_widget.dart';
 import 'package:fluttergirdi/widgets/recommendation_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -1109,6 +1111,10 @@ class _SearchPageState extends State<SearchPage> {
         const RecommendationCard(),
         const SizedBox(height: 8),
         const DiscoveryListsWidget(),
+        const SizedBox(height: 12),
+        const PeopleRecommendationsWidget(),
+        const SizedBox(height: 12),
+        const DiscoverNewsAndBlogSections(),
       ],
     );
   }

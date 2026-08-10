@@ -10,7 +10,6 @@ import 'package:fluttergirdi/screens/leaderboard_screen.dart';
 import 'package:fluttergirdi/screens/badges_progress_screen.dart';
 import 'package:fluttergirdi/screens/settings_page.dart';
 import 'package:fluttergirdi/screens/clubs_tab.dart';
-import 'package:fluttergirdi/screens/news_list_page.dart';
 import '../screens/trivia_welcome_screen.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
@@ -162,12 +161,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
                         );
                       },
                     ),
-                    _buildMenuItem(
-                      context,
-                      title: 'Gündem ve Blog',
-                      onTap: () => _openPage(context, const NewsListPage()),
-                    ),
-
                     const SizedBox(height: 24),
 
                     _buildSectionTitle("UYGULAMA"),

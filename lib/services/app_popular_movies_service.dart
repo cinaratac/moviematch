@@ -5,9 +5,42 @@ class AppPopularMoviesService {
   AppPopularMoviesService._();
   static final AppPopularMoviesService instance = AppPopularMoviesService._();
 
+  List<AppPopularMovie>? _cachedMovies;
+  Future<List<AppPopularMovie>>? _pending;
+
+  List<AppPopularMovie>? get cachedMovies => _cachedMovies;
+
+  Future<List<AppPopularMovie>> preload() => loadWeeklyPopularMovies();
+
   Future<List<AppPopularMovie>> loadWeeklyPopularMovies({
     int resultLimit = 10,
     int maxWeeks = 3,
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh && _cachedMovies != null) {
+      return Future.value(_cachedMovies);
+    }
+    final pending = _pending;
+    if (pending != null) return pending;
+
+    final future = _fetchWeeklyPopularMovies(
+      resultLimit: resultLimit,
+      maxWeeks: maxWeeks,
+    );
+    _pending = future;
+    return future
+        .then((movies) {
+          _cachedMovies = movies;
+          return movies;
+        })
+        .whenComplete(() {
+          if (identical(_pending, future)) _pending = null;
+        });
+  }
+
+  Future<List<AppPopularMovie>> _fetchWeeklyPopularMovies({
+    required int resultLimit,
+    required int maxWeeks,
   }) async {
     try {
       final response = await FirebaseFunctions.instance

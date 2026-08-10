@@ -11,7 +11,6 @@ import 'package:fluttergirdi/screens/profilescreen.dart';
 import 'package:fluttergirdi/screens/search_page.dart';
 import 'package:fluttergirdi/services/announcement_service.dart';
 import 'package:fluttergirdi/screens/news_detail_page.dart';
-import 'package:fluttergirdi/screens/news_list_page.dart';
 import 'package:fluttergirdi/screens/post_detail_screen.dart';
 import 'package:fluttergirdi/services/tab_service.dart';
 import 'package:fluttergirdi/services/global_data_service.dart';
@@ -186,10 +185,9 @@ class _HomeShellState extends State<HomeShell> {
 
     if (path.contains('/news')) {
       if (mounted) {
-        debugPrint("Haber listesi linki yakalandı!");
-        Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const NewsListPage()));
+        debugPrint("Haber bağlantısı keşfet ekranına yönlendirildi.");
+        _switchToTab(1);
+        TabService.instance.changeTab(1);
       }
       return;
     }
