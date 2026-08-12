@@ -14,6 +14,7 @@ import '../screens/trivia_welcome_screen.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:fluttergirdi/auth/login_page.dart';
 import 'package:fluttergirdi/widgets/ui_polish.dart';
+import 'package:fluttergirdi/widgets/viewport_fitted_content.dart';
 
 class CustomDrawer extends StatefulWidget {
   const CustomDrawer({super.key});
@@ -93,141 +94,146 @@ class _CustomDrawerState extends State<CustomDrawer> {
               const HairlineDivider(),
 
               Expanded(
-                child: ListView(
+                child: ViewportFittedContent(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-                  children: [
-                    _buildSectionTitle("KEŞFET"),
-                    _buildMenuItem(
-                      context,
-                      title: 'Liderlik Tablosu',
-                      onTap: () =>
-                          _openPage(context, const LeaderboardScreen()),
-                    ),
-                    _buildMenuItem(
-                      context,
-                      title: 'Kulüpler',
-                      onTap: () => _openPage(
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildSectionTitle("KEŞFET"),
+                      _buildMenuItem(
                         context,
-                        Scaffold(
-                          appBar: AppBar(title: const Text("Kulüpler")),
-                          body: const ClubsTab(),
-                        ),
+                        title: 'Liderlik Tablosu',
+                        onTap: () =>
+                            _openPage(context, const LeaderboardScreen()),
                       ),
-                    ),
-                    _buildMenuItem(
-                      context,
-                      title: 'Rozetler',
-                      onTap: () =>
-                          _openPage(context, const BadgesProgressScreen()),
-                    ),
-                    _buildMenuItem(
-                      context,
-                      title: 'Sinema Yarışması',
-                      onTap: () =>
-                          _openPage(context, const TriviaWelcomeScreen()),
-                    ),
-
-                    const SizedBox(height: 24),
-                    _buildSectionTitle("YAYINLAR"),
-
-                    StreamBuilder<DocumentSnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('system')
-                          .doc('announcement')
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        bool hasNew = false;
-                        String? currentId;
-                        if (snapshot.hasData && snapshot.data!.exists) {
-                          final data =
-                              snapshot.data!.data() as Map<String, dynamic>;
-                          if (data['isActive'] == true) {
-                            currentId = data['id'];
-                            if (currentId != null &&
-                                currentId != _lastSeenAnnouncementId) {
-                              hasNew = true;
-                            }
-                          }
-                        }
-                        return _buildMenuItem(
+                      _buildMenuItem(
+                        context,
+                        title: 'Kulüpler',
+                        onTap: () => _openPage(
                           context,
-                          title: 'Yenilikler',
-                          hasBadge: hasNew,
-                          onTap: () {
-                            if (currentId != null) {
-                              _markAnnouncementAsSeen(currentId);
+                          Scaffold(
+                            appBar: AppBar(title: const Text("Kulüpler")),
+                            body: const ClubsTab(),
+                          ),
+                        ),
+                      ),
+                      _buildMenuItem(
+                        context,
+                        title: 'Rozetler',
+                        onTap: () =>
+                            _openPage(context, const BadgesProgressScreen()),
+                      ),
+                      _buildMenuItem(
+                        context,
+                        title: 'Sinema Yarışması',
+                        onTap: () =>
+                            _openPage(context, const TriviaWelcomeScreen()),
+                      ),
+
+                      const SizedBox(height: 24),
+                      _buildSectionTitle("YAYINLAR"),
+
+                      StreamBuilder<DocumentSnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('system')
+                            .doc('announcement')
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          bool hasNew = false;
+                          String? currentId;
+                          if (snapshot.hasData && snapshot.data!.exists) {
+                            final data =
+                                snapshot.data!.data() as Map<String, dynamic>;
+                            if (data['isActive'] == true) {
+                              currentId = data['id'];
+                              if (currentId != null &&
+                                  currentId != _lastSeenAnnouncementId) {
+                                hasNew = true;
+                              }
                             }
-                            _openPage(context, const AnnouncementsScreen());
-                          },
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 24),
-
-                    _buildSectionTitle("UYGULAMA"),
-                    _buildMenuItem(
-                      context,
-                      title: 'Ayarlar',
-                      onTap: () => _openPage(context, const SettingsPage()),
-                    ),
-                    _buildMenuItem(
-                      context,
-                      title: 'Davet Et',
-                      onTap: () => SharePlus.instance.share(
-                        ShareParams(
-                          text:
-                              'CineMatch ile film zevkini keşfet! https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch',
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                        ),
-                        onPressed: () async {
-                          // 1. Önbellek temizliği
-                          await DefaultCacheManager().emptyCache();
-                          // 2. Shared Preferences temizliği
-                          final prefs = await SharedPreferences.getInstance();
-                          await prefs.clear();
-
-                          // 3. KRİTİK ADIM: Önce tüm sayfaları (ve Stream'leri) yok edip Login'e git!
-                          if (context.mounted) {
-                            Navigator.of(
-                              context,
-                              rootNavigator: true,
-                            ).pushAndRemoveUntil(
-                              MaterialPageRoute(
-                                builder: (_) => const LoginPage(),
-                              ),
-                              (route) =>
-                                  false, // Arkada açık kalan ne kadar sayfa varsa hepsini siler
-                            );
                           }
-
-                          // 4. Navigasyondan hemen sonra çıkış yap (Böylece permission-denied hatası asla olmaz)
-                          await FirebaseAuth.instance.signOut();
+                          return _buildMenuItem(
+                            context,
+                            title: 'Yenilikler',
+                            hasBadge: hasNew,
+                            onTap: () {
+                              if (currentId != null) {
+                                _markAnnouncementAsSeen(currentId);
+                              }
+                              _openPage(context, const AnnouncementsScreen());
+                            },
+                          );
                         },
-                        child: const Text(
-                          "Çıkış yap",
-                          style: TextStyle(
-                            color: CupertinoColors.destructiveRed,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
+                      ),
+                      const SizedBox(height: 24),
+
+                      _buildSectionTitle("UYGULAMA"),
+                      _buildMenuItem(
+                        context,
+                        title: 'Ayarlar',
+                        onTap: () => _openPage(context, const SettingsPage()),
+                      ),
+                      _buildMenuItem(
+                        context,
+                        title: 'Davet Et',
+                        onTap: () => SharePlus.instance.share(
+                          ShareParams(
+                            text:
+                                'CineMatch ile film zevkini keşfet! https://play.google.com/store/apps/details?id=com.kozmosoft.cinematch',
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
+
+                      const SizedBox(height: 10),
+
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                          ),
+                          onPressed: () async {
+                            // 1. Önbellek temizliği
+                            await DefaultCacheManager().emptyCache();
+                            // 2. Shared Preferences temizliği
+                            final prefs = await SharedPreferences.getInstance();
+                            await prefs.clear();
+
+                            // 3. KRİTİK ADIM: Önce tüm sayfaları (ve Stream'leri) yok edip Login'e git!
+                            if (context.mounted) {
+                              Navigator.of(
+                                context,
+                                rootNavigator: true,
+                              ).pushAndRemoveUntil(
+                                MaterialPageRoute(
+                                  builder: (_) => const LoginPage(),
+                                ),
+                                (route) =>
+                                    false, // Arkada açık kalan ne kadar sayfa varsa hepsini siler
+                              );
+                            }
+
+                            // 4. Navigasyondan hemen sonra çıkış yap (Böylece permission-denied hatası asla olmaz)
+                            await FirebaseAuth.instance.signOut();
+                          },
+                          child: const Text(
+                            "Çıkış yap",
+                            style: TextStyle(
+                              color: CupertinoColors.destructiveRed,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -271,15 +277,6 @@ class _CustomDrawerState extends State<CustomDrawer> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'CINEMATCH',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colors.primary,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 2.2,
-                    ),
-                  ),
-                  const SizedBox(height: 13),
                   Row(
                     children: [
                       CircleAvatar(

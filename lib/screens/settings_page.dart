@@ -12,7 +12,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:fluttergirdi/screens/account_deletion_page.dart';
 import 'package:fluttergirdi/screens/blocked_users_screen.dart';
+import 'package:fluttergirdi/auth/password_reset_page.dart';
 import 'package:flutter_cached_pdfview/flutter_cached_pdfview.dart';
+import 'package:fluttergirdi/services/password_reset_service.dart';
+import 'package:fluttergirdi/utils/app_contact.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -105,8 +108,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _copySupportEmail() async {
-    const email = 'cinematch.app.dev@gmail.com';
-    await Clipboard.setData(const ClipboardData(text: email));
+    await Clipboard.setData(const ClipboardData(text: AppContact.supportEmail));
     if (!mounted) return;
     Navigator.pop(context);
     _toast('E-posta adresi kopyalandı.');
@@ -193,12 +195,31 @@ class _SettingsPageState extends State<SettingsPage> {
       _toast('E-posta bulunamadı.');
       return;
     }
+    final hasPasswordProvider = user.providerData.any(
+      (provider) => provider.providerId == 'password',
+    );
+    if (!hasPasswordProvider) {
+      _toast(
+        'Bu hesap Google veya Apple ile giriş yapıyor; ayrı bir şifresi yok.',
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: user.email!);
-      _toast('Şifre sıfırlama bağlantısı gönderildi.');
-    } catch (e) {
-      _toast('Hata: $e');
+      final retryAfter = await PasswordResetService.instance.request(
+        user.email!,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PasswordResetPage(
+            email: user.email!,
+            initialResendSeconds: retryAfter,
+          ),
+        ),
+      );
+    } on PasswordResetException catch (error) {
+      _toast(error.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -424,7 +445,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _showSupportDialog() {
-    const email = 'cinematch.app.dev@gmail.com';
+    const email = AppContact.supportEmail;
 
     _showSettingsDialog<void>(
       title: 'Destek',

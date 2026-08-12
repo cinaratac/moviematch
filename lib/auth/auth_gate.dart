@@ -98,7 +98,6 @@ class _RegistrationGateState extends State<_RegistrationGate> {
 
 // import'lara ekle:
 
-
 // _GateLoading'i değiştir:
 class _GateLoading extends StatelessWidget {
   const _GateLoading();
@@ -110,7 +109,7 @@ class _GateLoading extends StatelessWidget {
         child: Center(
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 40.0),
-            child: BrandedSplash(),
+            child: BrandedSplash(progress: 0.06),
           ),
         ),
       ),

@@ -103,6 +103,7 @@ class _HomeShellState extends State<HomeShell> {
       _index = targetIndex;
       _loadedPages[targetIndex] = true;
     });
+    NotificationService.I.setMessagesScreenActive(targetIndex == 3);
 
     // Sekme geçişi bitince arka plan yüklemelerine kaldığı yerden devam et
   }
@@ -144,6 +145,7 @@ class _HomeShellState extends State<HomeShell> {
     _announcementTimer?.cancel();
     _linkSubscription?.cancel();
     TabService.instance.indexNotifier.removeListener(_onTabServiceIndexChanged);
+    NotificationService.I.setMessagesScreenActive(false);
     super.dispose();
   }
 

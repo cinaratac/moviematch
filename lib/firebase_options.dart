@@ -48,7 +48,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyAsHFffuxGA1cYKbHBs8LE6QbJOi4pjwC4',
-    appId: '1:266660427246:android:4dcb77ff5e91e47dc04aff',
+    appId: '1:266660427246:android:8fb16e780cb74f7ec04aff',
     messagingSenderId: '266660427246',
     projectId: 'movie-matching-8a836',
     storageBucket: 'movie-matching-8a836.firebasestorage.app',

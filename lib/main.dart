@@ -24,11 +24,19 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Ekran yönü ayarları (Dikey moda sabitleme)
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // Telefonlarda portreyi koru; tablet ve katlanabilirlerde yeniden
+  // boyutlandırma ile kullanıcının yön tercihine izin ver.
+  final view = WidgetsBinding.instance.platformDispatcher.views.first;
+  final logicalWidth = view.physicalSize.width / view.devicePixelRatio;
+  final logicalHeight = view.physicalSize.height / view.devicePixelRatio;
+  final isCompact = logicalWidth < 600 || logicalHeight < 600;
+  await SystemChrome.setPreferredOrientations(
+    isCompact
+        ? [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]
+        : DeviceOrientation.values,
+  );
 
   // 2. Firebase Başlatma
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -44,14 +52,12 @@ Future<void> main() async {
         );
   }
 
-  // --- APP CHECK AKTİVASYONU (GEÇİCİ OLARAK KAPATILDI) ---
-
- // await FirebaseAppCheck.instance.activate(
-  //   androidProvider: kReleaseMode
-  //       ? AndroidProvider.playIntegrity
-  //       : AndroidProvider.debug,
-  //   appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
-  // );
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: kReleaseMode
+        ? AndroidProvider.playIntegrity
+        : AndroidProvider.debug,
+    appleProvider: kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
+  );
 
   // Firestore Ayarları
   FirebaseFirestore.instance.settings = const Settings(

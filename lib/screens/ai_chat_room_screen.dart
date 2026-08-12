@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttergirdi/screens/search_movie.dart';
 import 'package:fluttergirdi/services/ai_chat_service.dart';
 import 'package:fluttergirdi/services/chat_service.dart';
+import 'package:fluttergirdi/services/notification_service.dart';
 import 'package:fluttergirdi/widgets/chat_ui_components.dart'
     show MessageBubble;
 import 'package:fluttergirdi/widgets/cinematch_bot_avatar.dart';
@@ -41,6 +42,7 @@ class _AiChatRoomScreenState extends State<AiChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    NotificationService.I.enterChat(AiChatService.aiUid);
     _myUid = FirebaseAuth.instance.currentUser!.uid;
     _init();
   }
@@ -154,6 +156,7 @@ class _AiChatRoomScreenState extends State<AiChatRoomScreen> {
 
   @override
   void dispose() {
+    NotificationService.I.leaveChat(AiChatService.aiUid);
     _ctrl.dispose();
     _scrollController.dispose();
     super.dispose();

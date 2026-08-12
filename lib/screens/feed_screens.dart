@@ -100,14 +100,14 @@ class _FeedPageState extends State<FeedPage>
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: SizedBox(
-                  width: 190,
-                  height: 54,
+                  width: 166,
+                  height: 46,
                   child: ClipRect(
                     child: Transform.scale(
-                      scale: 1.53,
+                      scale: 2.6,
                       child: Image.asset(
                         'assets/images/cinematch_name.png',
-                        fit: BoxFit.cover,
+                        fit: BoxFit.contain,
                         alignment: Alignment.center,
                         filterQuality: FilterQuality.high,
                       ),

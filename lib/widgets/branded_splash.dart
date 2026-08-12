@@ -7,11 +7,12 @@ import 'package:fluttergirdi/widgets/green_characters.dart';
 /// içermez. Bu sayede hem AuthGate'in kayıt durumu kontrolü sırasında
 /// (henüz kullanıcıya özel servisler başlamadan) hem de InitialLoadingScreen
 /// içinde asıl preloading yapılırken güvenle gösterilebilir.
-/// Süre belirsiz olabileceği için animasyon tek seferlik değil, döngülü.
+/// Gerçek yükleme ilerlemesini yumuşatarak karakter ve barı birlikte hareket ettirir.
 class BrandedSplash extends StatefulWidget {
-  const BrandedSplash({super.key, this.progress});
+  const BrandedSplash({super.key, this.progress, this.onProgressComplete});
 
   final double? progress;
+  final VoidCallback? onProgressComplete;
 
   @override
   State<BrandedSplash> createState() => _BrandedSplashState();
@@ -20,7 +21,7 @@ class BrandedSplash extends StatefulWidget {
 class _BrandedSplashState extends State<BrandedSplash>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final String _randomFact;
+  bool _completionReported = false;
 
   static const List<String> _cinemaFacts = [
     'Matrix serisindeki ikonik yeşil kodlar aslında Japon suşi tariflerinden oluşur.',
@@ -31,11 +32,12 @@ class _BrandedSplashState extends State<BrandedSplash>
     'Rocky filmindeki ikonik koşu sahnesinde, pazar yerindeki insanların çoğu çekim yapıldığından habersiz gerçek halktı.',
     'Leon (Sevginin Gücü) filmindeki polis baskını sahnesi o kadar gerçekçiydi ki, civardaki bir soyguncu gerçek polis sanıp teslim olmuştur.',
   ];
+  static final String _sessionFact =
+      _cinemaFacts[Random().nextInt(_cinemaFacts.length)];
 
   @override
   void initState() {
     super.initState();
-    _randomFact = _cinemaFacts[Random().nextInt(_cinemaFacts.length)];
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
@@ -49,6 +51,11 @@ class _BrandedSplashState extends State<BrandedSplash>
       );
     } else {
       _controller.value = progress.clamp(0.0, 1.0);
+      if (_controller.value >= 1) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _reportCompletion();
+        });
+      }
     }
   }
 
@@ -57,12 +64,36 @@ class _BrandedSplashState extends State<BrandedSplash>
     super.didUpdateWidget(oldWidget);
     final progress = widget.progress;
     if (progress != null && progress != oldWidget.progress) {
-      _controller.animateTo(
-        progress.clamp(0.0, 1.0),
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-      );
+      _animateToProgress(progress);
     }
+  }
+
+  void _animateToProgress(double progress) {
+    final target = progress.clamp(0.0, 1.0);
+    if (target <= _controller.value) {
+      if (target >= 1) _reportCompletion();
+      return;
+    }
+
+    final distance = target - _controller.value;
+    final durationMs = (420 + (distance * 1050)).round().clamp(420, 1250);
+    _controller
+        .animateTo(
+          target,
+          duration: Duration(milliseconds: durationMs),
+          curve: Curves.easeInOutCubic,
+        )
+        .then((_) {
+          if (mounted && target >= 1 && _controller.value >= 1) {
+            _reportCompletion();
+          }
+        });
+  }
+
+  void _reportCompletion() {
+    if (_completionReported) return;
+    _completionReported = true;
+    widget.onProgressComplete?.call();
   }
 
   @override
@@ -151,7 +182,7 @@ class _BrandedSplashState extends State<BrandedSplash>
         ),
         const SizedBox(height: 8),
         Text(
-          _randomFact,
+          _sessionFact,
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 15,

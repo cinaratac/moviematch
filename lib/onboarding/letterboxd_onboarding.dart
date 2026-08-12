@@ -19,6 +19,7 @@ import 'package:cloud_functions/cloud_functions.dart'; // TMDB araması için
 import 'package:cached_network_image/cached_network_image.dart'; // Resimler için
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 
 class OnboardingLetterboxd extends StatefulWidget {
   const OnboardingLetterboxd({super.key});
@@ -42,6 +43,7 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
   String? _profileImagePath;
   String? _uploadedPhotoPath;
   String? _uploadedPhotoUrl;
+  String? _googleProfilePhotoUrl;
   Map<String, dynamic>? _favoriteMovie;
 
   final _ageController = TextEditingController();
@@ -132,7 +134,8 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
   }
 
   Future<void> _checkAlreadySet() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final authUser = FirebaseAuth.instance.currentUser;
+    final uid = authUser?.uid;
     if (uid == null) {
       await FirebaseAuth.instance.signOut();
       if (!mounted) return;
@@ -142,6 +145,8 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
       );
       return;
     }
+
+    _googleProfilePhotoUrl = _googleProviderPhotoUrl(authUser!);
 
     try {
       final db = FirebaseFirestore.instance;
@@ -161,6 +166,17 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
         userData: snapshots[0].data(),
         draftData: snapshots[1].data(),
       );
+      final registrationDraft = snapshots[1].data();
+      final draftProvider = (registrationDraft?['authProvider'] ?? '')
+          .toString();
+      final draftPhotoUrl = (registrationDraft?['photoURL'] ?? '')
+          .toString()
+          .trim();
+      if (_googleProfilePhotoUrl == null &&
+          draftProvider == 'google' &&
+          _isValidHttpsUrl(draftPhotoUrl)) {
+        _googleProfilePhotoUrl = draftPhotoUrl;
+      }
       if (stage == RegistrationStage.complete) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const InitialLoadingScreen()),
@@ -618,7 +634,22 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
 
   bool get _hasRequiredPhoto =>
       (_profileImagePath != null && _profileImagePath!.isNotEmpty) ||
-      (_uploadedPhotoUrl != null && _uploadedPhotoUrl!.isNotEmpty);
+      (_uploadedPhotoUrl != null && _uploadedPhotoUrl!.isNotEmpty) ||
+      (_googleProfilePhotoUrl != null && _googleProfilePhotoUrl!.isNotEmpty);
+
+  static String? _googleProviderPhotoUrl(User user) {
+    for (final provider in user.providerData) {
+      if (provider.providerId != 'google.com') continue;
+      final photoUrl = provider.photoURL?.trim() ?? '';
+      if (_isValidHttpsUrl(photoUrl)) return photoUrl;
+    }
+    return null;
+  }
+
+  static bool _isValidHttpsUrl(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null && uri.scheme == 'https' && uri.host.isNotEmpty;
+  }
 
   ImageProvider<Object>? get _profileImageProvider {
     final localPath = _profileImagePath;
@@ -628,6 +659,10 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
     final remoteUrl = _uploadedPhotoUrl;
     if (remoteUrl != null && remoteUrl.isNotEmpty) {
       return CachedNetworkImageProvider(remoteUrl);
+    }
+    final googleUrl = _googleProfilePhotoUrl;
+    if (googleUrl != null && googleUrl.isNotEmpty) {
+      return CachedNetworkImageProvider(googleUrl);
     }
     return null;
   }
@@ -1099,26 +1134,46 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
       return (path: existingPath, url: existingUrl);
     }
 
-    final localPath = _profileImagePath;
-    if (localPath == null || localPath.isEmpty) {
-      throw StateError('Profil fotoğrafı bulunamadı. Lütfen yeniden seç.');
-    }
-    final localFile = File(localPath);
-    if (!await localFile.exists()) {
-      throw StateError(
-        'Seçilen fotoğraf artık cihazda yok. Lütfen yeniden seç.',
-      );
-    }
-
     final storagePath = 'profile_images/$uid/avatar.jpg';
     final storageRef = FirebaseStorage.instance.ref(storagePath);
-    await storageRef.putFile(
-      localFile,
-      SettableMetadata(
-        contentType: 'image/jpeg',
-        customMetadata: {'ownerUid': uid, 'purpose': 'onboarding_profile'},
-      ),
+    final metadata = SettableMetadata(
+      contentType: 'image/jpeg',
+      customMetadata: {'ownerUid': uid, 'purpose': 'onboarding_profile'},
     );
+
+    final localPath = _profileImagePath;
+    final localFile = localPath == null || localPath.isEmpty
+        ? null
+        : File(localPath);
+    if (localFile != null && await localFile.exists()) {
+      await storageRef.putFile(localFile, metadata);
+    } else {
+      final googlePhotoUrl = _googleProfilePhotoUrl;
+      if (googlePhotoUrl == null || googlePhotoUrl.isEmpty) {
+        if (localFile != null) {
+          throw StateError(
+            'Seçilen fotoğraf artık cihazda yok. Lütfen yeniden seç.',
+          );
+        }
+        throw StateError('Profil fotoğrafı bulunamadı. Lütfen yeniden seç.');
+      }
+
+      final response = await http
+          .get(Uri.parse(googlePhotoUrl))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200 || response.bodyBytes.isEmpty) {
+        throw StateError(
+          'Google profil fotoğrafı alınamadı. Lütfen bir fotoğraf seç.',
+        );
+      }
+      if (response.bodyBytes.length >= 5 * 1024 * 1024) {
+        throw StateError(
+          'Google profil fotoğrafı çok büyük. Lütfen başka bir fotoğraf seç.',
+        );
+      }
+      await storageRef.putData(response.bodyBytes, metadata);
+    }
+
     final downloadUrl = await storageRef.getDownloadURL();
     _uploadedPhotoPath = storagePath;
     _uploadedPhotoUrl = downloadUrl;
@@ -1262,7 +1317,9 @@ class _OnboardingLetterboxdState extends State<OnboardingLetterboxd>
         msg = e.message ?? msg;
       } else if (e is FirebaseFunctionsException &&
           e.code == 'unauthenticated') {
-        msg = 'Oturumun sona ermiş. Lütfen yeniden giriş yap.';
+        msg = FirebaseAuth.instance.currentUser == null
+            ? 'Oturumun sona ermiş. Lütfen yeniden giriş yap.'
+            : 'Uygulama doğrulanamadı. Lütfen uygulamayı tamamen kapatıp yeniden aç.';
       } else if (e is FirebaseFunctionsException && e.code == 'internal') {
         msg = 'Film bilgileri kaydedilirken sunucu hatası oluştu. Tekrar dene.';
       } else if (e.toString().contains('Letterboxd kullanıcısı bulunamadı')) {

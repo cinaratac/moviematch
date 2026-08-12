@@ -27,7 +27,7 @@ Kurulum sorularında:
 
 - E-posta belge koleksiyonu: `mail`
 - SMTP bağlantısı: seçilen işlem e-postası sağlayıcısının güvenli SMTP URI'si
-- Varsayılan gönderici: doğrulanmış CineMatch alan adına ait bir adres
+- Varsayılan gönderici: `CineMatch <team@cinematchsocial.com>`
 
 Teslimatı yüksek hacimli kişisel Gmail hesabı yerine doğrulanmış alan adına
 sahip bir işlem e-postası sağlayıcısıyla yapılandır.
@@ -35,11 +35,10 @@ sahip bir işlem e-postası sağlayıcısıyla yapılandır.
 ## 3. Backend ve kuralları yayınla
 
 ```bash
-firebase deploy --only functions:requestEmailVerificationCode,functions:verifyEmailVerificationCode,functions:cleanupEmailVerificationMail,functions:completeOnboarding,functions:cancelRegistration,firestore:rules
+firebase deploy --only functions:requestPasswordReset,functions:verifyPasswordResetCode,functions:completePasswordReset,functions:requestEmailVerificationCode,functions:verifyEmailVerificationCode,functions:cleanupEmailVerificationMail,functions:completeOnboarding,functions:cancelRegistration,firestore:rules
 ```
 
 Trigger Email teslimatı `SUCCESS` veya `ERROR` durumuna ulaştığında
 `cleanupEmailVerificationMail` kuyruk belgesini siler. Teslim edilmeden kalan
 eski belgeler için `mail.expireAt` alanında Firestore TTL politikası açılması da
 önerilir.
-

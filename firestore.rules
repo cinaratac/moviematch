@@ -234,6 +234,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /password_reset_requests/{requestId} {
+      allow read, write: if false;
+    }
+
     match /usernames/{username} {
       allow read, write: if false;
     }

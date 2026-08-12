@@ -4,7 +4,7 @@
       "android": {
         "default": {
           "projectId": "movie-matching-8a836",
-          "appId": "1:266660427246:android:4dcb77ff5e91e47dc04aff",
+          "appId": "1:266660427246:android:8fb16e780cb74f7ec04aff",
           "fileOutput": "android/app/google-services.json"
         }
       },

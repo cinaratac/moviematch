@@ -7,6 +7,7 @@ import 'package:fluttergirdi/auth/email_verification_page.dart';
 import 'package:fluttergirdi/services/text_filter_service.dart';
 // Yeni arka plan widget'ını import ediyoruz (Paket adınız fluttergirdi varsayılmıştır)
 import 'package:fluttergirdi/widgets/background_3d_posters.dart';
+import 'package:fluttergirdi/widgets/viewport_fitted_content.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -278,8 +279,6 @@ class _RegisterPageState extends State<RegisterPage> {
     final bgGradientEnd = Colors.white.withOpacity(0.85);
 
     return Scaffold(
-      // Klavye açıldığında tasarımın sıkışmasını engellemek için resizeToAvoidBottomInset false yapabiliriz
-      // Ancak SingleChildScrollView olduğu için true kalsa da çalışır.
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
@@ -311,7 +310,7 @@ class _RegisterPageState extends State<RegisterPage> {
               },
               behavior: HitTestBehavior.translucent,
               child: Center(
-                child: SingleChildScrollView(
+                child: ViewportFittedContent(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   child: Form(
                     key: _form,

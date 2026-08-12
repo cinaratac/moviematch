@@ -24,6 +24,7 @@ class NotificationService {
 
   bool _inited = false;
   bool _navigationReady = false;
+  bool _messagesScreenActive = false;
   final List<String> _activeChatIds = [];
   Map<String, dynamic>? _pendingNavigation;
   StreamSubscription<RemoteMessage>? _foregroundSub;
@@ -45,7 +46,10 @@ class NotificationService {
     );
 
     await _fln.initialize(
-      const InitializationSettings(android: androidInit, iOS: iosInit),
+      settings: const InitializationSettings(
+        android: androidInit,
+        iOS: iosInit,
+      ),
       onDidReceiveNotificationResponse: (response) {
         _handlePayload(response.payload);
       },
@@ -130,10 +134,22 @@ class NotificationService {
     _activeChatIds
       ..remove(chatId)
       ..add(chatId);
+    _dismissVisibleChatBanner();
   }
 
   void leaveChat(String chatId) {
     _activeChatIds.remove(chatId);
+  }
+
+  void setMessagesScreenActive(bool active) {
+    _messagesScreenActive = active;
+    if (active) _dismissVisibleChatBanner();
+  }
+
+  void _dismissVisibleChatBanner() {
+    if (_banner.value?.data['type']?.toString() == 'chat') {
+      _removeBanner();
+    }
   }
 
   Future<void> dispose() async {
@@ -142,6 +158,7 @@ class NotificationService {
     _foregroundSub = null;
     _openedSub = null;
     _navigationReady = false;
+    _messagesScreenActive = false;
     _activeChatIds.clear();
     _removeBanner();
     _inited = false;
@@ -149,9 +166,9 @@ class NotificationService {
 
   Future<void> _showForegroundPush(RemoteMessage message) async {
     final data = Map<String, dynamic>.from(message.data);
-    if (data['type']?.toString() == 'chat' &&
-        _activeChatIds.isNotEmpty &&
-        data['chatId']?.toString() == _activeChatIds.last) {
+    final isChatNotification = data['type']?.toString() == 'chat';
+    if (isChatNotification &&
+        (_messagesScreenActive || _activeChatIds.isNotEmpty)) {
       return;
     }
     if (!_shouldShow(_dedupeKey(message))) return;

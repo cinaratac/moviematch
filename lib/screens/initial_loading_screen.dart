@@ -22,6 +22,7 @@ class InitialLoadingScreen extends StatefulWidget {
 
 class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
   double _progress = 0.06;
+  final Completer<void> _progressComplete = Completer<void>();
 
   @override
   void initState() {
@@ -47,7 +48,11 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
 
     if (!mounted) return;
     _setProgress(1);
-    await Future.delayed(const Duration(milliseconds: 320));
+    await _progressComplete.future.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {},
+    );
+    await Future.delayed(const Duration(milliseconds: 80));
 
     if (mounted) {
       Navigator.pushReplacement(
@@ -199,7 +204,9 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
 
   void _setProgress(double value) {
     if (!mounted) return;
-    setState(() => _progress = value.clamp(0.0, 1.0));
+    final nextProgress = value.clamp(0.0, 1.0);
+    if (nextProgress <= _progress) return;
+    setState(() => _progress = nextProgress);
   }
 
   @override
@@ -208,7 +215,14 @@ class _InitialLoadingScreenState extends State<InitialLoadingScreen> {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 40.0),
-          child: BrandedSplash(progress: _progress),
+          child: BrandedSplash(
+            progress: _progress,
+            onProgressComplete: () {
+              if (!_progressComplete.isCompleted) {
+                _progressComplete.complete();
+              }
+            },
+          ),
         ),
       ),
     );

@@ -124,6 +124,12 @@ const EMAIL_VERIFICATION_RESEND_MS = 60 * 1000;
 const EMAIL_VERIFICATION_WINDOW_MS = 60 * 60 * 1000;
 const EMAIL_VERIFICATION_MAX_SENDS = 5;
 const EMAIL_VERIFICATION_MAX_ATTEMPTS = 5;
+const PASSWORD_RESET_RESEND_MS = 60 * 1000;
+const PASSWORD_RESET_WINDOW_MS = 60 * 60 * 1000;
+const PASSWORD_RESET_MAX_SENDS = 5;
+const PASSWORD_RESET_OTP_TTL_MS = 10 * 60 * 1000;
+const PASSWORD_RESET_SESSION_TTL_MS = 10 * 60 * 1000;
+const PASSWORD_RESET_MAX_ATTEMPTS = 5;
 
 function normalizedEmail(value) {
   return cleanText(value, 254).toLowerCase();
@@ -172,6 +178,316 @@ function safeHashEquals(left, right) {
   }
   return crypto.timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
+
+function passwordResetRequestKey(email) {
+  return crypto
+    .createHash("sha256")
+    .update(`password-reset:${email}`)
+    .digest("hex");
+}
+
+function hashPasswordResetOtp(uid, email, code) {
+  return crypto
+    .createHmac("sha256", emailOtpSecret())
+    .update(`password-reset:otp:${uid}:${email}:${code}`)
+    .digest("hex");
+}
+
+function hashPasswordResetSession(token) {
+  return crypto
+    .createHash("sha256")
+    .update(`password-reset:session:${token}`)
+    .digest("hex");
+}
+
+exports.requestPasswordReset = onCall(
+  { enforceAppCheck: true, secrets: ["EMAIL_OTP_HMAC_SECRET"] },
+  async (request) => {
+    let email = normalizedEmail(request.data && request.data.email);
+    if (request.auth && request.auth.uid) {
+      const authenticatedUser = await admin.auth().getUser(request.auth.uid);
+      email = normalizedEmail(authenticatedUser.email);
+    }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new HttpsError("invalid-argument", "Geçerli bir e-posta adresi girin.");
+    }
+
+    const db = admin.firestore();
+    const requestRef = db
+      .collection("password_reset_requests")
+      .doc(passwordResetRequestKey(email));
+    let authUser = null;
+    try {
+      authUser = await admin.auth().getUserByEmail(email);
+    } catch (error) {
+      if (error.code !== "auth/user-not-found") throw error;
+    }
+    const eligible = authUser !== null &&
+      authProviderIds(authUser).has("password") &&
+      authUser.disabled !== true;
+    const subjectUid = eligible ? authUser.uid : "missing";
+    const code = crypto.randomInt(0, 1000000).toString().padStart(6, "0");
+    const codeHash = hashPasswordResetOtp(subjectUid, email, code);
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const rateLimit = await db.runTransaction(async (transaction) => {
+      const requestDoc = await transaction.get(requestRef);
+      const previous = requestDoc.exists ? requestDoc.data() || {} : {};
+      const previousSentAt = timestampMillis(previous.lastSentAt);
+      const retryAfterMs = PASSWORD_RESET_RESEND_MS - (nowMs - previousSentAt);
+      if (previousSentAt > 0 && retryAfterMs > 0) {
+        return { allowed: false, retryAfterSeconds: Math.ceil(retryAfterMs / 1000) };
+      }
+
+      let windowStartedAtMs = timestampMillis(previous.windowStartedAt);
+      let sentCount = Number(previous.sentCount) || 0;
+      if (!windowStartedAtMs || nowMs - windowStartedAtMs >= PASSWORD_RESET_WINDOW_MS) {
+        windowStartedAtMs = nowMs;
+        sentCount = 0;
+      }
+      if (sentCount >= PASSWORD_RESET_MAX_SENDS) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Saatlik şifre sıfırlama sınırına ulaştınız. Lütfen daha sonra tekrar deneyin."
+        );
+      }
+
+      transaction.set(requestRef, {
+        email,
+        subjectUid,
+        codeHash,
+        codeExpiresAt: admin.firestore.Timestamp.fromMillis(
+          nowMs + PASSWORD_RESET_OTP_TTL_MS
+        ),
+        attempts: 0,
+        lastSentAt: now,
+        windowStartedAt: admin.firestore.Timestamp.fromMillis(windowStartedAtMs),
+        sentCount: sentCount + 1,
+        sessionHash: admin.firestore.FieldValue.delete(),
+        sessionExpiresAt: admin.firestore.FieldValue.delete(),
+        verifiedAt: admin.firestore.FieldValue.delete(),
+        expireAt: admin.firestore.Timestamp.fromMillis(
+          nowMs + 24 * 60 * 60 * 1000
+        ),
+        updatedAt: now,
+      }, { merge: true });
+      return { allowed: true, retryAfterSeconds: 60 };
+    });
+
+    if (!rateLimit.allowed) {
+      return { ok: true, ...rateLimit };
+    }
+
+    if (!eligible) {
+      return { ok: true, sent: true, retryAfterSeconds: 60 };
+    }
+
+    const mailData = {
+      to: email,
+      category: "password_reset",
+      expireAt: admin.firestore.Timestamp.fromMillis(
+        nowMs + 24 * 60 * 60 * 1000
+      ),
+      message: {
+        subject: "CineMatch şifre sıfırlama kodun",
+        text: `CineMatch şifre sıfırlama kodun: ${code}. Kod 10 dakika geçerlidir. Bu isteği sen yapmadıysan kodu kimseyle paylaşma.`,
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;color:#1f2937">
+            <h2 style="color:#2E7D32">CineMatch</h2>
+            <p>Şifreni yenilemek için aşağıdaki kodu uygulamaya gir:</p>
+            <div style="font-size:34px;font-weight:700;letter-spacing:10px;padding:18px 0;color:#2E7D32">${code}</div>
+            <p>Kod 10 dakika geçerlidir. Bu isteği sen yapmadıysan kodu kimseyle paylaşma.</p>
+          </div>
+        `,
+      },
+      createdAt: now,
+    };
+    if (request.auth && request.auth.uid === authUser.uid) {
+      mailData.ownerUid = authUser.uid;
+    }
+    await db.collection("mail").add(mailData);
+    return { ok: true, sent: true, retryAfterSeconds: 60 };
+  }
+);
+
+exports.verifyPasswordResetCode = onCall(
+  { enforceAppCheck: true, secrets: ["EMAIL_OTP_HMAC_SECRET"] },
+  async (request) => {
+    let email = normalizedEmail(request.data && request.data.email);
+    if (request.auth && request.auth.uid) {
+      const authenticatedUser = await admin.auth().getUser(request.auth.uid);
+      email = normalizedEmail(authenticatedUser.email);
+    }
+    const code = cleanText(request.data && request.data.code, 6);
+    if (!email || !/^\d{6}$/.test(code)) {
+      throw new HttpsError("invalid-argument", "6 haneli kodu eksiksiz girin.");
+    }
+
+    let authUser;
+    try {
+      authUser = await admin.auth().getUserByEmail(email);
+    } catch (error) {
+      if (error.code === "auth/user-not-found") {
+        throw new HttpsError("permission-denied", "Kod geçersiz veya süresi dolmuş.");
+      }
+      throw error;
+    }
+    if (!authProviderIds(authUser).has("password") || authUser.disabled === true) {
+      throw new HttpsError("permission-denied", "Kod geçersiz veya süresi dolmuş.");
+    }
+
+    const db = admin.firestore();
+    const requestRef = db
+      .collection("password_reset_requests")
+      .doc(passwordResetRequestKey(email));
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+    const sessionHash = hashPasswordResetSession(sessionToken);
+    const submittedHash = hashPasswordResetOtp(authUser.uid, email, code);
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const result = await db.runTransaction(async (transaction) => {
+      const requestDoc = await transaction.get(requestRef);
+      const data = requestDoc.exists ? requestDoc.data() || {} : {};
+      const attempts = Number(data.attempts) || 0;
+      const expired = timestampMillis(data.codeExpiresAt) <= nowMs;
+      const validIdentity = data.subjectUid === authUser.uid &&
+        normalizedEmail(data.email) === email;
+      if (!requestDoc.exists || expired || !validIdentity ||
+          attempts >= PASSWORD_RESET_MAX_ATTEMPTS) {
+        return { verified: false, locked: attempts >= PASSWORD_RESET_MAX_ATTEMPTS };
+      }
+      if (!safeHashEquals(cleanText(data.codeHash, 64), submittedHash)) {
+        const nextAttempts = attempts + 1;
+        transaction.set(requestRef, {
+          attempts: nextAttempts,
+          updatedAt: now,
+        }, { merge: true });
+        return {
+          verified: false,
+          locked: nextAttempts >= PASSWORD_RESET_MAX_ATTEMPTS,
+        };
+      }
+
+      transaction.set(requestRef, {
+        sessionHash,
+        sessionExpiresAt: admin.firestore.Timestamp.fromMillis(
+          nowMs + PASSWORD_RESET_SESSION_TTL_MS
+        ),
+        verifiedAt: now,
+        codeHash: admin.firestore.FieldValue.delete(),
+        codeExpiresAt: admin.firestore.FieldValue.delete(),
+        attempts: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+      return { verified: true, locked: false };
+    });
+
+    if (!result.verified) {
+      throw new HttpsError(
+        result.locked ? "resource-exhausted" : "permission-denied",
+        result.locked
+          ? "Çok fazla hatalı kod girildi. Yeni kod isteyin."
+          : "Kod geçersiz veya süresi dolmuş."
+      );
+    }
+    return { ok: true, resetToken: sessionToken };
+  }
+);
+
+exports.completePasswordReset = onCall(
+  { enforceAppCheck: true },
+  async (request) => {
+    let email = normalizedEmail(request.data && request.data.email);
+    if (request.auth && request.auth.uid) {
+      const authenticatedUser = await admin.auth().getUser(request.auth.uid);
+      email = normalizedEmail(authenticatedUser.email);
+    }
+    const resetToken = cleanText(request.data && request.data.resetToken, 64);
+    const rawPassword = request.data && request.data.newPassword;
+    const newPassword = typeof rawPassword === "string" ? rawPassword : "";
+    if (!email || !/^[a-f0-9]{64}$/.test(resetToken)) {
+      throw new HttpsError("permission-denied", "Şifre yenileme oturumu geçersiz.");
+    }
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      throw new HttpsError(
+        "invalid-argument",
+        "Yeni şifre en az 8 karakter olmalıdır."
+      );
+    }
+
+    let authUser;
+    try {
+      authUser = await admin.auth().getUserByEmail(email);
+    } catch (error) {
+      if (error.code === "auth/user-not-found") {
+        throw new HttpsError("permission-denied", "Şifre yenileme oturumu geçersiz.");
+      }
+      throw error;
+    }
+    if (!authProviderIds(authUser).has("password") || authUser.disabled === true) {
+      throw new HttpsError("permission-denied", "Şifre yenileme oturumu geçersiz.");
+    }
+
+    const db = admin.firestore();
+    const requestRef = db
+      .collection("password_reset_requests")
+      .doc(passwordResetRequestKey(email));
+    const submittedSessionHash = hashPasswordResetSession(resetToken);
+    const nowMs = Date.now();
+    const now = admin.firestore.Timestamp.fromMillis(nowMs);
+    const authorized = await db.runTransaction(async (transaction) => {
+      const requestDoc = await transaction.get(requestRef);
+      const data = requestDoc.exists ? requestDoc.data() || {} : {};
+      const valid = requestDoc.exists &&
+        data.subjectUid === authUser.uid &&
+        normalizedEmail(data.email) === email &&
+        timestampMillis(data.sessionExpiresAt) > nowMs &&
+        safeHashEquals(cleanText(data.sessionHash, 64), submittedSessionHash);
+      if (!valid) return false;
+      transaction.set(requestRef, {
+        sessionHash: admin.firestore.FieldValue.delete(),
+        processingHash: submittedSessionHash,
+        processingStartedAt: now,
+        updatedAt: now,
+      }, { merge: true });
+      return true;
+    });
+    if (!authorized) {
+      throw new HttpsError("permission-denied", "Şifre yenileme oturumu geçersiz veya süresi dolmuş.");
+    }
+
+    try {
+      await admin.auth().updateUser(authUser.uid, { password: newPassword });
+      await admin.auth().revokeRefreshTokens(authUser.uid);
+      await requestRef.delete();
+    } catch (error) {
+      await db.runTransaction(async (transaction) => {
+        const requestDoc = await transaction.get(requestRef);
+        const data = requestDoc.exists ? requestDoc.data() || {} : {};
+        if (safeHashEquals(
+          cleanText(data.processingHash, 64),
+          submittedSessionHash
+        ) && timestampMillis(data.sessionExpiresAt) > Date.now()) {
+          transaction.set(requestRef, {
+            sessionHash: submittedSessionHash,
+            processingHash: admin.firestore.FieldValue.delete(),
+            processingStartedAt: admin.firestore.FieldValue.delete(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      });
+      if (["auth/invalid-password", "auth/password-does-not-meet-requirements"]
+        .includes(error.code)) {
+        throw new HttpsError(
+          "invalid-argument",
+          "Bu şifre güvenlik koşullarını karşılamıyor. Daha güçlü bir şifre deneyin."
+        );
+      }
+      throw error;
+    }
+    return { ok: true };
+  }
+);
 
 exports.requestEmailVerificationCode = onCall(
   { secrets: ["EMAIL_OTP_HMAC_SECRET"] },
@@ -1311,7 +1627,7 @@ exports.cleanupEmailVerificationMail = functions.firestore
   .onUpdate(async (change) => {
     const data = change.after.data() || {};
     const deliveryState = cleanText(data.delivery && data.delivery.state, 30);
-    if (!["email_verification", "account_deletion_verification"]
+    if (!["email_verification", "account_deletion_verification", "password_reset"]
       .includes(data.category) ||
         !["SUCCESS", "ERROR"].includes(deliveryState)) {
       return null;

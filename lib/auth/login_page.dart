@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fluttergirdi/auth/register_page.dart';
+import 'package:fluttergirdi/auth/password_reset_page.dart';
 import 'package:fluttergirdi/widgets/green_characters.dart';
 import 'package:fluttergirdi/widgets/offline_banner.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:fluttergirdi/widgets/background_3d_posters.dart';
+import 'package:fluttergirdi/widgets/viewport_fitted_content.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:fluttergirdi/auth/auth_gate.dart'; // KESİN YÖNLENDİRME İÇİN EKLENDİ
 import 'package:fluttergirdi/services/global_data_service.dart';
 import 'package:fluttergirdi/services/notification_service.dart';
+import 'package:fluttergirdi/services/password_reset_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -26,6 +29,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _isGoogleLoading = false;
   bool _isAppleLoading = false;
+  bool _isPasswordResetLoading = false;
   bool _isPasswordVisible = false;
 
   @override
@@ -113,25 +117,32 @@ class _LoginPageState extends State<LoginPage> {
       );
       return;
     }
+    setState(() => _isPasswordResetLoading = true);
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(
-        email: _emailController.text.trim(),
-      );
+      final email = _emailController.text.trim();
+      final retryAfter = await PasswordResetService.instance.request(email);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Sıfırlama bağlantısı e-posta adresinize gönderildi.',
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PasswordResetPage(
+              email: email,
+              initialResendSeconds: retryAfter,
             ),
           ),
         );
       }
-    } catch (e) {
+    } on PasswordResetException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Hata: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.message),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
+    } finally {
+      if (mounted) setState(() => _isPasswordResetLoading = false);
     }
   }
 
@@ -140,7 +151,9 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isGoogleLoading = true);
 
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      final googleSignIn = GoogleSignIn();
+      await googleSignIn.signOut();
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       if (googleUser == null) {
         if (mounted) setState(() => _isGoogleLoading = false);
         return;
@@ -224,7 +237,11 @@ class _LoginPageState extends State<LoginPage> {
     final bgGradientEnd = Colors.white.withOpacity(0.85);
 
     // Herhangi bir yüklenme durumunu kontrol etme
-    final isAnyLoading = _isLoading || _isGoogleLoading || _isAppleLoading;
+    final isAnyLoading =
+        _isLoading ||
+        _isGoogleLoading ||
+        _isAppleLoading ||
+        _isPasswordResetLoading;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -252,7 +269,7 @@ class _LoginPageState extends State<LoginPage> {
               // 3. KATMAN: Mevcut Login Formu
               SafeArea(
                 child: Center(
-                  child: SingleChildScrollView(
+                  child: ViewportFittedContent(
                     padding: const EdgeInsets.symmetric(horizontal: 24.0),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -328,7 +345,7 @@ class _LoginPageState extends State<LoginPage> {
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(
-                            onPressed: _resetPassword,
+                            onPressed: isAnyLoading ? null : _resetPassword,
                             style: TextButton.styleFrom(
                               foregroundColor: primaryGreen,
                               padding: const EdgeInsets.symmetric(
@@ -336,7 +353,11 @@ class _LoginPageState extends State<LoginPage> {
                                 vertical: 8,
                               ),
                             ),
-                            child: const Text('Şifremi Unuttum?'),
+                            child: Text(
+                              _isPasswordResetLoading
+                                  ? 'Gönderiliyor...'
+                                  : 'Şifremi Unuttum?',
+                            ),
                           ),
                         ),
                         const SizedBox(height: 24),
