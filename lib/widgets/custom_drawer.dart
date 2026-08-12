@@ -110,14 +110,8 @@ class _CustomDrawerState extends State<CustomDrawer> {
                       ),
                       _buildMenuItem(
                         context,
-                        title: 'Kulüpler',
-                        onTap: () => _openPage(
-                          context,
-                          Scaffold(
-                            appBar: AppBar(title: const Text("Kulüpler")),
-                            body: const ClubsTab(),
-                          ),
-                        ),
+                        title: 'Odalar',
+                        onTap: () => _openPage(context, const ClubsScreen()),
                       ),
                       _buildMenuItem(
                         context,

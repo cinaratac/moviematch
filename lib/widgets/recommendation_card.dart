@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:infinite_carousel/infinite_carousel.dart';
+import 'package:shimmer/shimmer.dart';
 import '../services/recommendation_engine.dart';
 import '../widgets/poster_image.dart';
 import 'package:fluttergirdi/screens/movie_detail_screen.dart';
@@ -99,10 +100,6 @@ class _RecommendationDetailsPanel extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final genres = recommendation.genres.take(3).join(' / ');
-    final overview = recommendation.overview.trim().isEmpty
-        ? recommendation.matchReason
-        : recommendation.overview;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest.withValues(alpha: 0.48),
@@ -185,8 +182,6 @@ class _RecommendationDetailsPanel extends StatelessWidget {
                             const SizedBox(height: 3),
                             Text(
                               recommendation.matchReason,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: cs.onSurface,
                                 height: 1.3,
@@ -200,17 +195,7 @@ class _RecommendationDetailsPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
             ],
-            Text(
-              overview,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-                height: 1.35,
-              ),
-            ),
           ],
         ),
       ),
@@ -302,8 +287,6 @@ class RecommendationCard extends StatefulWidget {
 
 class _RecommendationCardState extends State<RecommendationCard>
     with AutomaticKeepAliveClientMixin, SingleTickerProviderStateMixin {
-  static final Map<String, List<MovieRecommendation>> _sessionCache = {};
-
   @override
   bool get wantKeepAlive => true;
   List<MovieRecommendation>? _recommendations;
@@ -332,15 +315,7 @@ class _RecommendationCardState extends State<RecommendationCard>
       end: Offset.zero,
     ).animate(detailsCurve);
 
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    final cached = uid == null ? null : _sessionCache[uid];
-    if (cached != null && cached.isNotEmpty) {
-      _recommendations = cached;
-      _loading = false;
-      _detailsController.value = 1;
-    } else {
-      _loadRecommendations();
-    }
+    _loadRecommendations();
   }
 
   @override
@@ -403,25 +378,22 @@ class _RecommendationCardState extends State<RecommendationCard>
     _detailsController.forward(from: 0);
   }
 
-  Future<void> _loadRecommendations({bool forceRefresh = false}) async {
+  Future<void> _loadRecommendations() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       if (mounted) setState(() => _loading = false);
       return;
     }
 
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() => _loading = true);
+    }
 
     try {
-      if (forceRefresh) {
-        RecommendationEngine.instance.clearMemoryCache();
-        _sessionCache.remove(uid);
-      }
       final recs = await RecommendationEngine.instance.generateRecommendations(
         uid,
       );
 
-      _sessionCache[uid] = List<MovieRecommendation>.unmodifiable(recs);
       if (mounted) {
         setState(() {
           _recommendations = recs;
@@ -431,8 +403,18 @@ class _RecommendationCardState extends State<RecommendationCard>
         });
         _detailsController.forward(from: 0);
       }
-    } catch (e) {
-      if (mounted) setState(() => _loading = false);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Öneriler yenilenemedi. Lütfen tekrar dene.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -587,6 +569,111 @@ class _RecommendationCardState extends State<RecommendationCard>
     );
   }
 
+  Widget _buildLoadingState(ThemeData theme, ColorScheme cs) {
+    final isDark = theme.brightness == Brightness.dark;
+    final baseColor = isDark
+        ? cs.surfaceContainerHighest
+        : const Color(0xFFE1E4E2);
+    final highlightColor = isDark
+        ? cs.surfaceContainerHigh
+        : const Color(0xFFF4F6F4);
+
+    Widget block(double width, double height, {double radius = 6}) {
+      return Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(radius),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.28)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Shimmer.fromColors(
+        baseColor: baseColor,
+        highlightColor: highlightColor,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Row(
+                children: [
+                  block(20, 20, radius: 10),
+                  const SizedBox(width: 8),
+                  block(164, 18),
+                  const Spacer(),
+                  block(20, 20, radius: 10),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: _posterExpandedHeight,
+              child: ClipRect(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(width: 16),
+                    block(_posterWidth, _posterExpandedHeight, radius: 4),
+                    block(_posterWidth, _posterCollapsedHeight, radius: 4),
+                    block(_posterWidth, _posterCollapsedHeight, radius: 4),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: block(190, 18)),
+                        const SizedBox(width: 18),
+                        block(48, 24, radius: 12),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        block(112, 24, radius: 12),
+                        const SizedBox(width: 8),
+                        block(82, 24, radius: 12),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    block(double.infinity, 54, radius: 10),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -594,44 +681,7 @@ class _RecommendationCardState extends State<RecommendationCard>
     final cs = theme.colorScheme;
 
     if (_loading) {
-      return Container(
-        height: 200,
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [cs.primaryContainer, cs.secondaryContainer],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 20),
-              Text(
-                'Yapay zeka sana g\u00f6re filmler se\u00e7iyor...',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: cs.onPrimaryContainer,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Sevdi\u011fin t\u00fcrler, y\u00f6netmenler ve izleme ge\u00e7mi\u015fin yapay zeka ile analiz edilir.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: cs.onPrimaryContainer.withValues(alpha: 0.7),
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
+      return _buildLoadingState(theme, cs);
     }
 
     if (_recommendations == null || _recommendations!.isEmpty) {
