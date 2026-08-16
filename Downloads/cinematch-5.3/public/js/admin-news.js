@@ -1,20 +1,12 @@
-const firebaseConfig = {
-  apiKey: "AIzaSyAsHFffuxGA1cYKbHBs8LE6QbJOi4pjwC4",
-  authDomain: "movie-matching-8a836.firebaseapp.com",
-  projectId: "movie-matching-8a836",
-  storageBucket: "movie-matching-8a836.firebasestorage.app",
-  messagingSenderId: "266660427246",
-  appId: "1:266660427246:web:4dcb77ff5e91e47dc04aff",
-};
+// Firebase başlatma, oturum kalıcılığı ve yetki önbelleği admin-shared.js
+// içinde ortaklaştırıldı (bkz. js/admin-shared.js). Bu sayede paneller arası
+// geçişte gereksiz Cloud Function çağrısı yapılmıyor ve geçici hatalar
+// yüzünden kullanıcı sistemden atılmıyor.
+const { auth, db, functions } = CineAdmin;
+const authPersistenceReady = CineAdmin.persistenceReady;
 
-firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
-const db = firebase.firestore();
-const functions = firebase.functions();
-const authPersistenceReady = auth.setPersistence(
-  firebase.auth.Auth.Persistence.LOCAL
-);
+const ARTICLE_PAGE_SIZE = 30;
+let articlePageSize = ARTICLE_PAGE_SIZE;
 
 const els = {
   loginPanel: document.getElementById("loginPanel"),
@@ -46,15 +38,13 @@ const els = {
   deleteButton: document.getElementById("deleteButton"),
   saveButton: document.getElementById("saveButton"),
   saveMessage: document.getElementById("saveMessage"),
+  loadMoreArticlesButton: document.getElementById("loadMoreArticlesButton"),
 };
 
 let unsubscribeArticles = null;
 let articles = [];
 
-function setMessage(target, text, type = "") {
-  target.textContent = text || "";
-  target.className = `message ${type}`.trim();
-}
+const { setMessage, escapeHtml, isPermissionError } = CineAdmin;
 
 function slugify(value) {
   return (value || "")
@@ -89,11 +79,6 @@ function showAdmin(user) {
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;
-}
-
-function isPermissionError(error) {
-  const code = error && error.code ? String(error.code) : "";
-  return code.includes("permission-denied") || code.includes("unauthenticated");
 }
 
 function resetForm() {
@@ -196,24 +181,24 @@ function renderArticles() {
   markActiveArticle(els.articleId.value);
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 function subscribeArticles() {
   if (unsubscribeArticles) unsubscribeArticles();
   unsubscribeArticles = db
     .collection("news_articles")
     .orderBy("updatedAt", "desc")
+    .limit(articlePageSize)
     .onSnapshot(
       (snapshot) => {
         articles = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         renderArticles();
+        // Getirilen kayıt sayısı, istenen sayfa boyutuna eşit veya fazlaysa
+        // muhtemelen daha fazla kayıt vardır; "Daha Fazla Yükle" butonunu göster.
+        if (els.loadMoreArticlesButton) {
+          els.loadMoreArticlesButton.classList.toggle(
+            "hidden",
+            snapshot.docs.length < articlePageSize
+          );
+        }
       },
       (error) => {
         els.articleList.innerHTML = `<p class="message error">${escapeHtml(error.message)}</p>`;
@@ -240,10 +225,17 @@ els.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-els.logoutButton.addEventListener("click", () => auth.signOut());
+els.logoutButton.addEventListener("click", () => CineAdmin.logout());
 els.newArticleButton.addEventListener("click", resetForm);
 els.articleSearch.addEventListener("input", renderArticles);
 els.articleStatusFilter.addEventListener("change", renderArticles);
+
+if (els.loadMoreArticlesButton) {
+  els.loadMoreArticlesButton.addEventListener("click", () => {
+    articlePageSize += ARTICLE_PAGE_SIZE;
+    subscribeArticles();
+  });
+}
 
 els.title.addEventListener("blur", () => {
   if (!els.slug.value.trim()) els.slug.value = slugify(els.title.value);
@@ -298,14 +290,19 @@ auth.onAuthStateChanged(async (user) => {
 
   try {
     await authPersistenceReady;
-    const isNewsAdmin = functions.httpsCallable("isNewsAdmin");
-    await isNewsAdmin();
+    // "newsAdmin" yetkisi Duyuru paneli ile ortak önbelleklenir; bu sayede
+    // Haber <-> Duyuru arası geçişte tekrar Cloud Function çağrısı yapılmaz
+    // ve geçici hatalar yüzünden oturum kapatılıp tekrar giriş istenmez.
+    await CineAdmin.requireRole(user, "newsAdmin", () =>
+      functions.httpsCallable("isNewsAdmin")()
+    );
     showAdmin(user);
+    articlePageSize = ARTICLE_PAGE_SIZE;
     resetForm();
     subscribeArticles();
   } catch (error) {
     if (isPermissionError(error)) {
-      await auth.signOut();
+      await CineAdmin.logout();
       showLogin();
       setMessage(els.loginMessage, "Bu panel için yetkiniz yok.", "error");
       return;

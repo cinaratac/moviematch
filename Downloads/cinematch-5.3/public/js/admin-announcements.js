@@ -1,19 +1,7 @@
-const firebaseConfig = {
-  apiKey: "AIzaSyAsHFffuxGA1cYKbHBs8LE6QbJOi4pjwC4",
-  authDomain: "movie-matching-8a836.firebaseapp.com",
-  projectId: "movie-matching-8a836",
-  storageBucket: "movie-matching-8a836.firebasestorage.app",
-  messagingSenderId: "266660427246",
-  appId: "1:266660427246:web:4dcb77ff5e91e47dc04aff",
-};
-
-firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
-const functions = firebase.functions();
-const authPersistenceReady = auth.setPersistence(
-  firebase.auth.Auth.Persistence.LOCAL
-);
+// Firebase başlatma, oturum kalıcılığı ve yetki önbelleği admin-shared.js
+// içinde ortaklaştırıldı (bkz. js/admin-shared.js).
+const { auth, functions } = CineAdmin;
+const authPersistenceReady = CineAdmin.persistenceReady;
 
 const els = {
   loginPanel: document.getElementById("loginPanel"),
@@ -37,10 +25,7 @@ const els = {
   deactivateAnnouncementButton: document.getElementById("deactivateAnnouncementButton"),
 };
 
-function setMessage(target, text, type = "") {
-  target.textContent = text || "";
-  target.className = `message ${type}`.trim();
-}
+const { setMessage, escapeHtml, isPermissionError } = CineAdmin;
 
 function showLogin() {
   els.loginPanel.classList.remove("hidden");
@@ -51,20 +36,6 @@ function showAdmin(user) {
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;
-}
-
-function isPermissionError(error) {
-  const code = error && error.code ? String(error.code) : "";
-  return code.includes("permission-denied") || code.includes("unauthenticated");
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 function formatDate(value) {
@@ -100,6 +71,7 @@ function renderAnnouncementList(items) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "article-item";
+    button.dataset.id = item.id || "";
     button.innerHTML = `
       <strong>${escapeHtml(item.title || "Başlıksız duyuru")}</strong>
       <span>${escapeHtml(formatDate(item.date))}</span>
@@ -109,7 +81,13 @@ function renderAnnouncementList(items) {
       els.announcementTitle.value = item.title || "";
       els.announcementMessage.value = item.message || "";
       els.announcementImageUrl.value = item.imageUrl || "";
-      els.announcementActive.checked = true;
+      // Önceden hep "true" yapılıyordu; artık kayıttaki gerçek durum
+      // gösteriliyor ki hangi duyurunun aktif/pasif olduğu net olsun.
+      els.announcementActive.checked = item.isActive === true;
+      els.announcementStatus.textContent = item.isActive ? "Yayında" : "Pasif";
+      document.querySelectorAll("#announcementList .article-item").forEach((btn) => {
+        btn.classList.toggle("active", btn === button);
+      });
     });
     els.announcementList.appendChild(button);
   });
@@ -175,7 +153,7 @@ els.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-els.logoutButton.addEventListener("click", () => auth.signOut());
+els.logoutButton.addEventListener("click", () => CineAdmin.logout());
 
 els.saveAnnouncementButton.addEventListener("click", () => {
   saveAnnouncement(
@@ -201,13 +179,17 @@ auth.onAuthStateChanged(async (user) => {
 
   try {
     await authPersistenceReady;
-    const isNewsAdmin = functions.httpsCallable("isNewsAdmin");
-    await isNewsAdmin();
+    // "newsAdmin" yetkisi Haber paneli ile ortak önbelleklenir; Haber
+    // panelinden bu panele (veya tersi) geçişte tekrar Cloud Function
+    // çağrısı yapılmaz, bu da "tekrar giriş yap" bug'ını çözer.
+    await CineAdmin.requireRole(user, "newsAdmin", () =>
+      functions.httpsCallable("isNewsAdmin")()
+    );
     showAdmin(user);
     loadAnnouncement();
   } catch (error) {
     if (isPermissionError(error)) {
-      await auth.signOut();
+      await CineAdmin.logout();
       showLogin();
       setMessage(els.loginMessage, "Bu panel için yetkiniz yok.", "error");
       return;

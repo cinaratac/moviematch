@@ -1,20 +1,10 @@
-const firebaseConfig = {
-  apiKey: "AIzaSyAsHFffuxGA1cYKbHBs8LE6QbJOi4pjwC4",
-  authDomain: "movie-matching-8a836.firebaseapp.com",
-  projectId: "movie-matching-8a836",
-  storageBucket: "movie-matching-8a836.firebasestorage.app",
-  messagingSenderId: "266660427246",
-  appId: "1:266660427246:web:4dcb77ff5e91e47dc04aff",
-};
+// Firebase başlatma, oturum kalıcılığı ve yetki önbelleği admin-shared.js
+// içinde ortaklaştırıldı (bkz. js/admin-shared.js).
+const { auth, db, functions } = CineAdmin;
+const authPersistenceReady = CineAdmin.persistenceReady;
 
-firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
-const db = firebase.firestore();
-const functions = firebase.functions();
-const authPersistenceReady = auth.setPersistence(
-  firebase.auth.Auth.Persistence.LOCAL
-);
+const QUESTION_PAGE_SIZE = 60;
+let questionPageSize = QUESTION_PAGE_SIZE;
 
 const els = {
   loginPanel: document.getElementById("loginPanel"),
@@ -55,15 +45,13 @@ const els = {
   bulkSaveButton: document.getElementById("bulkSaveButton"),
   bulkMessage: document.getElementById("bulkMessage"),
   loadSampleButton: document.getElementById("loadSampleButton"),
+  loadMoreQuestionsButton: document.getElementById("loadMoreQuestionsButton"),
 };
 
 let unsubscribeQuestions = null;
 let questions = [];
 
-function setMessage(target, text, type = "") {
-  target.textContent = text || "";
-  target.className = `message ${type}`.trim();
-}
+const { setMessage, escapeHtml, isPermissionError } = CineAdmin;
 
 function getWeekIdFor(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -84,15 +72,6 @@ function nextWeekId() {
   return getWeekIdFor(date);
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 function showLogin() {
   els.loginPanel.classList.remove("hidden");
   els.adminPanel.classList.add("hidden");
@@ -102,11 +81,6 @@ function showAdmin(user) {
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;
-}
-
-function isPermissionError(error) {
-  const code = error && error.code ? String(error.code) : "";
-  return code.includes("permission-denied") || code.includes("unauthenticated");
 }
 
 function updateWeekButtons() {
@@ -238,10 +212,17 @@ function subscribeQuestions() {
   unsubscribeQuestions = db
     .collection("trivia_questions")
     .orderBy("createdAt", "desc")
+    .limit(questionPageSize)
     .onSnapshot(
       (snapshot) => {
         questions = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         renderQuestions();
+        if (els.loadMoreQuestionsButton) {
+          els.loadMoreQuestionsButton.classList.toggle(
+            "hidden",
+            snapshot.docs.length < questionPageSize
+          );
+        }
       },
       (error) => {
         els.questionList.innerHTML = `<p class="message error">${escapeHtml(error.message)}</p>`;
@@ -294,11 +275,17 @@ els.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-els.logoutButton.addEventListener("click", () => auth.signOut());
+els.logoutButton.addEventListener("click", () => CineAdmin.logout());
 els.newQuestionButton.addEventListener("click", resetForm);
 els.questionSearch.addEventListener("input", renderQuestions);
 els.weekFilter.addEventListener("change", renderQuestions);
 els.activeFilter.addEventListener("change", renderQuestions);
+if (els.loadMoreQuestionsButton) {
+  els.loadMoreQuestionsButton.addEventListener("click", () => {
+    questionPageSize += QUESTION_PAGE_SIZE;
+    subscribeQuestions();
+  });
+}
 els.currentWeekButton.addEventListener("click", () => {
   els.weekId.value = currentWeekId();
   els.bulkWeekId.value = currentWeekId();
@@ -391,15 +378,17 @@ auth.onAuthStateChanged(async (user) => {
 
   try {
     await authPersistenceReady;
-    const isTriviaAdmin = functions.httpsCallable("isTriviaAdmin");
-    await isTriviaAdmin();
+    await CineAdmin.requireRole(user, "triviaAdmin", () =>
+      functions.httpsCallable("isTriviaAdmin")()
+    );
     showAdmin(user);
+    questionPageSize = QUESTION_PAGE_SIZE;
     updateWeekButtons();
     resetForm();
     subscribeQuestions();
   } catch (error) {
     if (isPermissionError(error)) {
-      await auth.signOut();
+      await CineAdmin.logout();
       showLogin();
       setMessage(els.loginMessage, "Bu panel için yetkiniz yok.", "error");
       return;

@@ -173,6 +173,21 @@ button {
   background: var(--primary-dark);
 }
 
+.secondary-action {
+  width: 100%;
+  min-height: 38px;
+  margin: 4px 0 16px;
+  border-radius: 8px;
+  background: var(--surface-soft, #f2f2f2);
+  color: var(--text);
+  font-weight: 700;
+  border: 1px solid var(--border, #ddd);
+}
+
+.secondary-action:hover {
+  background: var(--border, #e5e5e5);
+}
+
 .question-toolbar {
   display: grid;
   gap: 10px;

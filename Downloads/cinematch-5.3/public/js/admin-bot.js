@@ -1,19 +1,7 @@
-const firebaseConfig = {
-  apiKey: "AIzaSyAsHFffuxGA1cYKbHBs8LE6QbJOi4pjwC4",
-  authDomain: "movie-matching-8a836.firebaseapp.com",
-  projectId: "movie-matching-8a836",
-  storageBucket: "movie-matching-8a836.firebasestorage.app",
-  messagingSenderId: "266660427246",
-  appId: "1:266660427246:web:4dcb77ff5e91e47dc04aff",
-};
-
-firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
-const functions = firebase.functions();
-const authPersistenceReady = auth.setPersistence(
-  firebase.auth.Auth.Persistence.LOCAL
-);
+// Firebase başlatma, oturum kalıcılığı ve yetki önbelleği admin-shared.js
+// içinde ortaklaştırıldı (bkz. js/admin-shared.js).
+const { auth, functions } = CineAdmin;
+const authPersistenceReady = CineAdmin.persistenceReady;
 
 const els = {
   loginPanel: document.getElementById("loginPanel"),
@@ -86,19 +74,7 @@ const TOOL_PAGE_SIZE = 25;
 
 let charts = { daily: null, tool: null, rating: null };
 
-function setMessage(target, text, type = "") {
-  target.textContent = text || "";
-  target.className = `message ${type}`.trim();
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+const { setMessage, escapeHtml, isPermissionError } = CineAdmin;
 
 function formatDate(value) {
   if (!value) return "-";
@@ -118,11 +94,6 @@ function showAdmin(user) {
   els.loginPanel.classList.add("hidden");
   els.adminPanel.classList.remove("hidden");
   els.currentUserLabel.textContent = user.email || user.uid;
-}
-
-function isPermissionError(error) {
-  const code = error && error.code ? String(error.code) : "";
-  return code.includes("permission-denied") || code.includes("unauthenticated");
 }
 
 // ---------------------------------------------------------------------
@@ -519,7 +490,7 @@ els.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-els.logoutButton.addEventListener("click", () => auth.signOut());
+els.logoutButton.addEventListener("click", () => CineAdmin.logout());
 
 auth.onAuthStateChanged(async (user) => {
   botAccess = null;
@@ -531,15 +502,21 @@ auth.onAuthStateChanged(async (user) => {
 
   try {
     await authPersistenceReady;
-    const getBotAdminAccess = functions.httpsCallable("getBotAdminAccess");
-    const result = await getBotAdminAccess();
-    botAccess = result.data; // { baseUrl, key }
+    // Bot backend erişim anahtarı sekme ömrü boyunca kısa süreliğine
+    // önbelleğe alınır; bu sayede bu panele tekrar dönüldüğünde
+    // (ör. başka bir admin sayfasına gidip geri gelince) her seferinde
+    // yeniden Cloud Function çağrısı yapılmaz.
+    botAccess = await CineAdmin.requireRole(user, "botAdmin", async () => {
+      const getBotAdminAccess = functions.httpsCallable("getBotAdminAccess");
+      const result = await getBotAdminAccess();
+      return result.data; // { baseUrl, key }
+    });
 
     showAdmin(user);
     await loadAll();
   } catch (error) {
     if (isPermissionError(error)) {
-      await auth.signOut();
+      await CineAdmin.logout();
       showLogin();
       setMessage(els.loginMessage, "Bu panel için yetkiniz yok.", "error");
       return;
